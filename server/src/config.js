@@ -80,6 +80,7 @@ export const config = {
 
   /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
   libraryName: local.libraryName ?? defaults.libraryName ?? '',
+  libraryColor: local.libraryColor ?? defaults.libraryColor ?? '',
 
   port: Number(process.env.PORT ?? local.port ?? defaults.port ?? 8787),
 
@@ -121,6 +122,13 @@ export function saveSettings(patch) {
   if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
   if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
+  // The colour the library's name is written in. Only a plain hex colour is
+  // accepted: this value is interpolated into a stylesheet, and anything else
+  // reaching that far would be a way to inject rules into the page.
+  if (typeof patch.libraryColor === 'string') {
+    const wanted = patch.libraryColor.trim();
+    allowed.libraryColor = /^#[0-9a-fA-F]{6}$/.test(wanted) ? wanted.toLowerCase() : '';
+  }
   if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
   // Where the database and artwork live. Applying it needs a restart, which the
   // desktop app performs; the value is stored here so both processes agree.
@@ -142,6 +150,7 @@ export function saveSettings(patch) {
 export function settingsView() {
   return {
     libraryName: config.libraryName,
+    libraryColor: config.libraryColor,
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
     libraryRoots: config.libraryRoots,

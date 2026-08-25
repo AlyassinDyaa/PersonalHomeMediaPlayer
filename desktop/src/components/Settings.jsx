@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
-import { headerPreview } from '../branding.js';
+import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
 
 /**
  * Library settings: which folders to scan, and running a scan with live
@@ -19,6 +19,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
   const [keySaved, setKeySaved] = useState(false);
   const [name, setName] = useState('');
   const [nameSaved, setNameSaved] = useState(false);
+  const [color, setColor] = useState('');
   const [error, setError] = useState(null);
 
   const [scan, setScan] = useState(null); // { percent, message, phase }
@@ -31,6 +32,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
         setSettings(loadedSettings);
         setStats(loadedStats);
         setName(loadedSettings.libraryName ?? '');
+        setColor(brandColor(loadedSettings.libraryColor));
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -42,9 +44,25 @@ export function Settings({ onScanned, onSettingsChanged }) {
 
   const saveName = async () => {
     try {
-      const saved = await api.saveSettings({ libraryName: name });
+      const saved = await api.saveSettings({ libraryName: name, libraryColor: color });
       setSettings(saved);
       setNameSaved(true);
+      setError(null);
+      onSettingsChanged?.(saved);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  /**
+   * Colours save on the spot. A colour is judged by looking at it, so making
+   * the choice wait behind a Save button would hide the thing being chosen.
+   */
+  const chooseColor = async (next) => {
+    setColor(next);
+    try {
+      const saved = await api.saveSettings({ libraryColor: next });
+      setSettings(saved);
       setError(null);
       onSettingsChanged?.(saved);
     } catch (err) {
@@ -188,10 +206,35 @@ export function Settings({ onScanned, onSettingsChanged }) {
             />
             <button className="btn btn-secondary" onClick={saveName}>Save</button>
           </div>
-          <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+          <div className="color-row">
+            <span className="settings-hint" style={{ margin: 0 }}>Colour</span>
+            {BRAND_COLORS.map((swatch) => (
+              <button
+                key={swatch.value}
+                type="button"
+                className={swatch.value === color ? 'swatch selected' : 'swatch'}
+                style={{ background: swatch.value }}
+                title={swatch.name}
+                aria-label={swatch.name}
+                aria-pressed={swatch.value === color}
+                onClick={() => chooseColor(swatch.value)}
+              />
+            ))}
+
+            {/* Anything not in the row, for a colour of their own. */}
+            <label className="swatch custom" title="Custom colour" style={{ background: color }}>
+              <input
+                type="color"
+                value={color}
+                onChange={(event) => chooseColor(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <p className="settings-hint" style={{ margin: '12px 0 0' }}>
             {nameSaved
               ? 'Saved.'
-              : 'Header will read “' + headerPreview(name) + '”.'}
+              : <>Header will read <strong style={{ color }}>{headerPreview(name)}</strong>.</>}
           </p>
         </section>
 

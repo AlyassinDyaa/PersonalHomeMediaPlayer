@@ -6,7 +6,7 @@ import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
 import Settings from './components/Settings.jsx';
-import { headerPreview } from './branding.js';
+import { headerPreview, brandColor } from './branding.js';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
@@ -42,6 +42,7 @@ export function App({ info }) {
   const [error, setError] = useState(null);
   const [scrolled, setScrolled] = useState(false);
   const [libraryName, setLibraryName] = useState('');
+  const [libraryColor, setLibraryColor] = useState('');
 
   const reload = useCallback(async () => {
     try {
@@ -52,6 +53,7 @@ export function App({ info }) {
         api.settings().catch(() => ({})),
       ]);
       setLibraryName(settings.libraryName ?? '');
+      setLibraryColor(settings.libraryColor ?? '');
       setItems(allItems);
       setResume(continueWatching);
       setGenres(genreList);
@@ -64,6 +66,12 @@ export function App({ info }) {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  /** Reflect a settings change in the header without waiting for a reload. */
+  const applyBranding = useCallback((next) => {
+    setLibraryName(next.libraryName ?? '');
+    setLibraryColor(next.libraryColor ?? '');
+  }, []);
 
 
   // Refresh progress-driven rows when the player closes.
@@ -195,7 +203,8 @@ export function App({ info }) {
   if (detailId) {
     return (
       <>
-        <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled brand={headerPreview(libraryName)} />
+        <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled
+             brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
         <div className="view" key={detailId}>
@@ -213,7 +222,8 @@ export function App({ info }) {
 
   return (
     <>
-      <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled} brand={headerPreview(libraryName)} />
+      <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled}
+           brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
 
       <div className="view" key={view + (query.trim() ? ':search' : '')}>
 
@@ -247,7 +257,7 @@ export function App({ info }) {
             <h1 className="page-title">Welcome</h1>
             <span className="page-sub">Add the folder holding your movies and shows to get started</span>
           </div>
-          <Settings onScanned={reload} onSettingsChanged={(next) => setLibraryName(next.libraryName ?? '')} />
+          <Settings onScanned={reload} onSettingsChanged={applyBranding} />
         </>
       )}
 
@@ -289,7 +299,7 @@ export function App({ info }) {
       )}
 
       {!loading && view === 'library' && (
-        <Settings onScanned={reload} />
+        <Settings onScanned={reload} onSettingsChanged={applyBranding} />
       )}
 
       {!loading && (view === 'movies' || view === 'shows') && (
@@ -318,10 +328,10 @@ const SEARCH_PLACEHOLDER = {
   library: 'Search your library',
 };
 
-function Nav({ view, goto, query, setQuery, scrolled, brand }) {
+function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor }) {
   return (
     <nav className={scrolled ? 'nav scrolled' : 'nav'}>
-      <div className="nav-brand" title={brand}>{brand}</div>
+      <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>
       <div className="nav-links">
         {VIEWS.map((entry) => (
           <button
