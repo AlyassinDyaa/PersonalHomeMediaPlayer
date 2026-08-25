@@ -125,7 +125,9 @@ export function Detail({ itemId, onBack, onPlay }) {
                       <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 13 }}>
                         {episode.watched
                           ? <span className="episode-watched">Watched</span>
-                          : formatDuration(episode.duration) || formatSize(episode.size)}
+                          : formatDuration(episode.duration)
+                            || formatRuntime(episode.runtime)
+                            || formatSize(episode.size)}
                       </span>
                     </div>
                     {episode.overview && <p className="episode-overview">{episode.overview}</p>}

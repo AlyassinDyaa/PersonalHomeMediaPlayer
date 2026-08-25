@@ -362,15 +362,16 @@ function persist(enriched, suggestions, scanId, startedAt) {
       INSERT INTO videos (
         id, item_id, season_id, season, episode, episode_end,
         title, overview, still_path, air_date,
-        path, size, extension, duration, parse_pattern, alternatives,
+        path, size, extension, duration, runtime, parse_pattern, alternatives,
         added_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         item_id = excluded.item_id, season_id = excluded.season_id,
         season = excluded.season, episode = excluded.episode,
         episode_end = excluded.episode_end, title = excluded.title,
         overview = excluded.overview, still_path = excluded.still_path,
         air_date = excluded.air_date, size = excluded.size,
+        runtime = excluded.runtime,
         parse_pattern = excluded.parse_pattern,
         alternatives = excluded.alternatives, updated_at = excluded.updated_at
     `);
@@ -443,7 +444,9 @@ function persist(enriched, suggestions, scanId, startedAt) {
           video.path,
           video.size,
           video.ext,
+          // duration is learned from playback; runtime comes from metadata.
           null,
+          fields.runtime ?? null,
           fields.pattern ?? null,
           JSON.stringify(fields.alternatives ?? []),
           timestamp,
@@ -467,6 +470,7 @@ function persist(enriched, suggestions, scanId, startedAt) {
       if (item.kind === 'movie') {
         movieCount++;
         writeVideo(item.file, {
+          runtime: metadata?.runtime ?? null,
           subtitles: item.subtitles,
           alternatives: (item.alternatives ?? []).map((alt) => alt.path),
         });
@@ -498,6 +502,7 @@ function persist(enriched, suggestions, scanId, startedAt) {
               overview: meta?.overview ?? null,
               stillPath: meta?.stillPath ?? null,
               airDate: meta?.airDate ?? null,
+              runtime: meta?.runtime ?? metadata?.runtime ?? null,
               pattern: episode.pattern,
               alternatives: (episode.alternatives ?? []).map((alt) => alt.file.path),
               subtitles: episode.subtitles,

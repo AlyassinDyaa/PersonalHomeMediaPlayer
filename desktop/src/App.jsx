@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, artwork, episodeLabel, displayTitle } from './api.js';
+import { api, artwork, episodeLabel, displayTitle, formatRuntime } from './api.js';
 import Hero from './components/Hero.jsx';
 import Row from './components/Row.jsx';
 import Card from './components/Card.jsx';
@@ -10,6 +10,12 @@ import Settings from './components/Settings.jsx';
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
   return count + ' ' + noun + (count === 1 ? '' : 's');
+}
+
+/** Secondary line under a poster: seasons for a show, year and length for a film. */
+function cardMeta(item) {
+  if (item.kind === 'show') return plural(item.seasonCount, 'season');
+  return [item.year, formatRuntime(item.runtime)].filter(Boolean).join(' · ');
 }
 
 const VIEWS = [
@@ -99,7 +105,11 @@ export function App({ info }) {
     [items],
   );
 
-  /** Start playback of a specific video through the main process. */
+  /**
+   * Start playback. For a show, everything from the chosen episode onward is
+   * handed to the player as a queue so it can advance on its own; entries carry
+   * only an id and a title, and their file paths resolve as each one starts.
+   */
   const play = useCallback(async (video, item) => {
     if (!window.media?.play) {
       setError('Playback is only available in the desktop app.');
@@ -107,14 +117,26 @@ export function App({ info }) {
     }
     try {
       const full = await api.video(video.id);
-      const label = displayTitle(item, { ...video, title: full.title });
+
+      const episodes = (item.seasons ?? [])
+        .flatMap((season) => season.episodes)
+        .filter((entry) => entry.id);
+      const startIndex = episodes.findIndex((entry) => entry.id === video.id);
+
+      const queue = startIndex >= 0
+        ? episodes.slice(startIndex).map((entry) => ({
+            videoId: entry.id,
+            title: displayTitle(item, entry),
+          }))
+        : [{ videoId: full.id, title: displayTitle(item, { ...video, title: full.title }) }];
 
       const response = await window.media.play({
-        filePath: full.path,
         videoId: full.id,
-        startPosition: full.position > 30 ? full.position : 0,
+        filePath: full.path,
+        title: displayTitle(item, { ...video, title: full.title }),
         subtitleFiles: full.subtitles.map((subtitle) => subtitle.path),
-        title: label,
+        startPosition: full.position > 30 ? full.position : 0,
+        queue,
       });
       if (!response?.ok) setError(response?.error ?? 'Playback failed');
     } catch (err) {
@@ -175,7 +197,7 @@ export function App({ info }) {
           <div className="grid">
             {results.map((item) => (
               <Card key={item.id} item={item} onClick={() => openDetail(item)}
-                    label={<><strong>{item.title}</strong>{item.year}</>} />
+                    label={<><strong>{item.title}</strong>{cardMeta(item)}</>} />
             ))}
           </div>
         </>
@@ -208,11 +230,11 @@ export function App({ info }) {
               )}
             />
             <Row title="Recently Released" items={recentlyAdded} onSelect={openDetail}
-                 renderLabel={(item) => <><strong>{item.title}</strong>{item.year}</>} />
+                 renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="TV Shows" items={shows} onSelect={openDetail}
-                 renderLabel={(item) => <><strong>{item.title}</strong>{plural(item.seasonCount, 'season')}</>} />
+                 renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="Movies" items={movies} onSelect={openDetail}
-                 renderLabel={(item) => <><strong>{item.title}</strong>{item.year}</>} />
+                 renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="Top Rated" items={topRated} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{item.rating?.toFixed(1)}</>} />
 
@@ -221,7 +243,7 @@ export function App({ info }) {
               if (inGenre.length < 3) return null;
               return (
                 <Row key={genre.name} title={genre.name} items={inGenre} onSelect={openDetail}
-                     renderLabel={(item) => <><strong>{item.title}</strong>{item.year}</>} />
+                     renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
               );
             })}
           </div>
@@ -240,7 +262,7 @@ export function App({ info }) {
           renderLabel={(item) => (
             <>
               <strong>{item.title}</strong>
-              {item.kind === 'show' ? plural(item.episodeCount, 'episode') : item.year}
+              {cardMeta(item)}
             </>
           )}
         />

@@ -59,6 +59,7 @@ function shapeVideo(row) {
     size: row.size,
     extension: row.extension,
     duration: row.duration,
+    runtime: row.runtime,
     position: row.position ?? 0,
     watched: Boolean(row.watched),
   };

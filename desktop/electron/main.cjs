@@ -30,6 +30,12 @@ let serverChild = null;
 let serverPort = 8787;
 let mpvPath = null;
 let embedPlayer = false;
+let startMuted = false;
+/** Upcoming videos, so the player can advance without asking the UI. */
+let queue = [];
+let queueIndex = 0;
+/** True while moving between queue entries, so the stop is not treated as an exit. */
+let advancing = false;
 let lastProgressWrite = 0;
 
 /** Read committed defaults plus any local overrides, without importing ESM. */
@@ -50,6 +56,8 @@ async function startApiServer() {
   serverPort = Number(process.env.PORT || config.port || 8787);
   mpvPath = resolveMpvPath(config.mpvPath);
   embedPlayer = Boolean(config.embedPlayer);
+  // Automated runs mute playback so testing does not disturb the machine.
+  startMuted = Boolean(config.startMuted) || process.env.MEDIA_MUTE === '1';
 
   const started = await startServerProcess({
     entry: path.join(PROJECT_ROOT, 'server', 'src', 'index.js'),
@@ -143,8 +151,8 @@ function createPlayerWindow() {
  * only accepts mouse input while the pointer is over the control bar, which is
  * what keeps the video underneath behaving normally.
  */
-function createOverlayWindow() {
-  const display = screen.getPrimaryDisplay();
+function createOverlayWindow(targetDisplay) {
+  const display = targetDisplay ?? screen.getPrimaryDisplay();
   const { x, y, width, height } = display.bounds;
 
   overlayWindow = new BrowserWindow({
@@ -191,10 +199,34 @@ function sendOverlayState(patch) {
   overlayWindow.webContents.send('overlay:state', patch);
 }
 
-function showOverlay() {
-  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow();
-  // Shown without focus so mpv keeps keyboard control (space, arrows, f).
-  overlayWindow.showInactive();
+/**
+ * The display playback should happen on: whichever screen the browse window is
+ * currently on. Both mpv and the overlay are pinned to it, because if they land
+ * on different monitors the controls appear detached from the video and never
+ * receive the pointer.
+ */
+function playbackDisplay() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return screen.getDisplayMatching(mainWindow.getBounds());
+  }
+  return screen.getPrimaryDisplay();
+}
+
+function showOverlay(targetDisplay) {
+  const display = targetDisplay ?? playbackDisplay();
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow(display);
+
+  // Re-apply the bounds every time: the window is long-lived, but the display
+  // it belongs on can change between one playback and the next.
+  const { x, y, width, height } = display.bounds;
+  overlayWindow.setBounds({ x, y, width, height });
+
+  // The overlay takes focus deliberately. An unfocused window on Windows
+  // consumes the first click to activate itself, which made every control feel
+  // dead until it had been clicked twice. Keyboard shortcuts are handled by the
+  // overlay and forwarded to mpv, so nothing is lost by holding focus here.
+  overlayWindow.show();
+  overlayWindow.focus();
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 }
@@ -257,6 +289,205 @@ function closePlayerWindow() {
   }
 }
 
+/**
+ * Work out where an intro ends and an outro begins.
+ *
+ * Chapter markers are authoritative when a file has them, which is common for
+ * Blu-ray rips and rare for web releases. Otherwise fall back to conventional
+ * offsets, which are approximate by nature — the button exists to save a few
+ * seconds of scrubbing, not to be frame accurate.
+ *
+ * @param {number|null} duration
+ */
+async function detectSkipPoints(duration) {
+  const config = readConfig();
+  const introLength = Number(config.introSkipSeconds ?? 85);
+  const outroLength = Number(config.outroSkipSeconds ?? 90);
+
+  let chapters = [];
+  try {
+    chapters = (await player.command(['get_property', 'chapter-list'])) || [];
+  } catch {
+    chapters = [];
+  }
+
+  let intro = null;
+  let outro = null;
+
+  for (let i = 0; i < chapters.length; i++) {
+    const name = String(chapters[i].title ?? '');
+    const next = chapters[i + 1];
+    if (!intro && /\b(intro|opening|op|title\s*sequence|main\s*title)\b/i.test(name)) {
+      intro = { from: chapters[i].time, to: next ? next.time : chapters[i].time + introLength };
+    }
+    if (!outro && /\b(outro|ending|ed|credits|end\s*credits)\b/i.test(name)) {
+      outro = { from: chapters[i].time };
+    }
+  }
+
+  // Only offer a heuristic intro skip on something long enough to have one.
+  if (!intro && duration && duration > 8 * 60) {
+    intro = { from: 0, to: introLength, approximate: true };
+  }
+  if (!outro && duration && duration > 8 * 60) {
+    outro = { from: Math.max(0, duration - outroLength), approximate: true };
+  }
+
+  return { intro, outro };
+}
+
+/**
+ * Fill in a queue entry's file path and subtitles.
+ *
+ * Queue entries arrive carrying only an id and a title so that queueing a long
+ * series costs nothing; the details are fetched as each episode is reached.
+ */
+async function resolveEntry(entry) {
+  if (entry.filePath) return entry;
+
+  const response = await fetch(apiUrl('/api/videos/' + entry.videoId));
+  if (!response.ok) throw new Error('Could not load episode ' + entry.videoId);
+  const video = await response.json();
+
+  return {
+    ...entry,
+    filePath: video.path,
+    subtitleFiles: (video.subtitles ?? []).map((subtitle) => subtitle.path),
+    // Resume mid-episode, but ignore a position that is only a few seconds in.
+    startPosition: video.position > 30 ? video.position : 0,
+  };
+}
+
+/**
+ * Start the queue entry at `index`. Returns { ok } so the renderer can surface
+ * a failure, and is also the path used for autoplay and the next/previous
+ * buttons, so all four behave identically.
+ */
+async function startQueueEntry(index, startPosition) {
+  if (!mpvPath) {
+    const message = 'mpv was not found. Install it, or set mpvPath in config.json.';
+    dialog.showErrorBox('Cannot play video', message);
+    return { ok: false, error: message };
+  }
+  if (index < 0 || index >= queue.length) return { ok: false, error: 'no such episode' };
+
+  queueIndex = index;
+  const entry = await resolveEntry(queue[index]);
+  queue[index] = entry;
+
+  // Embedded mode is opt-in and known to swallow input; see mpv.cjs.
+  let windowHandle = null;
+  if (embedPlayer) {
+    if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow();
+    playerWindow.show();
+    playerWindow.focus();
+    windowHandle = nativeHandleOf(playerWindow);
+  }
+
+  ensurePlayer(windowHandle);
+
+  const display = playbackDisplay();
+
+  try {
+    await player.start({
+      filePath: entry.filePath,
+      videoId: entry.videoId,
+      startPosition: startPosition ?? entry.startPosition ?? 0,
+      subtitleFiles: entry.subtitleFiles ?? [],
+      title: entry.title ?? '',
+      display: display.bounds,
+      muted: startMuted,
+    });
+
+    if (!embedPlayer) {
+      overlayState = {
+        title: entry.title ?? '',
+        position: startPosition ?? 0,
+        duration: null,
+        paused: false,
+        volume: 100,
+        muted: startMuted,
+        subtitles: [],
+        audioTracks: [],
+        subtitleId: null,
+        audioId: null,
+        hasNext: queueIndex < queue.length - 1,
+        hasPrev: queueIndex > 0,
+        nextTitle: queue[queueIndex + 1]?.title ?? null,
+        skip: { intro: null, outro: null },
+      };
+      showOverlay(display);
+      sendOverlayState(overlayState);
+
+      // Track lists and chapters only exist once mpv has loaded the file.
+      player.getTracks()
+        .then((tracks) => sendOverlayState(describeTracks(tracks)))
+        .catch(() => { /* the overlay simply omits track menus */ });
+
+      player.command(['get_property', 'duration'])
+        .then((duration) => detectSkipPoints(duration))
+        .then((skip) => sendOverlayState({ skip }))
+        .catch(() => { /* skip buttons stay hidden */ });
+    }
+
+    return { ok: true };
+  } catch (error) {
+    hideOverlay();
+    closePlayerWindow();
+    return { ok: false, error: error.message };
+  }
+}
+
+/** Create the player once and attach the listeners that outlive each file. */
+function ensurePlayer(windowHandle) {
+  if (player) return player;
+
+  player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer, useOverlay: !embedPlayer });
+
+  player.on('position', ({ videoId, position, duration }) => {
+    writeProgress(videoId, position, duration);
+    sendOverlayState({ position, duration });
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('player:position', { videoId, position, duration });
+    }
+  });
+
+  player.on('property', ({ name, value }) => {
+    if (name === 'pause') sendOverlayState({ paused: Boolean(value) });
+    else if (name === 'volume' && typeof value === 'number') sendOverlayState({ volume: value });
+    else if (name === 'mute') sendOverlayState({ muted: Boolean(value) });
+    else if (name === 'sid') sendOverlayState({ subtitleId: typeof value === 'number' ? value : null });
+    else if (name === 'aid') sendOverlayState({ audioId: typeof value === 'number' ? value : null });
+    else if (name === 'duration' && typeof value === 'number') sendOverlayState({ duration: value });
+  });
+
+  // Reaching the end of a file is what triggers autoplay, as distinct from the
+  // user quitting, which must not roll on to the next episode.
+  player.on('ended', ({ reason }) => {
+    if (reason !== 'eof') return;
+    if (queueIndex < queue.length - 1) {
+      advancing = true;
+      startQueueEntry(queueIndex + 1, 0).finally(() => { advancing = false; });
+    }
+  });
+
+  player.on('stopped', async ({ videoId, position }) => {
+    const duration = player ? player.state.duration : null;
+    await writeProgress(videoId, position, duration, { force: true });
+    // A stop that is part of moving to the next episode must not tear the
+    // playback UI down.
+    if (advancing) return;
+    hideOverlay();
+    closePlayerWindow();
+  });
+
+  player.on('log', (line) => {
+    if (/error|failed/i.test(line)) console.error('[mpv]', line);
+  });
+
+  return player;
+}
+
 function registerIpc() {
   ipcMain.handle('app:info', () => ({
     apiBase: apiUrl(''),
@@ -266,83 +497,16 @@ function registerIpc() {
   }));
 
   ipcMain.handle('player:play', async (event, options) => {
-    if (!mpvPath) {
-      const message = 'mpv was not found. Install it, or set mpvPath in config.json.';
-      dialog.showErrorBox('Cannot play video', message);
-      return { ok: false, error: message };
-    }
-
-    // Embedded mode is opt-in and known to swallow input; see mpv.cjs.
-    let windowHandle = null;
-    if (embedPlayer) {
-      if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow();
-      playerWindow.show();
-      playerWindow.focus();
-      windowHandle = nativeHandleOf(playerWindow);
-    }
-
-    if (!player) {
-      player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer, useOverlay: !embedPlayer });
-
-      player.on('position', ({ videoId, position, duration }) => {
-        writeProgress(videoId, position, duration);
-        sendOverlayState({ position, duration });
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('player:position', { videoId, position, duration });
-        }
-      });
-
-      player.on('property', ({ name, value }) => {
-        if (name === 'pause') sendOverlayState({ paused: Boolean(value) });
-        else if (name === 'volume' && typeof value === 'number') sendOverlayState({ volume: value });
-        else if (name === 'sid') sendOverlayState({ subtitleId: typeof value === 'number' ? value : null });
-        else if (name === 'aid') sendOverlayState({ audioId: typeof value === 'number' ? value : null });
-        else if (name === 'duration' && typeof value === 'number') sendOverlayState({ duration: value });
-      });
-
-      player.on('stopped', async ({ videoId, position }) => {
-        const duration = player ? player.state.duration : null;
-        await writeProgress(videoId, position, duration, { force: true });
-        hideOverlay();
-        closePlayerWindow();
-      });
-
-      player.on('log', (line) => {
-        if (/error|failed/i.test(line)) console.error('[mpv]', line);
-      });
-    }
-
-    try {
-      await player.start(options);
-
-      if (!embedPlayer) {
-        overlayState = {
-          title: options.title || '',
-          position: options.startPosition || 0,
-          duration: null,
-          paused: false,
-          volume: 100,
-          subtitles: [],
-          audioTracks: [],
-          subtitleId: null,
-          audioId: null,
-        };
-        showOverlay();
-        sendOverlayState(overlayState);
-
-        // Track lists are only available once mpv has loaded the file.
-        player.getTracks()
-          .then((tracks) => sendOverlayState(describeTracks(tracks)))
-          .catch(() => { /* the overlay simply omits track menus */ });
-      }
-
-      return { ok: true };
-    } catch (error) {
-      hideOverlay();
-      closePlayerWindow();
-      return { ok: false, error: error.message };
-    }
+    // A show sends its remaining episodes so the player can advance on its own.
+    queue = Array.isArray(options.queue) && options.queue.length
+      ? options.queue
+      : [{ ...options }];
+    queueIndex = Math.max(0, queue.findIndex((entry) => entry.videoId === options.videoId));
+    return startQueueEntry(queueIndex, options.startPosition ?? 0);
   });
+
+  ipcMain.handle('player:next', async () => startQueueEntry(queueIndex + 1, 0));
+  ipcMain.handle('player:previous', async () => startQueueEntry(queueIndex - 1, 0));
 
   ipcMain.on('overlay:ready', (event) => {
     if (overlayWindow && !overlayWindow.isDestroyed()) {

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('player', {
 
   command: (args) => ipcRenderer.invoke('player:command', args),
   stop: () => ipcRenderer.invoke('player:stop'),
+  next: () => ipcRenderer.invoke('player:next'),
+  previous: () => ipcRenderer.invoke('player:previous'),
 
   /**
    * Toggle whether the overlay window accepts mouse input. False makes it

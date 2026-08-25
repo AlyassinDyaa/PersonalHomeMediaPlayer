@@ -28,7 +28,7 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   pointer-events: none;
 }
 
-.overlay.visible { opacity: 1; }
+.overlay.visible { opacity: 1; pointer-events: auto; }
 
 /* ------------------------------------------------------------------ top --- */
 
@@ -182,4 +182,45 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   background: rgba(229, 9, 20, 0.22);
   color: #fff;
   font-weight: 600;
+}
+
+/* ------------------------------------------------------------- prompts --- */
+
+.overlay-prompts {
+  position: absolute;
+  right: 48px;
+  bottom: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.prompt-btn {
+  padding: 13px 26px;
+  border-radius: 5px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgba(28, 28, 34, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  backdrop-filter: blur(3px);
+  transition: background 0.15s ease, transform 0.1s ease;
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-btn:hover { background: rgba(255, 255, 255, 0.95); color: #111; border-color: #fff; }
+.prompt-btn:active { transform: scale(0.97); }
+
+.prompt-btn.primary { background: rgba(255, 255, 255, 0.94); color: #111; border-color: #fff; }
+.prompt-btn.primary:hover { background: #fff; }
+
+.track-empty {
+  padding: 8px 12px 10px;
+  font-size: 13px;
+  color: #8b8b96;
+  font-style: italic;
 }

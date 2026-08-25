@@ -92,7 +92,16 @@ class MpvPlayer extends EventEmitter {
    * @param {string[]} [options.subtitleFiles] External subtitle paths to attach.
    * @param {string} [options.title] Window title.
    */
-  async start({ filePath, videoId = null, startPosition = 0, subtitleFiles = [], title = '' }) {
+  async start({
+    filePath,
+    videoId = null,
+    startPosition = 0,
+    subtitleFiles = [],
+    title = '',
+    /** Screen rect mpv should open on, so the overlay can be aligned to it. */
+    display = null,
+    muted = false,
+  }) {
     if (this.isRunning) await this.stop();
 
     this.currentVideoId = videoId;
@@ -125,6 +134,14 @@ class MpvPlayer extends EventEmitter {
     } else {
       // mpv owns a borderless fullscreen window, so it receives input directly.
       args.push('--fullscreen=yes', '--border=no');
+
+      // Pin mpv to a specific monitor. Positioning the window inside the target
+      // display makes mpv fullscreen on that display, which avoids mapping
+      // Electron's display list onto mpv's own screen indices — and, critically,
+      // guarantees the control overlay ends up on the same screen as the video.
+      if (display) {
+        args.push('--geometry=+' + Math.round(display.x + 20) + '+' + Math.round(display.y + 20));
+      }
       // --ontop makes mpv re-assert itself as topmost, which pushes the custom
       // control overlay behind the video. Fullscreen already covers the desktop,
       // so it is only needed when mpv is drawing its own controls.
@@ -142,6 +159,9 @@ class MpvPlayer extends EventEmitter {
 
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
     if (title) args.push('--force-media-title=' + title);
+    // Used when driving the app from an automated test, so playback does not
+    // interrupt whatever else is happening on the machine.
+    if (muted) args.push('--mute=yes');
     for (const subtitle of subtitleFiles) args.push('--sub-file=' + subtitle);
 
     args.push('--', filePath);

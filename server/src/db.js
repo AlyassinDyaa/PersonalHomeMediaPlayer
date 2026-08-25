@@ -149,11 +149,31 @@ CREATE TABLE IF NOT EXISTS scans (
 
 let database = null;
 
+/**
+ * Columns added after the initial schema.
+ *
+ * `CREATE TABLE IF NOT EXISTS` leaves an existing database untouched, so new
+ * columns have to be added explicitly or an upgrade silently keeps the old
+ * shape and queries fail at runtime.
+ */
+const MIGRATIONS = [
+  { table: 'videos', column: 'runtime', definition: 'INTEGER' },
+];
+
+function migrate(db) {
+  for (const { table, column, definition } of MIGRATIONS) {
+    const columns = db.prepare('PRAGMA table_info(' + table + ')').all();
+    if (columns.some((info) => info.name === column)) continue;
+    db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition);
+  }
+}
+
 export function getDb() {
   if (database) return database;
   ensureDataDirs();
   database = new DatabaseSync(config.databasePath);
   database.exec(SCHEMA);
+  migrate(database);
   return database;
 }
 
