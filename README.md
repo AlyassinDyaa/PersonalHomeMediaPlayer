@@ -19,7 +19,7 @@ scanner is built around those cases rather than against them.
 
 ```
 server/     Headless Node service: scanner, metadata, SQLite, local REST API.
-desktop/    Electron + React UI, with mpv embedded for playback.
+desktop/    Electron + React UI, driving mpv for playback.
 tools/      Development scripts for profiling a library and testing the parser.
 ```
 
@@ -32,7 +32,7 @@ it out for a library that is ~92% MKV.
 
 mpv runs in its own borderless fullscreen window rather than embedded into an
 Electron window via `--wid`. Embedding does display video correctly, but mouse
-and keyboard events never reach mpv child window, so its on-screen controls
+and keyboard events never reach mpv's child window, so its on-screen controls
 never appear and seeking is impossible. Both modes were compared by screenshot
 before choosing. Embedding remains available behind `embedPlayer` in config for
 future work on a custom overlay.
