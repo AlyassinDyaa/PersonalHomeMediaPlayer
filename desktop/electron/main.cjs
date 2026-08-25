@@ -29,7 +29,6 @@ let overlayState = { title: '', subtitles: [], audioTracks: [] };
 let serverChild = null;
 let serverPort = 8787;
 let mpvPath = null;
-let embedPlayer = false;
 let startMuted = false;
 /** Upcoming videos, so the player can advance without asking the UI. */
 let queue = [];
@@ -40,6 +39,13 @@ let advancing = false;
 let displayOverride = null;
 /** Interval handle for the cursor poll that wakes the controls. */
 let cursorWatch = null;
+/** Which of our windows currently holds focus, driving overlay visibility. */
+let playerFocused = false;
+let overlayFocused = false;
+let mainFocused = false;
+/** mpv's own view of whether its (embedded) window has focus. */
+let mpvFocused = false;
+let mpvFocusReported = false;
 let lastProgressWrite = 0;
 
 /** Read committed defaults plus any local overrides, without importing ESM. */
@@ -143,7 +149,6 @@ async function startApiServer() {
   serverPort = Number(process.env.PORT || config.port || 8787);
   // A portable build can carry its own mpv so nothing has to be installed.
   mpvPath = resolveMpvPath(config.mpvPath ?? null, bundledBinary('mpv', 'mpv.exe'));
-  embedPlayer = Boolean(config.embedPlayer);
   // Automated runs mute playback so testing does not disturb the machine.
   startMuted = Boolean(config.startMuted) || process.env.MEDIA_MUTE === '1';
 
@@ -217,6 +222,8 @@ function createMainWindow() {
     if (level >= 2) console.error('[renderer] ' + message);
   });
 
+  mainWindow.on('focus', () => { mainFocused = true; syncOverlayVisibility(); });
+  mainWindow.on('blur', () => { mainFocused = false; syncOverlayVisibility(); });
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
@@ -224,19 +231,95 @@ function createMainWindow() {
  * The window mpv draws into. Frameless and borderless so the embedded video
  * surface fills it completely, with no browser chrome visible around it.
  */
-function createPlayerWindow() {
+/**
+ * The window mpv renders into.
+ *
+ * mpv is embedded rather than left to open its own window. Asking mpv to go
+ * fullscreen means asking it to choose a monitor, and its display enumeration
+ * does not have to agree with Electron's — on a multi-monitor desktop that put
+ * the video on one screen and the controls on another. Naming the screen is no
+ * help either, since displays can share a label. Embedding removes the choice:
+ * the video is drawn inside a window whose position we set.
+ *
+ * The original objection to embedding — that mouse and keyboard never reach
+ * mpv's child window, so its own controls were unusable — no longer applies,
+ * because the overlay draws every control and forwards input over IPC.
+ */
+function createPlayerWindow(targetDisplay) {
+  const display = targetDisplay ?? playbackDisplay();
+  const { x, y, width, height } = display.bounds;
+
   playerWindow = new BrowserWindow({
+    x,
+    y,
+    width,
+    height,
     show: false,
     frame: false,
-    fullscreen: true,
     backgroundColor: '#000000',
     autoHideMenuBar: true,
+    skipTaskbar: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
 
+  // The overlay is owned by this window, so a new video window needs a new
+  // overlay; an owned window cannot be re-parented after creation.
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.destroy();
+    overlayWindow = null;
+  }
+
+  // An owned window stays above its owner but does not follow it, so the
+  // controls have to be moved whenever the video window moves or resizes.
+  const followParent = () => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    if (!playerWindow || playerWindow.isDestroyed()) return;
+    overlayWindow.setBounds(playerWindow.getBounds());
+  };
+  playerWindow.on('move', followParent);
+  playerWindow.on('resize', followParent);
+  playerWindow.on('enter-full-screen', followParent);
+  playerWindow.on('leave-full-screen', followParent);
+
   // Nothing is loaded into it: mpv owns the surface via --wid.
   playerWindow.on('closed', () => { playerWindow = null; });
+  playerWindow.on('focus', () => { playerFocused = true; syncOverlayVisibility(); });
+  playerWindow.on('blur', () => { playerFocused = false; syncOverlayVisibility(); });
   return playerWindow;
+}
+
+/**
+ * The controls float above the video, so they must disappear the moment the
+ * video is not what the user is looking at. Without this the control bar and
+ * title stayed on top of whatever application was switched to.
+ */
+function syncOverlayVisibility() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  if (!player || !player.isRunning) return;
+
+  // The video lives inside the player window, so focus on either of the two
+  // playback windows means the user is watching. Focus on the browse window, or
+  // on another application entirely, means they are not.
+  // If mpv never reports focus (an older build, or a video output that does
+  // not support it), fall back to assuming the video has it rather than
+  // hiding controls that would then never come back.
+  const videoFocused = mpvFocusReported ? mpvFocused : true;
+  const shouldShow = (playerFocused || overlayFocused || videoFocused) && !mainFocused;
+  const isShowing = overlayWindow.isVisible();
+
+  console.log('overlay: player=' + playerFocused + ' overlay=' + overlayFocused
+    + ' mpv=' + videoFocused + ' main=' + mainFocused + ' -> ' + (shouldShow ? 'show' : 'hide')
+    + (shouldShow === isShowing ? ' (no change)' : ''));
+
+  if (shouldShow === isShowing) return;
+
+  if (shouldShow) {
+    overlayWindow.showInactive();
+    startCursorWatch();
+  } else {
+    stopCursorWatch();
+    overlayWindow.hide();
+  }
 }
 
 /**
@@ -252,6 +335,13 @@ function createOverlayWindow(targetDisplay) {
   const { x, y, width, height } = display.bounds;
 
   overlayWindow = new BrowserWindow({
+    // Owned by the window the video is drawn in. This is what keeps the two
+    // together: Windows holds a child window directly above its parent and
+    // moves and hides it with the parent, so the controls cannot end up on a
+    // different monitor or drift out of alignment. It also means they are
+    // never above anything else — an always-on-top overlay used to sit over
+    // whatever application had been switched to.
+    parent: playerWindow ?? undefined,
     x,
     y,
     width,
@@ -274,9 +364,6 @@ function createOverlayWindow(targetDisplay) {
     },
   });
 
-  // 'screen-saver' sits above the ordinary topmost band that mpv's --ontop
-  // uses, so the controls stay visible over fullscreen video.
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 
   if (DEV_SERVER_URL) {
@@ -285,6 +372,8 @@ function createOverlayWindow(targetDisplay) {
     overlayWindow.loadFile(path.join(HERE, '..', 'dist', 'overlay.html'));
   }
 
+  overlayWindow.on('focus', () => { overlayFocused = true; syncOverlayVisibility(); });
+  overlayWindow.on('blur', () => { overlayFocused = false; syncOverlayVisibility(); });
   overlayWindow.on('closed', () => { overlayWindow = null; });
   return overlayWindow;
 }
@@ -346,10 +435,13 @@ function showOverlay(targetDisplay) {
   const display = targetDisplay ?? playbackDisplay();
   if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow(display);
 
-  // Re-apply the bounds every time: the window is long-lived, but the display
-  // it belongs on can change between one playback and the next.
-  const { x, y, width, height } = display.bounds;
-  overlayWindow.setBounds({ x, y, width, height });
+  // Match the video window exactly. Using the display bounds instead would
+  // leave the two misaligned whenever the video window is not filling the
+  // screen, which is what made the controls look detached from the picture.
+  const target = playerWindow && !playerWindow.isDestroyed()
+    ? playerWindow.getBounds()
+    : display.bounds;
+  overlayWindow.setBounds(target);
 
   // The overlay takes focus deliberately. An unfocused window on Windows
   // consumes the first click to activate itself, which made every control feel
@@ -357,7 +449,6 @@ function showOverlay(targetDisplay) {
   // overlay and forwarded to mpv, so nothing is lost by holding focus here.
   overlayWindow.show();
   overlayWindow.focus();
-  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   startCursorWatch();
 }
@@ -441,7 +532,12 @@ async function writeProgress(videoId, position, duration, options) {
 }
 
 function closePlayerWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    stopCursorWatch();
+    overlayWindow.hide();
+  }
   if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.setFullScreen(false);
     playerWindow.hide();
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -542,18 +638,23 @@ async function startQueueEntry(index, startPosition) {
   const entry = await resolveEntry(queue[index]);
   queue[index] = entry;
 
-  // Embedded mode is opt-in and known to swallow input; see mpv.cjs.
-  let windowHandle = null;
-  if (embedPlayer) {
-    if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow();
-    playerWindow.show();
-    playerWindow.focus();
-    windowHandle = nativeHandleOf(playerWindow);
-  }
+  const display = playbackDisplay();
+
+  // The video is drawn inside a window we own and place, so it cannot end up on
+  // a different monitor from the controls.
+  if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow(display);
+  // Place first, then go fullscreen: fullscreen is applied to whichever screen
+  // the window is currently on, so the order decides which monitor it covers.
+  playerWindow.setFullScreen(false);
+  playerWindow.setBounds(display.bounds);
+  playerWindow.show();
+  playerWindow.setFullScreen(true);
+  playerWindow.focus();
+  const windowHandle = nativeHandleOf(playerWindow);
 
   ensurePlayer(windowHandle);
-
-  const display = playbackDisplay();
+  player.windowHandle = windowHandle;
+  player.embed = true;
 
   try {
     await player.start({
@@ -566,7 +667,7 @@ async function startQueueEntry(index, startPosition) {
       muted: startMuted,
     });
 
-    if (!embedPlayer) {
+    {
       overlayState = {
         title: entry.title ?? '',
         position: startPosition ?? 0,
@@ -610,7 +711,7 @@ async function startQueueEntry(index, startPosition) {
 function ensurePlayer(windowHandle) {
   if (player) return player;
 
-  player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer, useOverlay: !embedPlayer });
+  player = new MpvPlayer({ mpvPath, windowHandle, embed: true, useOverlay: true });
 
   player.on('position', ({ videoId, position, duration }) => {
     writeProgress(videoId, position, duration);
@@ -627,6 +728,11 @@ function ensurePlayer(windowHandle) {
     else if (name === 'sid') sendOverlayState({ subtitleId: typeof value === 'number' ? value : null });
     else if (name === 'aid') sendOverlayState({ audioId: typeof value === 'number' ? value : null });
     else if (name === 'duration' && typeof value === 'number') sendOverlayState({ duration: value });
+    else if (name === 'focused') {
+      mpvFocused = Boolean(value);
+      mpvFocusReported = true;
+      syncOverlayVisibility();
+    }
   });
 
   // Reaching the end of a file is what triggers autoplay, as distinct from the

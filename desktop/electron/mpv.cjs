@@ -51,6 +51,10 @@ const OBSERVED = {
   5: 'volume',
   6: 'sid',
   7: 'aid',
+  // mpv's window focus. When embedded, focus lands on mpv's child window and
+  // Electron's BrowserWindow focus events never fire, so this is the only
+  // reliable signal that the video is what the user is looking at.
+  8: 'focused',
 };
 
 class MpvPlayer extends EventEmitter {
@@ -58,11 +62,16 @@ class MpvPlayer extends EventEmitter {
    * @param {object} options
    * @param {string} options.mpvPath
    * @param {string|null} [options.windowHandle] Parent HWND for embedded mode.
-   * @param {boolean} [options.embed] Render inside our own window instead of
-   *   letting mpv own a top-level one. Off by default: embedding via --wid
-   *   displays video correctly but mouse and keyboard events never reach mpv's
-   *   child window, so its on-screen controls never appear and seeking is
-   *   impossible. Verified by screenshot comparison of both modes.
+   * @param {boolean} [options.embed] Render inside a window we own rather than
+   *   letting mpv create its own top-level one. This is how the video and the
+   *   controls are kept on the same screen: asking mpv to go fullscreen means
+   *   asking it to choose a monitor, and its display enumeration need not agree
+   *   with Electron's.
+   *
+   *   Embedding costs mpv its own input handling — mouse and keyboard never
+   *   reach its child window — which is why it was rejected at first. That no
+   *   longer matters, because the overlay draws every control and forwards
+   *   input over IPC.
    */
   constructor({ mpvPath, windowHandle = null, embed = false, useOverlay = true }) {
     super();
@@ -151,14 +160,18 @@ class MpvPlayer extends EventEmitter {
           + '+' + Math.round(display.y + display.height / 4),
         );
       }
-      if (this.useOverlay) {
-        // A window that exactly covers the screen can be handed the display
-        // scanout directly by the compositor ("independent flip"), which means
-        // other windows layered on top are never blended in and the overlay
-        // becomes invisible even though it is above mpv in the z-order.
-        // Disabling flip presentation forces normal composition.
-        args.push('--d3d11-flip=no');
-      }
+    }
+
+    if (this.useOverlay && !(this.embed && this.windowHandle)) {
+      // A top-level window that exactly covers the screen can be handed the
+      // display scanout directly by the compositor ("independent flip"), so
+      // anything layered above it is never blended in and the control overlay
+      // becomes invisible despite being above it in the z-order. Disabling flip
+      // presentation forces normal composition.
+      //
+      // Only for a window mpv owns. Applied to an embedded child window it
+      // produced a black picture instead.
+      args.push('--d3d11-flip=no');
     }
 
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
