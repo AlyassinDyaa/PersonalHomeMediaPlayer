@@ -49,6 +49,20 @@ export function Settings({ onScanned, onSettingsChanged }) {
     }
   };
 
+  /** Persist a single boolean setting and reflect it straight away. */
+  const saveToggle = async (key, value) => {
+    // Update first so the checkbox responds to the click rather than to the
+    // round trip; the response replaces it either way.
+    setSettings((previous) => ({ ...previous, [key]: value }));
+    try {
+      setSettings(await api.saveSettings({ [key]: value }));
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+      load();
+    }
+  };
+
   const saveRoots = async (roots) => {
     try {
       const saved = await api.saveSettings({ libraryRoots: roots });
@@ -148,6 +162,39 @@ export function Settings({ onScanned, onSettingsChanged }) {
               ? 'Saved.'
               : 'Header will read “' + headerPreview(name) + '”.'}
           </p>
+        </section>
+
+        <section className="settings-card">
+          <h2>Playback</h2>
+          <p className="settings-hint">
+            Skip prompts use chapter markers when a file has them. Most releases do
+            not, so the timings fall back to a convention and can land in the wrong
+            place — turn them off if they get in the way.
+          </p>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.skipIntroEnabled !== false}
+              onChange={(event) => saveToggle('skipIntroEnabled', event.target.checked)}
+            />
+            <span>
+              <strong>Skip Intro</strong>
+              <span className="toggle-note">Offers to jump past an opening title sequence</span>
+            </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.skipOutroEnabled !== false}
+              onChange={(event) => saveToggle('skipOutroEnabled', event.target.checked)}
+            />
+            <span>
+              <strong>Next episode prompt</strong>
+              <span className="toggle-note">Appears over the closing minutes of an episode</span>
+            </span>
+          </label>
         </section>
 
         <section className="settings-card">

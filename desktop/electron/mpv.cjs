@@ -151,17 +151,27 @@ class MpvPlayer extends EventEmitter {
     if (this.embed && this.windowHandle) {
       args.push('--wid=' + this.windowHandle);
     } else {
-      args.push('--border=no', '--fullscreen=yes');
+      // Borderless but deliberately NOT fullscreen. mpv cannot be told which
+      // monitor to use — --fs-screen-name is ignored, --geometry does not
+      // influence the choice, and setting geometry or fs-screen over IPC
+      // reports success without moving anything — so the window is positioned
+      // afterwards with SetWindowPos (see window-move.cjs). A borderless window
+      // covering the display looks like fullscreen and, unlike it, can be moved
+      // to another monitor mid-playback.
+      args.push('--border=no', '--fullscreen=no');
 
-      // Name the monitor mpv must use.
-      //
-      // Positioning it with --geometry does not work: aiming at two different
-      // displays was measured putting the video on the same one both times,
-      // which is how it ended up on a different screen from the controls.
-      // Electron's own display labels cannot identify a monitor either — this
-      // desktop reports three called "LF27T35" — but the Windows device name
-      // is unique, and displays.cjs maps a display's bounds onto it.
-      if (screenName) args.push('--fs-screen-name=' + screenName);
+      // Stop mpv resizing or re-centring the window to suit the video, which
+      // would undo the placement as soon as the first frame is decoded.
+      args.push('--no-keepaspect-window', '--auto-window-resize=no');
+
+      if (display) {
+        // A starting size and position, so the window is roughly right before
+        // it is placed exactly.
+        args.push(
+          '--geometry=' + Math.round(display.width) + 'x' + Math.round(display.height)
+          + '+' + Math.round(display.x) + '+' + Math.round(display.y),
+        );
+      }
     }
 
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
@@ -333,6 +343,11 @@ class MpvPlayer extends EventEmitter {
 
   setVolume(volume) {
     return this.setProperty('volume', Math.max(0, Math.min(130, volume)));
+  }
+
+  /** mpv's native window handle, needed to position the window ourselves. */
+  getWindowHandle() {
+    return this.command(['get_property', 'window-id']);
   }
 
   getTracks() {

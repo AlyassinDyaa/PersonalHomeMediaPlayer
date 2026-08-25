@@ -774,3 +774,96 @@ button {
   .view, .rows .row, .grid .card { animation: none; }
   .card { transition: none; }
 }
+
+/* --------------------------------------------------------------- toggles --- */
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.toggle-row:last-of-type { border-bottom: none; }
+
+.toggle-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.toggle-row strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.toggle-note {
+  display: block;
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------- view transitions --- */
+
+/*
+ * Views fade and rise slightly on entry. Short and small on purpose: a page
+ * that slides a long way reads as slow however fast it actually is.
+ */
+@keyframes view-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.view {
+  animation: view-enter 220ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Rows arrive just after the view, so the page assembles rather than pops. */
+@keyframes row-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.rows .row {
+  animation: row-enter 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.rows .row:nth-child(1) { animation-delay: 0ms; }
+.rows .row:nth-child(2) { animation-delay: 40ms; }
+.rows .row:nth-child(3) { animation-delay: 80ms; }
+.rows .row:nth-child(4) { animation-delay: 120ms; }
+.rows .row:nth-child(5) { animation-delay: 160ms; }
+.rows .row:nth-child(n+6) { animation-delay: 200ms; }
+
+/* Poster tiles settle with the same easing as the player controls. */
+.card {
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+.card-poster {
+  transition: box-shadow 220ms ease;
+}
+
+.card:hover .card-poster {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
+}
+
+.nav-link, .chip, .season-tab, .btn {
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease,
+              transform 120ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Respect a system preference for reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .view, .rows .row { animation: none; }
+  .card, .card-poster, .nav-link, .chip, .season-tab, .btn { transition: none; }
+}

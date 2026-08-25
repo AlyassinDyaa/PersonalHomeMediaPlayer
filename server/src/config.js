@@ -67,6 +67,14 @@ export const config = {
   tmdbApiKey: process.env.TMDB_API_KEY ?? local.tmdbApiKey ?? null,
   tmdbLanguage: process.env.TMDB_LANGUAGE ?? local.tmdbLanguage ?? 'en-US',
 
+  /**
+   * Skip Intro and Skip Outro prompts. Both can be turned off: without chapter
+   * markers their timings are conventional guesses rather than measurements,
+   * and a prompt at the wrong moment is worse than none.
+   */
+  skipIntroEnabled: local.skipIntroEnabled ?? defaults.skipIntroEnabled ?? true,
+  skipOutroEnabled: local.skipOutroEnabled ?? defaults.skipOutroEnabled ?? true,
+
   /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
   libraryName: local.libraryName ?? defaults.libraryName ?? '',
 
@@ -107,6 +115,8 @@ export function saveSettings(patch) {
         .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
     )];
   }
+  if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
+  if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
   if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
   if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
@@ -124,6 +134,8 @@ export function saveSettings(patch) {
 export function settingsView() {
   return {
     libraryName: config.libraryName,
+    skipIntroEnabled: config.skipIntroEnabled,
+    skipOutroEnabled: config.skipOutroEnabled,
     libraryRoots: config.libraryRoots,
     rootsStatus: config.libraryRoots.map((root) => ({
       path: root,

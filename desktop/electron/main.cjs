@@ -13,7 +13,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
 const { startServerProcess } = require('./server-process.cjs');
-const { deviceNameFor } = require('./displays.cjs');
+const { moveWindowTo } = require('./window-move.cjs');
 
 const HERE = __dirname;
 const PROJECT_ROOT = path.resolve(HERE, '..', '..');
@@ -424,8 +424,40 @@ function playbackDisplay() {
  * fullscreen, so playback is restarted on the target display from the current
  * position instead. That costs a brief black frame and is completely reliable.
  */
+/**
+ * Put the video window over a display, and align the controls to it.
+ *
+ * mpv reports its own window handle, which is the only reliable way to place it:
+ * every option and property mpv offers for choosing a monitor was measured
+ * doing nothing on this machine.
+ */
+async function placeVideoWindow(display) {
+  if (!player || !player.isRunning) return false;
+
+  try {
+    const hwnd = await player.getWindowHandle();
+    if (!hwnd) return false;
+    const moved = await moveWindowTo(hwnd, display.bounds);
+    console.log('video window -> ' + display.bounds.x + ',' + display.bounds.y
+      + ' ' + display.bounds.width + 'x' + display.bounds.height
+      + (moved ? ' ok' : ' FAILED'));
+    if (moved && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.setBounds(display.bounds);
+    }
+    return moved;
+  } catch (error) {
+    console.warn('Could not place the video window: ' + error.message);
+    return false;
+  }
+}
+
+/** Displays ordered the way they sit on the desk, so "next" means next along. */
+function displaysLeftToRight() {
+  return [...screen.getAllDisplays()].sort((a, b) => a.bounds.x - b.bounds.x || a.bounds.y - b.bounds.y);
+}
+
 async function moveToNextScreen() {
-  const displays = screen.getAllDisplays();
+  const displays = displaysLeftToRight();
   if (displays.length < 2) return { ok: false, error: 'Only one display is connected' };
   if (!player || !player.isRunning) return { ok: false, error: 'Nothing is playing' };
 
@@ -433,28 +465,24 @@ async function moveToNextScreen() {
   const index = displays.findIndex((entry) => entry.id === current.id);
   displayOverride = displays[(index + 1) % displays.length];
 
-  const position = player.state.position ?? 0;
-
-  // The restart stops mpv; that stop must not be mistaken for the user exiting.
-  advancing = true;
-  try {
-    return await startQueueEntry(queueIndex, position);
-  } finally {
-    advancing = false;
-  }
+  // Moving the window is enough: no restart, so playback never pauses, the
+  // position is kept and there is no black frame.
+  const moved = await placeVideoWindow(displayOverride);
+  sendOverlayState({ displayCount: displays.length });
+  return moved
+    ? { ok: true }
+    : { ok: false, error: 'Could not move the video to the next screen' };
 }
 
 function showOverlay(targetDisplay) {
   const display = targetDisplay ?? playbackDisplay();
   if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow(display);
 
-  // Match the video window exactly. Using the display bounds instead would
-  // leave the two misaligned whenever the video window is not filling the
-  // screen, which is what made the controls look detached from the picture.
-  const target = playerWindow && !playerWindow.isDestroyed()
-    ? playerWindow.getBounds()
-    : display.bounds;
-  overlayWindow.setBounds(target);
+  // mpv fullscreens on the named display, so the display's own bounds are what
+  // the controls must match. (An earlier version measured a BrowserWindow we
+  // used to embed the video in; that window is gone, and reading its stale
+  // bounds put the controls on the display the video had previously been on.)
+  overlayWindow.setBounds(display.bounds);
 
   // The overlay takes focus deliberately. An unfocused window on Windows
   // consumes the first click to activate itself, which made every control feel
@@ -574,6 +602,13 @@ async function detectSkipPoints(duration) {
   const introLength = Number(config.introSkipSeconds ?? 85);
   const outroLength = Number(config.outroSkipSeconds ?? 90);
 
+  // Either prompt can be switched off from the Library screen. Off means the
+  // prompt is never offered, whether its timing came from a chapter marker or
+  // from a conventional offset.
+  const introEnabled = config.skipIntroEnabled !== false;
+  const outroEnabled = config.skipOutroEnabled !== false;
+  if (!introEnabled && !outroEnabled) return { intro: null, outro: null };
+
   let chapters = [];
   try {
     chapters = (await player.command(['get_property', 'chapter-list'])) || [];
@@ -609,7 +644,10 @@ async function detectSkipPoints(duration) {
     outro = { from: Math.max(0, duration - outroLength), approximate: true };
   }
 
-  return { intro, outro };
+  return {
+    intro: introEnabled ? intro : null,
+    outro: outroEnabled ? outro : null,
+  };
 }
 
 /**
@@ -662,7 +700,7 @@ async function startQueueEntry(index, startPosition) {
   player.embed = false;
   player.windowHandle = null;
 
-  const screenName = await deviceNameFor(display);
+
 
   try {
     await player.start({
@@ -672,9 +710,13 @@ async function startQueueEntry(index, startPosition) {
       subtitleFiles: entry.subtitleFiles ?? [],
       title: entry.title ?? '',
       display: display.bounds,
-      screenName,
       muted: startMuted,
     });
+
+    // mpv cannot choose its own monitor, so place its window over the target
+    // display once it exists. Failure here is cosmetic — the video still plays,
+    // just possibly on the wrong screen — so it must not abort playback.
+    await placeVideoWindow(display);
 
     {
       overlayState = {
@@ -732,7 +774,10 @@ function ensurePlayer(windowHandle) {
   });
 
   player.on('property', ({ name, value }) => {
-    if (name === 'pause') sendOverlayState({ paused: Boolean(value) });
+    if (name === 'pause') {
+      console.log('pause -> ' + (value ? 'True' : 'False'));
+      sendOverlayState({ paused: Boolean(value) });
+    }
     else if (name === 'volume' && typeof value === 'number') sendOverlayState({ volume: value });
     else if (name === 'mute') sendOverlayState({ muted: Boolean(value) });
     else if (name === 'sid') sendOverlayState({ subtitleId: typeof value === 'number' ? value : null });
