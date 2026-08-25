@@ -325,7 +325,14 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   display: flex;
   align-items: center;
   min-width: 0;
-  align-self: stretch;
+  /*
+   * Hugs the title rather than stretching to fill the top band. The band is
+   * over a hundred pixels tall because of the gradient's padding, and letting
+   * the grab area cover all of it meant clicks nowhere near the title were
+   * being treated as attempts to move the window.
+   */
+  height: 40px;
+  align-self: flex-start;
   cursor: grab;
   /* The title must not swallow the drag by being dragged as text. */
   user-select: none;

@@ -182,8 +182,10 @@ export function Overlay() {
   const command = (args) => player?.command(args);
   const seekTo = (seconds) => command(['seek', Math.max(0, seconds), 'absolute']);
 
+  /** Where along the bar the pointer is, as a position in the video. */
   const onTrackPointer = (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width) return 0;
     const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
     return ratio * duration;
   };
@@ -315,14 +317,34 @@ export function Overlay() {
       <div className="overlay-bar">
         <div
           className="seek"
-          onMouseDown={(event) => { setScrubbing(true); setScrubValue(onTrackPointer(event)); }}
-          onMouseMove={(event) => { if (scrubbing) setScrubValue(onTrackPointer(event)); }}
-          onMouseUp={(event) => {
+          /*
+           * Pointer capture, so a scrub that wanders off the strip — up over
+           * the picture, or past either end — keeps following the pointer and
+           * still lands where it is released. Without it the bar let go the
+           * moment the pointer left, which is most of the way through any real
+           * attempt to skip.
+           */
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            setScrubbing(true);
+            setScrubValue(onTrackPointer(event));
+          }}
+          onPointerMove={(event) => { if (scrubbing) setScrubValue(onTrackPointer(event)); }}
+          onPointerUp={(event) => {
+            if (!scrubbing) return;
+            event.currentTarget.releasePointerCapture?.(event.pointerId);
             const target = onTrackPointer(event);
             setScrubbing(false);
             seekTo(target);
           }}
-          onMouseLeave={() => { if (scrubbing) { setScrubbing(false); seekTo(scrubValue); } }}
+          onPointerCancel={() => {
+            // The gesture was taken away mid-scrub; honour where it had reached
+            // rather than leaving the bar stuck to the pointer.
+            if (!scrubbing) return;
+            setScrubbing(false);
+            seekTo(scrubValue);
+          }}
         >
           <div className="seek-track">
             <div className="seek-fill" style={{ width: percent + '%' }} />

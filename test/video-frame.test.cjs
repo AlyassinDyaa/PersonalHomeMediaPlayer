@@ -121,4 +121,34 @@ check('a window dropped on the second monitor is clamped to that monitor', () =>
   assert.ok(b.y + b.height / 3 <= right.workArea.y + right.workArea.height, 'grabbable');
 });
 
+
+// --- when a press counts as a drag ----------------------------------------
+
+const { pastThreshold, DRAG_THRESHOLD, CLICK_MS, HELD_THRESHOLD } =
+  require('../desktop/electron/video-frame.cjs');
+
+check('a quick press that drifts a few pixels is a click, not a drag', () => {
+  // This is what a hand does on every ordinary click, and it used to yank a
+  // fullscreen video down into a small window.
+  assert.strictEqual(pastThreshold({ x: 960, y: 40 }, { x: 966, y: 43 }, 150), false);
+});
+
+check('a quick press that drifts a long way is still a drag', () => {
+  // A fast flick is deliberate, however brief.
+  assert.strictEqual(pastThreshold({ x: 960, y: 40 }, { x: 1010, y: 60 }, 90), true);
+});
+
+check('a held press becomes a drag once it moves at all', () => {
+  assert.strictEqual(pastThreshold({ x: 960, y: 40 }, { x: 966, y: 40 }, 400), true);
+});
+
+check('a held press that never moves is not a drag', () => {
+  assert.strictEqual(pastThreshold({ x: 960, y: 40 }, { x: 962, y: 41 }, 900), false);
+});
+
+check('the thresholds stay in a sane relationship', () => {
+  assert.ok(DRAG_THRESHOLD > HELD_THRESHOLD, 'a quick drag must need more travel than a slow one');
+  assert.ok(CLICK_MS >= 200, 'a click can easily last 200ms');
+});
+
 console.log('\npassed ' + passed + ' of ' + total);

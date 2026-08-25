@@ -196,6 +196,22 @@ function Drag($fromX, $fromY, $toX, $toY) {
   Start-Sleep -Milliseconds 1200
 }
 
+# A press, a small drift, a release. A synthetic click puts the pointer down
+# and up on the same pixel; a hand never does, and the difference used to be
+# enough to drag a fullscreen video down into a window.
+function DriftingClick($x, $y) {
+  [Win]::SetCursorPos($x, $y) | Out-Null
+  Start-Sleep -Milliseconds 400
+  [Win]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)
+  Start-Sleep -Milliseconds 60
+  foreach ($i in 1..3) {
+    [Win]::SetCursorPos($x + (2 * $i), $y + $i) | Out-Null
+    Start-Sleep -Milliseconds 30
+  }
+  [Win]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+  Start-Sleep -Milliseconds 1500
+}
+
 function Key($k) {
   [System.Windows.Forms.SendKeys]::SendWait($k)
   Start-Sleep -Milliseconds 1500
@@ -266,6 +282,12 @@ $afterClick = VideoRect
 Check 'clicking the control bar leaves the window alone' `
   ($null -ne $afterClick -and $afterClick.Width -eq $full.Width -and $afterClick.X -eq $full.X) `
   (Show $afterClick)
+
+# A click that drifts must not move the window either.
+Wake $full
+DriftingClick ($full.X + [int]($full.Width / 2)) ($full.Y + 40)
+$afterDrift = VideoRect
+Check 'a click that drifts is not treated as a drag' (($null -ne $afterDrift) -and ($afterDrift.Width -eq $full.Width) -and ($afterDrift.X -eq $full.X)) (Show $afterDrift)
 
 # 4. the transport controls respond to a click
 Wake $full
@@ -373,6 +395,14 @@ Wake $again
 $sg.CopyFromScreen($again.X, $again.Y, 0, 0, $shot.Size)
 $shot.Save("$scratch\suite-final.png", [System.Drawing.Imaging.ImageFormat]::Png)
 $sg.Dispose(); $shot.Dispose()
+
+# The close button, which is what a person actually reaches for.
+$beforeClose = VideoRect
+Wake $beforeClose
+ClickAt ($beforeClose.X + $beforeClose.Width - 52) ($beforeClose.Y + 40)
+Start-Sleep -Seconds 3
+$closed = -not (Get-Process mpv -ErrorAction SilentlyContinue)
+Check 'the close button closes the player' $closed ($(if ($closed) { 'mpv exited' } else { 'mpv still running' }))
 
 # 12. closing returns to the library
 Wake $again

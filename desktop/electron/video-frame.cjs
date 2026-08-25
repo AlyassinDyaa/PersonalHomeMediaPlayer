@@ -20,13 +20,22 @@
  */
 
 /**
- * How far the pointer must travel before a press becomes a drag.
+ * When a press counts as a drag rather than a click.
  *
- * Without this, clicking the control bar — to focus the window, or on the way
- * to a button — restored a fullscreen video to a small window, because the
- * press alone was enough to start the gesture.
+ * Distance alone is not enough. A hand drifts several pixels between pressing
+ * and releasing, so a five pixel rule turned ordinary clicks on the control bar
+ * into drags and yanked a fullscreen video down into a small window — including
+ * clicks that were only passing through on the way to a button.
+ *
+ * A quick press is therefore always a click, however far it slid, and a slower
+ * one still has to travel before it moves anything. A deliberate drag passes
+ * the far threshold almost immediately and is unaffected.
  */
-const DRAG_THRESHOLD = 5;
+const DRAG_THRESHOLD = 14;
+/** Below this, a press is a click no matter how much it drifted. */
+const CLICK_MS = 260;
+/** Once held longer than that, a smaller movement is accepted as a drag. */
+const HELD_THRESHOLD = 5;
 
 /** How much of a display a restored window covers. */
 const WINDOW_FRACTION = 0.68;
@@ -134,14 +143,22 @@ function clampToDisplay(bounds, display) {
   };
 }
 
-/** Whether a press has travelled far enough to be a drag rather than a click. */
-function pastThreshold(origin, point) {
-  return Math.abs(point.x - origin.x) >= DRAG_THRESHOLD
-    || Math.abs(point.y - origin.y) >= DRAG_THRESHOLD;
+/**
+ * Whether a press has become a drag.
+ * @param {{x: number, y: number}} origin where the press started
+ * @param {{x: number, y: number}} point where the pointer is now
+ * @param {number} heldMs how long the button has been down
+ */
+function pastThreshold(origin, point, heldMs) {
+  const travelled = Math.max(Math.abs(point.x - origin.x), Math.abs(point.y - origin.y));
+  if (travelled >= DRAG_THRESHOLD) return true;
+  return heldMs >= CLICK_MS && travelled >= HELD_THRESHOLD;
 }
 
 module.exports = {
   DRAG_THRESHOLD,
+  CLICK_MS,
+  HELD_THRESHOLD,
   pastThreshold,
   WINDOW_FRACTION,
   MIN_WIDTH,

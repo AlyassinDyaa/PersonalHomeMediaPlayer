@@ -605,9 +605,10 @@ function beginGesture(kind, point) {
     kind,
     origin: point,
     startBounds: { ...videoBounds },
-    // Nothing happens until the pointer moves: a press on the control bar is
-    // how the window is focused, and how a button is reached.
+    // Nothing happens until the press is clearly a drag: the control bar is
+    // also how the window is focused, and what a button is reached across.
     armed: false,
+    startedAt: Date.now(),
     // Dragging a fullscreen window restores it under the pointer, the way
     // dragging a maximised window does everywhere else in Windows.
     restoreTo: kind === 'move' && videoFullscreen
@@ -620,7 +621,7 @@ function beginGesture(kind, point) {
 /** Whether the press has become a drag, arming it the first time it has. */
 function gestureArmed(point) {
   if (gesture.armed) return true;
-  if (!pastThreshold(gesture.origin, point)) return false;
+  if (!pastThreshold(gesture.origin, point, Date.now() - gesture.startedAt)) return false;
 
   gesture.armed = true;
   if (gesture.restoreTo) {
