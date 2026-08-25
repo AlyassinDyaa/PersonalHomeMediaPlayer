@@ -1,0 +1,32 @@
+node_modules/
+dist/
+build/
+out/
+release/
+
+# Local scan cache, database and generated metadata
+data/
+*.db
+*.db-journal
+*.db-wal
+tools/recon.json
+
+# Cached artwork pulled from TMDB
+cache/
+posters/
+
+# Secrets (TMDB API key etc.)
+.env
+.env.local
+config.local.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
