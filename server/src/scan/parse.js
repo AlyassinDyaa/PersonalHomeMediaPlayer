@@ -552,3 +552,40 @@ export function seriesKey(title) {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+/**
+ * Validate an episode title parsed from a filename.
+ *
+ * Used only when the metadata provider had no title of its own. Scene names
+ * frequently leave behind fragments that are not titles at all — "HD",
+ * "BR vk007", a bare release group — and showing those is worse than showing
+ * nothing, because the UI can fall back to "Episode 4".
+ *
+ * @returns {string|null} A presentable title, or null if it is not one.
+ */
+export function cleanEpisodeTitle(raw) {
+  if (!raw) return null;
+
+  let text = stripReleaseTokens(String(raw), { allowEmpty: true })
+    .replace(/^[\s\-–_.,]+/, '')
+    .replace(/[\s\-–_.,]+$/, '')
+    .trim();
+
+  if (text.length < 3) return null;
+  if (/^(hd|sd|uhd|fhd|web|raw|part|pt)$/i.test(text)) return null;
+
+  const words = text.split(/\s+/);
+
+  // Every word looks like an abbreviation, a numbered tag, or a release group.
+  const allJunk = words.every((word) => (
+    /^[A-Za-z]{1,3}$/.test(word)
+    || /\d{2,}/.test(word)
+    || /^[A-Z0-9]{4,}$/.test(word)
+  ));
+  if (allJunk) return null;
+
+  // A real title contains at least one pronounceable word.
+  if (!words.some((word) => /[aeiou]/i.test(word) && word.length >= 3)) return null;
+
+  return text;
+}

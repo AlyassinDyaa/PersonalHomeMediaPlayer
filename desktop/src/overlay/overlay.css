@@ -1,0 +1,185 @@
+/* Transparent playback controls drawn over the mpv window. */
+
+:root {
+  --accent: #e50914;
+}
+
+html, body, #overlay-root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  color: #fff;
+  user-select: none;
+  cursor: default;
+}
+
+button { font: inherit; color: inherit; border: none; background: none; cursor: pointer; }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.28s ease;
+  pointer-events: none;
+}
+
+.overlay.visible { opacity: 1; }
+
+/* ------------------------------------------------------------------ top --- */
+
+.overlay-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 26px 44px 60px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.overlay-title {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+}
+
+/* --------------------------------------------------------------- bottom --- */
+
+.overlay-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 90px 44px 30px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.6) 48%, rgba(0, 0, 0, 0) 100%);
+}
+
+/* Generous hit area so the thin bar is still easy to grab. */
+.seek { padding: 10px 0; cursor: pointer; }
+
+.seek-track {
+  position: relative;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
+  transition: height 0.12s ease;
+}
+
+.seek:hover .seek-track { height: 7px; }
+
+.seek-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  border-radius: 3px;
+}
+
+.seek-knob {
+  position: absolute;
+  top: 50%;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.seek:hover .seek-knob { opacity: 1; }
+
+.overlay-times {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #cfcfd6;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.overlay-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.overlay-spacer { flex: 1; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 18px;
+  color: #fff;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.icon-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.icon-btn:active { transform: scale(0.94); }
+.icon-btn.active { background: rgba(255, 255, 255, 0.24); }
+.icon-btn.big { font-size: 22px; min-width: 50px; height: 50px; }
+
+.volume { display: flex; align-items: center; gap: 8px; }
+
+.volume input[type="range"] {
+  width: 96px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------- track menu --- */
+
+.track-menu {
+  position: absolute;
+  right: 44px;
+  bottom: 96px;
+  min-width: 230px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(18, 18, 24, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.7);
+}
+
+.track-menu-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #9a9aa6;
+  padding: 4px 10px 8px;
+}
+
+.track-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 5px;
+  font-size: 14px;
+  color: #e8e8ee;
+}
+
+.track-item:hover { background: rgba(255, 255, 255, 0.1); }
+
+.track-item.active {
+  background: rgba(229, 9, 20, 0.22);
+  color: #fff;
+  font-weight: 600;
+}

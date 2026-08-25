@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, artwork } from './api.js';
+import { api, artwork, episodeLabel, displayTitle } from './api.js';
 import Hero from './components/Hero.jsx';
 import Row from './components/Row.jsx';
 import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
+import Browse from './components/Browse.jsx';
 import Settings from './components/Settings.jsx';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
@@ -106,9 +107,7 @@ export function App({ info }) {
     }
     try {
       const full = await api.video(video.id);
-      const label = video.episode
-        ? item.title + ' - S' + video.season + 'E' + video.episode
-        : item.title;
+      const label = displayTitle(item, { ...video, title: full.title });
 
       const response = await window.media.play({
         filePath: full.path,
@@ -204,9 +203,7 @@ export function App({ info }) {
               renderLabel={(entry) => (
                 <>
                   <strong>{entry.item.title}</strong>
-                  {entry.video.episode
-                    ? 'S' + entry.video.season + ' E' + entry.video.episode + ' · ' + (entry.video.title ?? '')
-                    : 'Resume'}
+                  {entry.video.episode ? episodeLabel(entry.video) : 'Resume'}
                 </>
               )}
             />
@@ -236,21 +233,17 @@ export function App({ info }) {
       )}
 
       {!loading && !query.trim() && (view === 'movies' || view === 'shows') && (
-        <>
-          <div className="page-header">
-            <h1 className="page-title">{view === 'movies' ? 'Movies' : 'TV Shows'}</h1>
-            <span className="page-sub">{(view === 'movies' ? movies : shows).length} titles</span>
-          </div>
-          <div className="grid">
-            {(view === 'movies' ? movies : shows).map((item) => (
-              <Card key={item.id} item={item} onClick={() => openDetail(item)}
-                    label={<>
-                      <strong>{item.title}</strong>
-                      {item.kind === 'show' ? plural(item.episodeCount, 'episode') : item.year}
-                    </>} />
-            ))}
-          </div>
-        </>
+        <Browse
+          title={view === 'movies' ? 'Movies' : 'TV Shows'}
+          items={view === 'movies' ? movies : shows}
+          onSelect={openDetail}
+          renderLabel={(item) => (
+            <>
+              <strong>{item.title}</strong>
+              {item.kind === 'show' ? plural(item.episodeCount, 'episode') : item.year}
+            </>
+          )}
+        />
       )}
     </>
   );

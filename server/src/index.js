@@ -15,9 +15,26 @@ import { getDb } from './db.js';
 import { runScan, setOverride } from './scan/index.js';
 import * as library from './library.js';
 import { walkLibrary } from './scan/walk.js';
+import { artworkStats, prefetchArtwork } from './meta/artwork.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+/**
+ * Begin a server-sent event response and return a send(event, data) function.
+ * @param {import('express').Response} res
+ */
+function openEventStream(res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  return (event, data) => {
+    res.write('event: ' + event + '\n');
+    res.write('data: ' + JSON.stringify(data) + '\n\n');
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Library
@@ -156,6 +173,28 @@ app.get('/api/browse/preview', (req, res) => {
   }
 });
 
+app.get('/api/artwork/stats', (req, res) => {
+  res.json(artworkStats());
+});
+
+/** Warm the whole image cache, streaming progress. */
+app.get('/api/artwork/prefetch', async (req, res) => {
+  const send = openEventStream(res);
+  try {
+    const result = await prefetchArtwork({
+      onProgress: (p) => send('progress', {
+        ...p,
+        percent: p.total ? Math.round(100 * (p.done / p.total)) : 0,
+      }),
+    });
+    send('done', result);
+  } catch (error) {
+    send('error', { message: error.message });
+  } finally {
+    res.end();
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Artwork: fetched once from TMDB, then served from disk
 // ---------------------------------------------------------------------------
@@ -202,16 +241,7 @@ let scanning = false;
 app.get('/api/scan/stream', async (req, res) => {
   if (scanning) return res.status(409).json({ error: 'a scan is already running' });
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-  });
-
-  const send = (event, data) => {
-    res.write('event: ' + event + '\n');
-    res.write('data: ' + JSON.stringify(data) + '\n\n');
-  };
+  const send = openEventStream(res);
 
   /**
    * Map a phase onto an overall percentage. Metadata lookup dominates the
@@ -223,9 +253,11 @@ app.get('/api/scan/stream', async (req, res) => {
       case 'walk': return 5;
       case 'group': return 15;
       case 'metadata':
-        return event.total ? 20 + Math.round(70 * (event.done / event.total)) : 20;
-      case 'merge': return 92;
-      case 'persist': return 96;
+        return event.total ? 20 + Math.round(55 * (event.done / event.total)) : 20;
+      case 'merge': return 78;
+      case 'persist': return 82;
+      case 'artwork':
+        return event.total ? 84 + Math.round(16 * (event.done / event.total)) : 84;
       default: return null;
     }
   };

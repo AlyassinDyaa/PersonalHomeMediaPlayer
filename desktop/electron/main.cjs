@@ -8,7 +8,7 @@
  * across versions, and the renderer's module format is independent of this.
  */
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
@@ -23,7 +23,9 @@ const PROGRESS_INTERVAL_MS = 5000;
 
 let mainWindow = null;
 let playerWindow = null;
+let overlayWindow = null;
 let player = null;
+let overlayState = { title: '', subtitles: [], audioTracks: [] };
 let serverChild = null;
 let serverPort = 8787;
 let mpvPath = null;
@@ -133,6 +135,93 @@ function createPlayerWindow() {
   return playerWindow;
 }
 
+/**
+ * Transparent, always-on-top window that draws the playback controls over mpv.
+ *
+ * mpv owns a separate top-level window, so the controls cannot be drawn inside
+ * it. This window floats above it instead. It is click-through by default and
+ * only accepts mouse input while the pointer is over the control bar, which is
+ * what keeps the video underneath behaving normally.
+ */
+function createOverlayWindow() {
+  const display = screen.getPrimaryDisplay();
+  const { x, y, width, height } = display.bounds;
+
+  overlayWindow = new BrowserWindow({
+    x,
+    y,
+    width,
+    height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(HERE, 'preload-overlay.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  // 'screen-saver' sits above the ordinary topmost band that mpv's --ontop
+  // uses, so the controls stay visible over fullscreen video.
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  if (DEV_SERVER_URL) {
+    overlayWindow.loadURL(DEV_SERVER_URL + 'overlay.html');
+  } else {
+    overlayWindow.loadFile(path.join(HERE, '..', 'dist', 'overlay.html'));
+  }
+
+  overlayWindow.on('closed', () => { overlayWindow = null; });
+  return overlayWindow;
+}
+
+function sendOverlayState(patch) {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayState = { ...overlayState, ...patch };
+  overlayWindow.webContents.send('overlay:state', patch);
+}
+
+function showOverlay() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) createOverlayWindow();
+  // Shown without focus so mpv keeps keyboard control (space, arrows, f).
+  overlayWindow.showInactive();
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+}
+
+function hideOverlay() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+}
+
+/** Map mpv's track list into the shape the overlay renders. */
+function describeTracks(tracks) {
+  const label = (track) => {
+    const parts = [];
+    if (track.lang) parts.push(String(track.lang).toUpperCase());
+    if (track.title) parts.push(track.title);
+    if (track.codec && !track.title) parts.push(track.codec);
+    if (!parts.length) parts.push('Track ' + track.id);
+    if (track.external) parts.push('(file)');
+    return parts.join(' · ');
+  };
+
+  const list = Array.isArray(tracks) ? tracks : [];
+  return {
+    subtitles: list.filter((t) => t.type === 'sub').map((t) => ({ id: t.id, label: label(t) })),
+    audioTracks: list.filter((t) => t.type === 'audio').map((t) => ({ id: t.id, label: label(t) })),
+  };
+}
+
 function nativeHandleOf(win) {
   const buffer = win.getNativeWindowHandle();
   return buffer.length === 8
@@ -193,18 +282,28 @@ function registerIpc() {
     }
 
     if (!player) {
-      player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer });
+      player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer, useOverlay: !embedPlayer });
 
       player.on('position', ({ videoId, position, duration }) => {
         writeProgress(videoId, position, duration);
+        sendOverlayState({ position, duration });
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('player:position', { videoId, position, duration });
         }
       });
 
+      player.on('property', ({ name, value }) => {
+        if (name === 'pause') sendOverlayState({ paused: Boolean(value) });
+        else if (name === 'volume' && typeof value === 'number') sendOverlayState({ volume: value });
+        else if (name === 'sid') sendOverlayState({ subtitleId: typeof value === 'number' ? value : null });
+        else if (name === 'aid') sendOverlayState({ audioId: typeof value === 'number' ? value : null });
+        else if (name === 'duration' && typeof value === 'number') sendOverlayState({ duration: value });
+      });
+
       player.on('stopped', async ({ videoId, position }) => {
         const duration = player ? player.state.duration : null;
         await writeProgress(videoId, position, duration, { force: true });
+        hideOverlay();
         closePlayerWindow();
       });
 
@@ -215,15 +314,52 @@ function registerIpc() {
 
     try {
       await player.start(options);
+
+      if (!embedPlayer) {
+        overlayState = {
+          title: options.title || '',
+          position: options.startPosition || 0,
+          duration: null,
+          paused: false,
+          volume: 100,
+          subtitles: [],
+          audioTracks: [],
+          subtitleId: null,
+          audioId: null,
+        };
+        showOverlay();
+        sendOverlayState(overlayState);
+
+        // Track lists are only available once mpv has loaded the file.
+        player.getTracks()
+          .then((tracks) => sendOverlayState(describeTracks(tracks)))
+          .catch(() => { /* the overlay simply omits track menus */ });
+      }
+
       return { ok: true };
     } catch (error) {
+      hideOverlay();
       closePlayerWindow();
       return { ok: false, error: error.message };
     }
   });
 
+  ipcMain.on('overlay:ready', (event) => {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send('overlay:state', overlayState);
+    }
+  });
+
+  ipcMain.on('overlay:interactive', (event, interactive) => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    // `forward: true` keeps mousemove flowing to the overlay even while it is
+    // click-through, which is how it knows when the pointer reaches the bar.
+    overlayWindow.setIgnoreMouseEvents(!interactive, { forward: true });
+  });
+
   ipcMain.handle('player:stop', async () => {
     if (player) await player.stop();
+    hideOverlay();
     closePlayerWindow();
     return { ok: true };
   });

@@ -91,3 +91,37 @@ export function formatSize(bytes) {
   const gb = bytes / 1024 ** 3;
   return gb >= 1 ? gb.toFixed(1) + ' GB' : (bytes / 1024 ** 2).toFixed(0) + ' MB';
 }
+
+/**
+ * "Season 2 · Episode 4", or a range when one file holds two episodes.
+ * Returns null for movies.
+ */
+export function episodeLabel(video) {
+  if (!video || video.episode == null) return null;
+  const number = video.episodeEnd && video.episodeEnd !== video.episode
+    ? video.episode + '–' + video.episodeEnd
+    : String(video.episode);
+  const season = video.season == null ? null : 'Season ' + video.season;
+  const episode = 'Episode ' + number;
+  return season ? season + ' · ' + episode : episode;
+}
+
+/**
+ * A clean, human-readable name for something being played, built from the show
+ * and numbering rather than from the filename.
+ *
+ * "Green Lantern: The Animated Series · Season 2 · Episode 4 · Beware My Power"
+ */
+export function displayTitle(item, video) {
+  const parts = [item?.title].filter(Boolean);
+  const label = episodeLabel(video);
+  if (label) parts.push(label);
+  if (video?.title) parts.push(video.title);
+  return parts.join(' · ');
+}
+
+/** Title for a single episode row: its name, or a numbered fallback. */
+export function episodeHeading(video) {
+  if (video?.title) return video.title;
+  return 'Episode ' + (video?.episode ?? '');
+}

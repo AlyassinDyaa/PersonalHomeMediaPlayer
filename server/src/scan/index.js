@@ -10,10 +10,11 @@ import { config, hasTmdb } from '../config.js';
 import { getDb, stableId, sortTitle, now, transaction } from '../db.js';
 import { walkLibrary } from './walk.js';
 import { groupLibrary } from './group.js';
-import { seriesKey } from './parse.js';
+import { seriesKey, cleanEpisodeTitle } from './parse.js';
 import {
   findBestMatch, getMovie, getShow, getSeason, pickLogo, pickCertification,
 } from '../meta/tmdb.js';
+import { prefetchArtwork } from '../meta/artwork.js';
 
 /** Scan-stable key for an item, unaffected by which folders it came from. */
 function scanKeyFor(item) {
@@ -58,11 +59,28 @@ async function resolveMetadata(item, scanKey) {
   let score = forcedId ? 1 : 0;
 
   if (!matchId) {
-    const match = await findBestMatch(kind, { title: item.title, year: item.year });
-    if (!match) return null;
-    matchId = match.id;
-    score = match.score;
+    let match = null;
+    try {
+      match = await findBestMatch(kind, { title: item.title, year: item.year });
+    } catch (error) {
+      // Search is unavailable (typically offline). Reuse the id resolved on a
+      // previous scan so this title keeps its identity, and therefore its id,
+      // its artwork, and the watch progress attached to it.
+      const remembered = getOverride('resolved', scanKey);
+      if (!remembered) throw error;
+      matchId = remembered;
+      score = 0.9;
+    }
+
+    if (!matchId) {
+      if (!match) return null;
+      matchId = match.id;
+      score = match.score;
+    }
   }
+
+  // Remember the resolution so a later offline scan can reuse it.
+  if (matchId && !forcedId) setOverride('resolved', scanKey, matchId);
 
   const details = kind === 'movie' ? await getMovie(matchId) : await getShow(matchId);
   if (!details) return null;
@@ -280,6 +298,24 @@ export async function runScan({ onProgress = () => {} } = {}) {
   const stats = persist(merged, grouped.suggestions, scanId, startedAt);
   stats.mergedByTmdb = mergeCount;
 
+  // Warm the image cache so browsing works with no connection.
+  if (hasTmdb()) {
+    onProgress({ phase: 'artwork', message: 'Caching artwork for offline use' });
+    try {
+      const artwork = await prefetchArtwork({
+        onProgress: ({ done, total }) => onProgress({
+          phase: 'artwork',
+          message: 'Caching artwork',
+          done,
+          total,
+        }),
+      });
+      stats.artwork = artwork;
+    } catch (error) {
+      onProgress({ phase: 'artwork', message: 'Artwork caching failed: ' + error.message });
+    }
+  }
+
   return {
     ...stats,
     walked: walked.videos.length,
@@ -456,8 +492,9 @@ function persist(enriched, suggestions, scanId, startedAt) {
               season: season.number,
               episode: episode.episode,
               episodeEnd: episode.episodeEnd,
-              // Prefer TMDB's episode title; fall back to what the filename said.
-              title: meta?.title ?? episode.title ?? null,
+              // Prefer TMDB's episode title. The filename fallback is validated,
+              // because scene names often leave junk fragments behind.
+              title: meta?.title ?? cleanEpisodeTitle(episode.title),
               overview: meta?.overview ?? null,
               stillPath: meta?.stillPath ?? null,
               airDate: meta?.airDate ?? null,

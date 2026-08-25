@@ -62,11 +62,13 @@ class MpvPlayer extends EventEmitter {
    *   child window, so its on-screen controls never appear and seeking is
    *   impossible. Verified by screenshot comparison of both modes.
    */
-  constructor({ mpvPath, windowHandle = null, embed = false }) {
+  constructor({ mpvPath, windowHandle = null, embed = false, useOverlay = true }) {
     super();
     this.mpvPath = mpvPath;
     this.windowHandle = windowHandle;
     this.embed = embed;
+    // When a custom overlay draws the controls, mpv must not draw its own.
+    this.useOverlay = useOverlay;
     this.process = null;
     this.socket = null;
     this.requestId = 0;
@@ -110,8 +112,8 @@ class MpvPlayer extends EventEmitter {
       '--keep-open=no',
       // mpv's own on-screen controller provides transport controls inside the
       // embedded surface, where an HTML overlay cannot reach.
-      '--osc=yes',
-      '--osd-bar=yes',
+      this.useOverlay ? '--osc=no' : '--osc=yes',
+      this.useOverlay ? '--osd-level=0' : '--osd-bar=yes',
       '--hwdec=auto-safe',
       '--sub-auto=fuzzy',
       '--audio-file-auto=fuzzy',
@@ -121,9 +123,21 @@ class MpvPlayer extends EventEmitter {
     if (this.embed && this.windowHandle) {
       args.push('--wid=' + this.windowHandle);
     } else {
-      // mpv owns a borderless fullscreen window, so it receives input directly
-      // and can draw its own controls.
-      args.push('--fullscreen=yes', '--ontop=yes', '--border=no');
+      // mpv owns a borderless fullscreen window, so it receives input directly.
+      args.push('--fullscreen=yes', '--border=no');
+      // --ontop makes mpv re-assert itself as topmost, which pushes the custom
+      // control overlay behind the video. Fullscreen already covers the desktop,
+      // so it is only needed when mpv is drawing its own controls.
+      if (!this.useOverlay) args.push('--ontop=yes');
+
+      if (this.useOverlay) {
+        // A window that exactly covers the screen can be handed the display
+        // scanout directly by the compositor ("independent flip"), which means
+        // other windows layered on top are never blended in and the overlay
+        // becomes invisible even though it is above mpv in the z-order.
+        // Disabling flip presentation forces normal composition.
+        args.push('--d3d11-flip=no');
+      }
     }
 
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));

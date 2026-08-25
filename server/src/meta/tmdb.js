@@ -40,12 +40,18 @@ function release() {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function cacheGet(url) {
+/**
+ * @param {string} url
+ * @param {{allowStale?: boolean}} [options] When stale entries are allowed the
+ *   TTL is ignored. Used as an offline fallback: out-of-date metadata is far
+ *   better than none, which would otherwise strip a title of its identity.
+ */
+function cacheGet(url, { allowStale = false } = {}) {
   const row = getDb()
     .prepare('SELECT body, fetched_at FROM tmdb_cache WHERE url = ?')
     .get(url);
   if (!row) return null;
-  if (now() - Number(row.fetched_at) > CACHE_TTL_MS) return null;
+  if (!allowStale && now() - Number(row.fetched_at) > CACHE_TTL_MS) return null;
   try {
     return JSON.parse(row.body);
   } catch {
@@ -103,7 +109,14 @@ export async function tmdbGet(path) {
         return body;
       } catch (error) {
         // Network blips are common on large scans; retry with backoff.
-        if (attempt === 3) throw error;
+        if (attempt === 3) {
+          // Offline, or TMDB unreachable. Fall back to a stale cache entry so a
+          // rescan without a connection keeps every title's existing identity
+          // instead of silently un-matching the whole library.
+          const stale = cacheGet(cacheKey, { allowStale: true });
+          if (stale !== null) return stale;
+          throw error;
+        }
         await sleep(2 ** attempt * 500);
       }
     }
