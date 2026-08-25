@@ -27,6 +27,7 @@ let player = null;
 let serverChild = null;
 let serverPort = 8787;
 let mpvPath = null;
+let embedPlayer = false;
 let lastProgressWrite = 0;
 
 /** Read committed defaults plus any local overrides, without importing ESM. */
@@ -46,6 +47,7 @@ async function startApiServer() {
   const config = readConfig();
   serverPort = Number(process.env.PORT || config.port || 8787);
   mpvPath = resolveMpvPath(config.mpvPath);
+  embedPlayer = Boolean(config.embedPlayer);
 
   const started = await startServerProcess({
     entry: path.join(PROJECT_ROOT, 'server', 'src', 'index.js'),
@@ -94,11 +96,20 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
+  const startView = process.env.MEDIA_START_VIEW || '';
   if (DEV_SERVER_URL) {
-    mainWindow.loadURL(DEV_SERVER_URL);
+    mainWindow.loadURL(DEV_SERVER_URL + (startView ? '#' + startView : ''));
   } else {
-    mainWindow.loadFile(path.join(HERE, '..', 'dist', 'index.html'));
+    mainWindow.loadFile(path.join(HERE, '..', 'dist', 'index.html'), startView ? { hash: startView } : undefined);
   }
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('renderer loaded: ' + mainWindow.webContents.getURL());
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    if (level >= 2) console.error('[renderer] ' + message);
+  });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -172,12 +183,17 @@ function registerIpc() {
       return { ok: false, error: message };
     }
 
-    if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow();
-    playerWindow.show();
-    playerWindow.focus();
+    // Embedded mode is opt-in and known to swallow input; see mpv.cjs.
+    let windowHandle = null;
+    if (embedPlayer) {
+      if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow();
+      playerWindow.show();
+      playerWindow.focus();
+      windowHandle = nativeHandleOf(playerWindow);
+    }
 
     if (!player) {
-      player = new MpvPlayer({ mpvPath, windowHandle: nativeHandleOf(playerWindow) });
+      player = new MpvPlayer({ mpvPath, windowHandle, embed: embedPlayer });
 
       player.on('position', ({ videoId, position, duration }) => {
         writeProgress(videoId, position, duration);

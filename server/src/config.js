@@ -73,3 +73,82 @@ export function ensureDataDirs() {
 export function hasTmdb() {
   return Boolean(config.tmdbApiKey);
 }
+
+const LOCAL_CONFIG_PATH = path.join(PROJECT_ROOT, 'config.local.json');
+
+/**
+ * Persist user-editable settings to config.local.json and apply them to the
+ * running process, so a change takes effect without a restart.
+ *
+ * Only whitelisted keys are accepted: this is reachable from the UI, and the
+ * config object also carries secrets that must not be settable this way.
+ * @param {{libraryRoots?: string[], tmdbApiKey?: string, mpvPath?: string}} patch
+ */
+export function saveSettings(patch) {
+  const allowed = {};
+
+  if (Array.isArray(patch.libraryRoots)) {
+    // Normalise separators and drop blanks and duplicates.
+    allowed.libraryRoots = [...new Set(
+      patch.libraryRoots
+        .filter((root) => typeof root === 'string' && root.trim())
+        .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
+    )];
+  }
+  if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
+  if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
+
+  const current = readJson(LOCAL_CONFIG_PATH);
+  const next = { ...current, ...allowed };
+  fs.writeFileSync(LOCAL_CONFIG_PATH, JSON.stringify(next, null, 2) + '\n', 'utf8');
+
+  Object.assign(config, allowed);
+  return settingsView();
+}
+
+/** The subset of configuration safe to expose to the UI. */
+export function settingsView() {
+  return {
+    libraryRoots: config.libraryRoots,
+    rootsStatus: config.libraryRoots.map((root) => ({
+      path: root,
+      available: fs.existsSync(root),
+    })),
+    dataDir: config.dataDir,
+    mpvPath: config.mpvPath,
+    // Never return the key itself, only whether one is present.
+    tmdbConfigured: hasTmdb(),
+    port: config.port,
+  };
+}
+
+/** List drives/directories so the UI can browse without a native dialog. */
+export function listDirectories(target) {
+  if (!target) {
+    // Enumerate drive roots on Windows, filesystem root elsewhere.
+    if (process.platform === 'win32') {
+      const drives = [];
+      for (const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+        const root = letter + ':/';
+        try {
+          if (fs.existsSync(root)) drives.push({ name: letter + ':', path: root });
+        } catch {
+          // Unreadable drive; skip.
+        }
+      }
+      return { parent: null, entries: drives };
+    }
+    return { parent: null, entries: [{ name: '/', path: '/' }] };
+  }
+
+  const entries = fs.readdirSync(target, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('$') && !entry.name.startsWith('.'))
+    .map((entry) => ({ name: entry.name, path: path.join(target, entry.name).replace(/\\/g, '/') }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const parent = path.dirname(target);
+  return {
+    parent: parent === target ? null : parent.replace(/\\/g, '/'),
+    entries,
+  };
+}

@@ -10,10 +10,11 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config, ensureDataDirs, hasTmdb } from './config.js';
+import { config, ensureDataDirs, hasTmdb, saveSettings, settingsView, listDirectories } from './config.js';
 import { getDb } from './db.js';
 import { runScan, setOverride } from './scan/index.js';
 import * as library from './library.js';
+import { walkLibrary } from './scan/walk.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -111,6 +112,51 @@ app.post('/api/suggestions/:id/resolve', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Settings: library locations, browsing the filesystem to choose them
+// ---------------------------------------------------------------------------
+
+app.get('/api/settings', (req, res) => {
+  res.json(settingsView());
+});
+
+app.put('/api/settings', (req, res) => {
+  try {
+    res.json(saveSettings(req.body ?? {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * Directory listing used by the in-app folder picker. Restricted to directory
+ * names only — it never exposes file contents.
+ */
+app.get('/api/browse', (req, res) => {
+  const target = typeof req.query.path === 'string' && req.query.path ? req.query.path : null;
+  try {
+    res.json(listDirectories(target));
+  } catch (error) {
+    res.status(400).json({ error: 'Cannot read that folder: ' + error.message });
+  }
+});
+
+/** Count media files under a folder, so the picker can preview what it will find. */
+app.get('/api/browse/preview', (req, res) => {
+  const target = typeof req.query.path === 'string' ? req.query.path : '';
+  if (!target) return res.status(400).json({ error: 'path is required' });
+  try {
+    const result = walkLibrary([target]);
+    res.json({
+      path: target,
+      videos: result.videos.length,
+      subtitles: result.subtitles.length,
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Artwork: fetched once from TMDB, then served from disk
 // ---------------------------------------------------------------------------
 
@@ -167,10 +213,29 @@ app.get('/api/scan/stream', async (req, res) => {
     res.write('data: ' + JSON.stringify(data) + '\n\n');
   };
 
+  /**
+   * Map a phase onto an overall percentage. Metadata lookup dominates the
+   * runtime, so it gets most of the bar; the rest are near-instant checkpoints
+   * that would otherwise make the bar appear stuck.
+   */
+  const percentFor = (event) => {
+    switch (event.phase) {
+      case 'walk': return 5;
+      case 'group': return 15;
+      case 'metadata':
+        return event.total ? 20 + Math.round(70 * (event.done / event.total)) : 20;
+      case 'merge': return 92;
+      case 'persist': return 96;
+      default: return null;
+    }
+  };
+
   scanning = true;
   try {
-    const stats = await runScan({ onProgress: (event) => send('progress', event) });
-    send('done', stats);
+    const stats = await runScan({
+      onProgress: (event) => send('progress', { ...event, percent: percentFor(event) }),
+    });
+    send('done', { ...stats, percent: 100 });
   } catch (error) {
     send('error', { message: error.message });
   } finally {

@@ -25,8 +25,21 @@ async function request(pathname, options) {
   return response.json();
 }
 
+/** Absolute base URL, needed for EventSource which cannot use a relative path. */
+export function apiBaseUrl() {
+  return apiBase;
+}
+
 export const api = {
   stats: () => request('/api/stats'),
+  settings: () => request('/api/settings'),
+  saveSettings: (patch) => request('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  }),
+  browse: (dir) => request('/api/browse' + (dir ? '?path=' + encodeURIComponent(dir) : '')),
+  browsePreview: (dir) => request('/api/browse/preview?path=' + encodeURIComponent(dir)),
   items: (params = {}) => {
     const query = new URLSearchParams(
       Object.entries(params).filter(([, value]) => value != null),

@@ -5,12 +5,42 @@
  * directly testable against the real library without touching the disk.
  */
 
+/**
+ * Container formats to treat as playable.
+ *
+ * Deliberately broad: playback is handled by mpv, which decodes essentially
+ * anything, so the scanner should not be the component that decides a file is
+ * unsupported. Anything mpv can open belongs in the library.
+ */
 export const VIDEO_EXTENSIONS = new Set([
-  '.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.ts', '.m2ts', '.mpg', '.mpeg', '.flv', '.webm',
+  // Mainstream
+  '.mkv', '.mp4', '.avi', '.m4v', '.mov', '.wmv', '.webm', '.flv', '.ogv',
+  // MPEG family and broadcast transport streams
+  '.mpg', '.mpeg', '.mpe', '.m1v', '.m2v', '.mpv', '.ts', '.m2ts', '.mts',
+  '.tp', '.trp', '.m2p', '.vob',
+  // Matroska / QuickTime variants
+  '.mk3d', '.qt',
+  // Windows and legacy formats
+  '.asf', '.asx', '.wm', '.wmp', '.wtv', '.dvr-ms', '.divx', '.f4v', '.amv',
+  // RealMedia
+  '.rm', '.rmvb', '.rv',
+  // Mobile and misc
+  '.3gp', '.3g2', '.mxf', '.nsv', '.roq', '.yuv', '.ogm', '.ogx', '.bik', '.smk',
+  // Disc images mpv can open directly
+  '.iso',
+]);
+
+/**
+ * Extensions that are audio-only. Kept separate so a music file sitting beside
+ * a movie is not mistaken for the feature.
+ */
+export const AUDIO_EXTENSIONS = new Set([
+  '.mp3', '.flac', '.aac', '.m4a', '.ogg', '.opus', '.wav', '.wma', '.ac3', '.dts', '.eac3',
 ]);
 
 export const SUBTITLE_EXTENSIONS = new Set([
-  '.srt', '.ass', '.ssa', '.sub', '.idx', '.vtt',
+  '.srt', '.ass', '.ssa', '.sub', '.idx', '.vtt', '.sup', '.pgs', '.smi', '.sami',
+  '.mpl2', '.dfxp', '.ttml', '.lrc',
 ]);
 
 /**

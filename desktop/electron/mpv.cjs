@@ -52,10 +52,21 @@ const OBSERVED = {
 };
 
 class MpvPlayer extends EventEmitter {
-  constructor({ mpvPath, windowHandle }) {
+  /**
+   * @param {object} options
+   * @param {string} options.mpvPath
+   * @param {string|null} [options.windowHandle] Parent HWND for embedded mode.
+   * @param {boolean} [options.embed] Render inside our own window instead of
+   *   letting mpv own a top-level one. Off by default: embedding via --wid
+   *   displays video correctly but mouse and keyboard events never reach mpv's
+   *   child window, so its on-screen controls never appear and seeking is
+   *   impossible. Verified by screenshot comparison of both modes.
+   */
+  constructor({ mpvPath, windowHandle = null, embed = false }) {
     super();
     this.mpvPath = mpvPath;
     this.windowHandle = windowHandle;
+    this.embed = embed;
     this.process = null;
     this.socket = null;
     this.requestId = 0;
@@ -107,7 +118,14 @@ class MpvPlayer extends EventEmitter {
       '--volume=100',
     ];
 
-    if (this.windowHandle) args.push('--wid=' + this.windowHandle);
+    if (this.embed && this.windowHandle) {
+      args.push('--wid=' + this.windowHandle);
+    } else {
+      // mpv owns a borderless fullscreen window, so it receives input directly
+      // and can draw its own controls.
+      args.push('--fullscreen=yes', '--ontop=yes', '--border=no');
+    }
+
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
     if (title) args.push('--force-media-title=' + title);
     for (const subtitle of subtitleFiles) args.push('--sub-file=' + subtitle);

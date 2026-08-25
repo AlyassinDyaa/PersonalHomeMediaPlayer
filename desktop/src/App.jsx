@@ -4,6 +4,7 @@ import Hero from './components/Hero.jsx';
 import Row from './components/Row.jsx';
 import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
+import Settings from './components/Settings.jsx';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
@@ -14,10 +15,15 @@ const VIEWS = [
   { id: 'home', label: 'Home' },
   { id: 'shows', label: 'TV Shows' },
   { id: 'movies', label: 'Movies' },
+  { id: 'library', label: 'Library' },
 ];
 
 export function App({ info }) {
-  const [view, setView] = useState('home');
+  // Initial view can be deep-linked via the URL hash (#library).
+  const [view, setView] = useState(() => {
+    const fromHash = (window.location.hash || '').replace('#', '');
+    return VIEWS.some((entry) => entry.id === fromHash) ? fromHash : 'home';
+  });
   const [detailId, setDetailId] = useState(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
@@ -131,7 +137,13 @@ export function App({ info }) {
     window.scrollTo(0, 0);
   }, []);
 
-  const goto = (next) => { setView(next); setDetailId(null); setQuery(''); window.scrollTo(0, 0); };
+  const goto = (next) => {
+    setView(next);
+    setDetailId(null);
+    setQuery('');
+    window.location.hash = next;
+    window.scrollTo(0, 0);
+  };
 
   if (detailId) {
     return (
@@ -170,7 +182,17 @@ export function App({ info }) {
         </>
       )}
 
-      {!loading && !query.trim() && view === 'home' && (
+      {!loading && !query.trim() && view === 'home' && items.length === 0 && (
+        <>
+          <div className="page-header">
+            <h1 className="page-title">Welcome</h1>
+            <span className="page-sub">Add the folder holding your movies and shows to get started</span>
+          </div>
+          <Settings onScanned={reload} />
+        </>
+      )}
+
+      {!loading && !query.trim() && view === 'home' && items.length > 0 && (
         <>
           <Hero item={featured} onPlay={playItem} onDetails={openDetail} />
           <div className="rows">
@@ -207,6 +229,10 @@ export function App({ info }) {
             })}
           </div>
         </>
+      )}
+
+      {!loading && !query.trim() && view === 'library' && (
+        <Settings onScanned={reload} />
       )}
 
       {!loading && !query.trim() && (view === 'movies' || view === 'shows') && (

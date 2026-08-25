@@ -26,9 +26,16 @@ tools/      Development scripts for profiling a library and testing the parser.
 The server is a separate process from the UI on purpose: it keeps the door open
 for phone/TV clients later without restructuring anything.
 
-Playback is handled by embedded **mpv** rather than an HTML `<video>` element.
-A browser engine cannot open Matroska at all, and cannot decode DTS or TrueHD —
-which rules it out for a library that is ~92% MKV.
+Playback is handled by **mpv** rather than an HTML `<video>` element. A browser
+engine cannot open Matroska at all, and cannot decode DTS or TrueHD, which rules
+it out for a library that is ~92% MKV.
+
+mpv runs in its own borderless fullscreen window rather than embedded into an
+Electron window via `--wid`. Embedding does display video correctly, but mouse
+and keyboard events never reach mpv child window, so its on-screen controls
+never appear and seeking is impossible. Both modes were compared by screenshot
+before choosing. Embedding remains available behind `embedPlayer` in config for
+future work on a custom overlay.
 
 ## Scanner
 
