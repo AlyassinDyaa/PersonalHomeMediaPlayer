@@ -36,8 +36,17 @@ function readJson(file) {
   }
 }
 
+/**
+ * Where user-editable settings live.
+ *
+ * In development that is the project directory. In a packaged build the app
+ * directory is read-only (and inside an archive), so the host passes a writable
+ * location instead.
+ */
+export const CONFIG_DIR = process.env.MEDIA_CONFIG_DIR || PROJECT_ROOT;
+
 const defaults = readJson(path.join(PROJECT_ROOT, 'config.json'));
-const local = readJson(path.join(PROJECT_ROOT, 'config.local.json'));
+const local = readJson(path.join(CONFIG_DIR, 'config.local.json'));
 
 const dataDir = process.env.MEDIA_DATA_DIR
   ?? local.dataDir
@@ -74,7 +83,7 @@ export function hasTmdb() {
   return Boolean(config.tmdbApiKey);
 }
 
-const LOCAL_CONFIG_PATH = path.join(PROJECT_ROOT, 'config.local.json');
+const LOCAL_CONFIG_PATH = path.join(CONFIG_DIR, 'config.local.json');
 
 /**
  * Persist user-editable settings to config.local.json and apply them to the
@@ -100,6 +109,7 @@ export function saveSettings(patch) {
 
   const current = readJson(LOCAL_CONFIG_PATH);
   const next = { ...current, ...allowed };
+  fs.mkdirSync(path.dirname(LOCAL_CONFIG_PATH), { recursive: true });
   fs.writeFileSync(LOCAL_CONFIG_PATH, JSON.stringify(next, null, 2) + '\n', 'utf8');
 
   Object.assign(config, allowed);

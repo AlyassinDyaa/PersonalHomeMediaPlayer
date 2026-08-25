@@ -36,6 +36,10 @@ let queue = [];
 let queueIndex = 0;
 /** True while moving between queue entries, so the stop is not treated as an exit. */
 let advancing = false;
+/** Monitor chosen via the player control, overriding the default. */
+let displayOverride = null;
+/** Interval handle for the cursor poll that wakes the controls. */
+let cursorWatch = null;
 let lastProgressWrite = 0;
 
 /** Read committed defaults plus any local overrides, without importing ESM. */
@@ -51,6 +55,15 @@ function readConfig() {
   return merged;
 }
 
+/**
+ * Application files are packed into an asar archive in a packaged build. The
+ * server is unpacked so it can be launched as a real file, and anything
+ * writable has to live outside the archive entirely.
+ */
+function unpackedPath(target) {
+  return target.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');
+}
+
 async function startApiServer() {
   const config = readConfig();
   serverPort = Number(process.env.PORT || config.port || 8787);
@@ -59,10 +72,18 @@ async function startApiServer() {
   // Automated runs mute playback so testing does not disturb the machine.
   startMuted = Boolean(config.startMuted) || process.env.MEDIA_MUTE === '1';
 
+  // In development everything lives beside the source; once packaged, the
+  // database, artwork cache and settings belong in the per-user data folder.
+  const writableDir = app.isPackaged ? app.getPath('userData') : PROJECT_ROOT;
+
   const started = await startServerProcess({
-    entry: path.join(PROJECT_ROOT, 'server', 'src', 'index.js'),
+    entry: unpackedPath(path.join(PROJECT_ROOT, 'server', 'src', 'index.js')),
     port: serverPort,
-    cwd: PROJECT_ROOT,
+    cwd: unpackedPath(PROJECT_ROOT),
+    env: {
+      MEDIA_CONFIG_DIR: writableDir,
+      MEDIA_DATA_DIR: path.join(writableDir, 'data'),
+    },
     onLog: (line) => { if (line) console.log('[server]', line); },
   });
 
@@ -206,10 +227,44 @@ function sendOverlayState(patch) {
  * receive the pointer.
  */
 function playbackDisplay() {
+  // An explicit choice from the "move to next screen" control wins until
+  // playback ends, so the video does not jump back on the next episode.
+  if (displayOverride) {
+    const still = screen.getAllDisplays().find((d) => d.id === displayOverride.id);
+    if (still) return still;
+    displayOverride = null;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     return screen.getDisplayMatching(mainWindow.getBounds());
   }
   return screen.getPrimaryDisplay();
+}
+
+/**
+ * Move playback to the next monitor.
+ *
+ * mpv cannot reliably be dragged between monitors while borderless and
+ * fullscreen, so playback is restarted on the target display from the current
+ * position instead. That costs a brief black frame and is completely reliable.
+ */
+async function moveToNextScreen() {
+  const displays = screen.getAllDisplays();
+  if (displays.length < 2) return { ok: false, error: 'Only one display is connected' };
+  if (!player || !player.isRunning) return { ok: false, error: 'Nothing is playing' };
+
+  const current = playbackDisplay();
+  const index = displays.findIndex((entry) => entry.id === current.id);
+  displayOverride = displays[(index + 1) % displays.length];
+
+  const position = player.state.position ?? 0;
+
+  // The restart stops mpv; that stop must not be mistaken for the user exiting.
+  advancing = true;
+  try {
+    return await startQueueEntry(queueIndex, position);
+  } finally {
+    advancing = false;
+  }
 }
 
 function showOverlay(targetDisplay) {
@@ -229,10 +284,41 @@ function showOverlay(targetDisplay) {
   overlayWindow.focus();
   overlayWindow.setAlwaysOnTop(true, 'screen-saver');
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  startCursorWatch();
 }
 
 function hideOverlay() {
+  stopCursorWatch();
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+}
+
+/**
+ * Poll the cursor and wake the controls when it moves.
+ *
+ * The overlay is click-through while its controls are hidden. Electron can
+ * forward mouse-move messages to a click-through window, but that proved
+ * unreliable here — the controls stayed hidden no matter how much the pointer
+ * moved. Reading the cursor position directly always works, and at 12Hz costs
+ * nothing measurable.
+ */
+function startCursorWatch() {
+  stopCursorWatch();
+  let last = screen.getCursorScreenPoint();
+
+  cursorWatch = setInterval(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return;
+    const point = screen.getCursorScreenPoint();
+    if (point.x === last.x && point.y === last.y) return;
+    last = point;
+    overlayWindow.webContents.send('overlay:wake');
+  }, 80);
+}
+
+function stopCursorWatch() {
+  if (cursorWatch) {
+    clearInterval(cursorWatch);
+    cursorWatch = null;
+  }
 }
 
 /** Map mpv's track list into the shape the overlay renders. */
@@ -411,6 +497,7 @@ async function startQueueEntry(index, startPosition) {
         audioTracks: [],
         subtitleId: null,
         audioId: null,
+        displayCount: screen.getAllDisplays().length,
         hasNext: queueIndex < queue.length - 1,
         hasPrev: queueIndex > 0,
         nextTitle: queue[queueIndex + 1]?.title ?? null,
@@ -477,6 +564,7 @@ function ensurePlayer(windowHandle) {
     // A stop that is part of moving to the next episode must not tear the
     // playback UI down.
     if (advancing) return;
+    displayOverride = null;
     hideOverlay();
     closePlayerWindow();
   });
@@ -506,6 +594,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('player:next', async () => startQueueEntry(queueIndex + 1, 0));
+  ipcMain.handle('player:moveScreen', async () => moveToNextScreen());
   ipcMain.handle('player:previous', async () => startQueueEntry(queueIndex - 1, 0));
 
   ipcMain.on('overlay:ready', (event) => {
@@ -543,11 +632,37 @@ function registerIpc() {
   }));
 }
 
+/**
+ * Record a fatal startup problem where it can be found afterwards.
+ *
+ * A packaged Windows app has no console, so an error dialog is the only thing
+ * the user sees and nothing survives to diagnose from. This writes the detail
+ * next to the app's data and tells the user where to look.
+ */
+function logStartupError(error) {
+  const detail = String((error && error.stack) || error);
+  let logPath = null;
+  try {
+    const dir = app.getPath('userData');
+    fs.mkdirSync(dir, { recursive: true });
+    logPath = path.join(dir, 'startup-error.log');
+    fs.writeFileSync(logPath, new Date().toISOString() + '\n' + detail + '\n', 'utf8');
+  } catch {
+    // Nowhere to write; the dialog below is all we have.
+  }
+  console.error(detail);
+  return { detail, logPath };
+}
+
 app.whenReady().then(async () => {
   try {
     await startApiServer();
   } catch (error) {
-    dialog.showErrorBox('Failed to start the media server', String(error && error.stack || error));
+    const { detail, logPath } = logStartupError(error);
+    dialog.showErrorBox(
+      'Failed to start the media server',
+      detail + (logPath ? '\n\nDetails written to:\n' + logPath : ''),
+    );
     app.quit();
     return;
   }

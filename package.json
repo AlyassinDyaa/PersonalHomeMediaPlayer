@@ -10,7 +10,11 @@
   "scripts": {
     "scan": "npm run scan -w server",
     "server": "npm run dev -w server",
-    "dev": "npm run dev -w desktop"
+    "dev": "npm run dev -w desktop",
+    "build": "npm run build -w @mediaplayer/desktop",
+    "dist": "npm run build && electron-builder",
+    "dist:dir": "npm run build && electron-builder --dir",
+    "package": "npm run build && node tools/package-app.mjs"
   },
   "engines": {
     "node": ">=22.5.0"
@@ -18,5 +22,58 @@
   "allowScripts": {
     "electron@33.4.11": true,
     "esbuild@0.25.12": true
+  },
+  "main": "desktop/electron/main.cjs",
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.alyassindyaa.personalhomemediaplayer",
+    "productName": "Personal Home Media Player",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/electron/**/*",
+      "desktop/dist/**/*",
+      "server/src/**/*",
+      "server/package.json",
+      "config.json",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "server/**/*",
+      "node_modules/express/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Media Library"
+    },
+    "portable": {
+      "artifactName": "PersonalHomeMediaPlayer-portable-${version}.exe"
+    }
   }
 }

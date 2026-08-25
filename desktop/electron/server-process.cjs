@@ -59,16 +59,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Start the server and resolve once it answers on /api/health.
  * @param {{entry: string, port: number, cwd: string, onLog?: (line: string) => void}} options
  */
-async function startServerProcess({ entry, port, cwd, onLog = () => {} }) {
+async function startServerProcess({ entry, port, cwd, env: extraEnv = {}, onLog = () => {} }) {
   const node = resolveNodePath();
   if (!node) {
     throw new Error(
       'Node ' + MINIMUM_NODE_MAJOR + ' or newer is required to run the media server, '
-      + 'but none was found. Install Node, or set MEDIAPLAYER_NODE to its full path.',
+      + 'but none was found. Install Node from nodejs.org, or set MEDIAPLAYER_NODE '
+      + 'to the full path of a node executable.',
     );
   }
 
-  const env = { ...process.env, PORT: String(port) };
+  const env = { ...process.env, ...extraEnv, PORT: String(port) };
   // Electron sets this for its own helper processes. It must not reach a real
   // Node child, where it changes how the runtime starts up.
   delete env.ELECTRON_RUN_AS_NODE;

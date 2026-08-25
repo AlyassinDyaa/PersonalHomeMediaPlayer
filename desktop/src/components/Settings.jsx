@@ -11,6 +11,8 @@ export function Settings({ onScanned }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
   const [picking, setPicking] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [keySaved, setKeySaved] = useState(false);
   const [error, setError] = useState(null);
 
   const [scan, setScan] = useState(null); // { percent, message, phase }
@@ -184,6 +186,37 @@ export function Settings({ onScanned }) {
               {settings.tmdbConfigured ? 'TMDB connected' : 'no API key configured'}
             </span>
           </div>
+
+          <div className="key-row">
+            <input
+              type="password"
+              className="key-input"
+              value={apiKey}
+              placeholder={settings.tmdbConfigured ? 'Replace TMDB API key' : 'Paste your TMDB API key'}
+              onChange={(event) => { setApiKey(event.target.value); setKeySaved(false); }}
+              spellCheck={false}
+            />
+            <button
+              className="btn btn-secondary"
+              disabled={!apiKey.trim()}
+              onClick={async () => {
+                try {
+                  setSettings(await api.saveSettings({ tmdbApiKey: apiKey.trim() }));
+                  setApiKey('');
+                  setKeySaved(true);
+                } catch (err) {
+                  setError(err.message);
+                }
+              }}
+            >
+              Save key
+            </button>
+          </div>
+          <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+            {keySaved
+              ? 'Saved. Run a scan to fetch artwork and descriptions.'
+              : 'A free key from themoviedb.org supplies posters, descriptions and episode titles.'}
+          </p>
           <div className="status-row">
             <span>Player</span>
             <span className={settings.mpvPath ? 'ok-text' : 'warn-text'}>

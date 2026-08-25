@@ -33,7 +33,6 @@ export function App({ info }) {
   });
   const [detailId, setDetailId] = useState(null);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState([]);
 
   const [items, setItems] = useState([]);
   const [resume, setResume] = useState([]);
@@ -74,15 +73,19 @@ export function App({ info }) {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Debounced search.
-  useEffect(() => {
-    const trimmed = query.trim();
-    if (!trimmed) { setResults([]); return undefined; }
-    const timer = setTimeout(() => {
-      api.search(trimmed).then(setResults).catch(() => setResults([]));
-    }, 180);
-    return () => clearTimeout(timer);
-  }, [query]);
+
+
+  const searchable = view === 'movies' ? 'movie' : view === 'shows' ? 'show' : null;
+
+  /** Titles matching the header search, scoped to the tab that is open. */
+  const results = useMemo(() => {
+    const trimmed = query.trim().toLowerCase();
+    if (!trimmed) return [];
+    return items
+      .filter((item) => !searchable || item.kind === searchable)
+      .filter((item) => item.title.toLowerCase().includes(trimmed))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [items, query, searchable, view]);
 
   const movies = useMemo(() => items.filter((item) => item.kind === 'movie'), [items]);
   const shows = useMemo(() => items.filter((item) => item.kind === 'show'), [items]);
@@ -188,7 +191,7 @@ export function App({ info }) {
 
       {loading && <div className="center-note"><div className="spinner" /><p>Loading your library…</p></div>}
 
-      {!loading && query.trim() && (
+      {!loading && view === 'home' && query.trim() && (
         <>
           <div className="page-header">
             <h1 className="page-title">Results</h1>
@@ -250,15 +253,16 @@ export function App({ info }) {
         </>
       )}
 
-      {!loading && !query.trim() && view === 'library' && (
+      {!loading && view === 'library' && (
         <Settings onScanned={reload} />
       )}
 
-      {!loading && !query.trim() && (view === 'movies' || view === 'shows') && (
+      {!loading && (view === 'movies' || view === 'shows') && (
         <Browse
           title={view === 'movies' ? 'Movies' : 'TV Shows'}
           items={view === 'movies' ? movies : shows}
           onSelect={openDetail}
+          query={query}
           renderLabel={(item) => (
             <>
               <strong>{item.title}</strong>
@@ -270,6 +274,13 @@ export function App({ info }) {
     </>
   );
 }
+
+const SEARCH_PLACEHOLDER = {
+  home: 'Search your library',
+  movies: 'Search movies',
+  shows: 'Search TV shows',
+  library: 'Search your library',
+};
 
 function Nav({ view, goto, query, setQuery, scrolled }) {
   return (
@@ -287,15 +298,20 @@ function Nav({ view, goto, query, setQuery, scrolled }) {
         ))}
       </div>
       <div className="nav-spacer" />
+      {view !== 'library' && (
       <div className="search-box">
         <span style={{ opacity: 0.5 }}>⌕</span>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search titles"
+          placeholder={SEARCH_PLACEHOLDER[view] ?? 'Search titles'}
           spellCheck={false}
         />
+        {query && (
+          <button className="clear-btn" onClick={() => setQuery('')} aria-label="Clear search">×</button>
+        )}
       </div>
+      )}
     </nav>
   );
 }

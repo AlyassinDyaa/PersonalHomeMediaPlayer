@@ -15,12 +15,20 @@ contextBridge.exposeInMainWorld('player', {
   stop: () => ipcRenderer.invoke('player:stop'),
   next: () => ipcRenderer.invoke('player:next'),
   previous: () => ipcRenderer.invoke('player:previous'),
+  moveScreen: () => ipcRenderer.invoke('player:moveScreen'),
 
   /**
    * Toggle whether the overlay window accepts mouse input. False makes it
    * click-through so the video window behaves normally underneath.
    */
   setInteractive: (interactive) => ipcRenderer.send('overlay:interactive', Boolean(interactive)),
+
+  /** Fired when the cursor moves, so the controls can reappear. */
+  onWake: (handler) => {
+    const listener = () => handler();
+    ipcRenderer.on('overlay:wake', listener);
+    return () => ipcRenderer.removeListener('overlay:wake', listener);
+  },
 
   /** @returns {() => void} unsubscribe */
   onState: (handler) => {

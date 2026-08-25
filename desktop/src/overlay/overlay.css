@@ -2,6 +2,8 @@
 
 :root {
   --accent: #e50914;
+  --control: #ffffff;
+  --control-dim: rgba(255, 255, 255, 0.72);
 }
 
 html, body, #overlay-root {
@@ -39,16 +41,20 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   right: 0;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 26px 44px 60px;
-  background: linear-gradient(180deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+  gap: 16px;
+  padding: 22px 34px 64px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0) 100%);
 }
 
 .overlay-title {
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -0.2px;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 62vw;
 }
 
 /* --------------------------------------------------------------- bottom --- */
@@ -58,12 +64,12 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 90px 44px 30px;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.6) 48%, rgba(0, 0, 0, 0) 100%);
+  padding: 96px 34px 26px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.62) 46%, rgba(0, 0, 0, 0) 100%);
 }
 
-/* Generous hit area so the thin bar is still easy to grab. */
-.seek { padding: 10px 0; cursor: pointer; }
+/* A tall hit area around a thin bar, so it is easy to grab. */
+.seek { padding: 12px 0; cursor: pointer; }
 
 .seek-track {
   position: relative;
@@ -87,9 +93,9 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
 .seek-knob {
   position: absolute;
   top: 50%;
-  width: 15px;
-  height: 15px;
-  margin: -7.5px 0 0 -7.5px;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
   border-radius: 50%;
   background: var(--accent);
   opacity: 0;
@@ -98,58 +104,100 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
 
 .seek:hover .seek-knob { opacity: 1; }
 
-.overlay-times {
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
-  color: #cfcfd6;
-  margin-top: 4px;
-  font-variant-numeric: tabular-nums;
-}
-
 .overlay-controls {
   display: flex;
   align-items: center;
-  gap: 18px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .overlay-spacer { flex: 1; }
+
+.overlay-clock {
+  font-size: 14px;
+  color: var(--control-dim);
+  font-variant-numeric: tabular-nums;
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.clock-sep { opacity: 0.45; margin: 0 6px; }
+
+/* -------------------------------------------------------------- buttons --- */
 
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 42px;
-  height: 42px;
-  padding: 0 10px;
-  border-radius: 6px;
-  font-size: 18px;
-  color: #fff;
-  transition: background 0.15s ease, transform 0.1s ease;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--control);
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
 }
 
-.icon-btn:hover { background: rgba(255, 255, 255, 0.16); }
-.icon-btn:active { transform: scale(0.94); }
-.icon-btn.active { background: rgba(255, 255, 255, 0.24); }
-.icon-btn.big { font-size: 22px; min-width: 50px; height: 50px; }
+.icon-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.icon-btn:active { transform: scale(0.92); }
+.icon-btn.active { background: rgba(255, 255, 255, 0.26); }
 
-.volume { display: flex; align-items: center; gap: 8px; }
+/* The primary transport button anchors the row. */
+.icon-btn.primary { width: 52px; height: 52px; }
+.icon-btn.close:hover { background: rgba(229, 9, 20, 0.85); }
 
-.volume input[type="range"] {
-  width: 96px;
+.volume { display: flex; align-items: center; gap: 4px; }
+
+.volume-slider {
+  width: 0;
+  opacity: 0;
   accent-color: var(--accent);
   cursor: pointer;
+  transition: width 0.2s ease, opacity 0.2s ease;
 }
+
+/* The slider unfurls on approach rather than permanently taking up the row. */
+.volume:hover .volume-slider,
+.volume-slider:focus { width: 104px; opacity: 1; }
+
+/* ------------------------------------------------------------- prompts --- */
+
+.overlay-prompts {
+  position: absolute;
+  right: 40px;
+  bottom: 210px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.prompt-btn {
+  padding: 13px 26px;
+  border-radius: 5px;
+  font-size: 16px;
+  font-weight: 600;
+  background: rgba(28, 28, 34, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  color: #fff;
+  transition: background 0.15s ease, transform 0.1s ease, color 0.15s ease;
+  max-width: 520px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompt-btn:hover { background: rgba(255, 255, 255, 0.95); color: #111; border-color: #fff; }
+.prompt-btn:active { transform: scale(0.97); }
+.prompt-btn.primary { background: rgba(255, 255, 255, 0.94); color: #111; border-color: #fff; }
+.prompt-btn.primary:hover { background: #fff; }
 
 /* ---------------------------------------------------------- track menu --- */
 
 .track-menu {
   position: absolute;
-  right: 44px;
-  bottom: 96px;
-  min-width: 230px;
-  max-height: 320px;
+  right: 34px;
+  bottom: 104px;
+  min-width: 240px;
+  max-height: 340px;
   overflow-y: auto;
   padding: 10px;
   border-radius: 8px;
@@ -183,40 +231,6 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
   color: #fff;
   font-weight: 600;
 }
-
-/* ------------------------------------------------------------- prompts --- */
-
-.overlay-prompts {
-  position: absolute;
-  right: 48px;
-  bottom: 240px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.prompt-btn {
-  padding: 13px 26px;
-  border-radius: 5px;
-  font-size: 16px;
-  font-weight: 600;
-  background: rgba(28, 28, 34, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  color: #fff;
-  backdrop-filter: blur(3px);
-  transition: background 0.15s ease, transform 0.1s ease;
-  max-width: 520px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.prompt-btn:hover { background: rgba(255, 255, 255, 0.95); color: #111; border-color: #fff; }
-.prompt-btn:active { transform: scale(0.97); }
-
-.prompt-btn.primary { background: rgba(255, 255, 255, 0.94); color: #111; border-color: #fff; }
-.prompt-btn.primary:hover { background: #fff; }
 
 .track-empty {
   padding: 8px 12px 10px;

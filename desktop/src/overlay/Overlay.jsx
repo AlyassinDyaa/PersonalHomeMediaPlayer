@@ -1,4 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  PlayIcon, PauseIcon, NextIcon, PrevIcon, Back10Icon, Forward10Icon,
+  VolumeIcon, MuteIcon, SubtitlesIcon, AudioIcon, CloseIcon, BackIcon, ScreenIcon,
+} from './Icons.jsx';
 
 const HIDE_AFTER_MS = 3600;
 
@@ -76,12 +80,20 @@ export function Overlay() {
     setInteractive(visible || Boolean(menu));
   }, [visible, menu, setInteractive]);
 
-  // Any pointer movement brings the controls back.
+  // Any pointer movement brings the controls back. Movement is reported by the
+  // main process, because a click-through window does not reliably see it.
   useEffect(() => {
     const onMove = () => wake();
     window.addEventListener('mousemove', onMove);
-    return () => window.removeEventListener('mousemove', onMove);
-  }, [wake]);
+    const unsubscribe = player?.onWake?.(onMove);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      unsubscribe?.();
+    };
+  }, [wake, player]);
+
+  // A new file starting counts as activity, so the controls introduce it.
+  useEffect(() => { if (state.title) wake(); }, [state.title, wake]);
 
   // Keyboard works whether focus sits with mpv or with this window.
   useEffect(() => {
@@ -137,8 +149,23 @@ export function Overlay() {
       }}
     >
       <div className="overlay-top">
-        <button className="icon-btn" title="Back to library" onClick={() => player?.stop()}>←</button>
+        <button className="icon-btn" title="Back to library (Esc)" onClick={() => player?.stop()}>
+          <BackIcon />
+        </button>
         <span className="overlay-title">{state.title}</span>
+        <span className="overlay-spacer" />
+        {state.displayCount > 1 && (
+          <button
+            className="icon-btn"
+            title="Move to the next screen"
+            onClick={() => player?.moveScreen()}
+          >
+            <ScreenIcon />
+          </button>
+        )}
+        <button className="icon-btn close" title="Close player (Esc)" onClick={() => player?.stop()}>
+          <CloseIcon />
+        </button>
       </div>
 
       {/* Floating prompts, positioned clear of the bar like a streaming app. */}
@@ -178,50 +205,58 @@ export function Overlay() {
           </div>
         </div>
 
-        <div className="overlay-times">
-          <span>{formatTime(position)}</span>
-          <span>{duration ? '-' + formatTime(duration - position) : ''}</span>
-        </div>
-
         <div className="overlay-controls">
-          <button className="icon-btn big" title="Play/pause" onClick={() => command(['cycle', 'pause'])}>
-            {state.paused ? '▶' : '❚❚'}
+          <button className="icon-btn primary" title="Play/pause (space)" onClick={() => command(['cycle', 'pause'])}>
+            {state.paused ? <PlayIcon size={26} /> : <PauseIcon size={26} />}
           </button>
-          <button className="icon-btn" title="Back 10 seconds" onClick={() => command(['seek', -10, 'relative'])}>
-            ↺10
+
+          <button className="icon-btn" title="Back 10 seconds (j)" onClick={() => command(['seek', -10, 'relative'])}>
+            <Back10Icon />
           </button>
-          <button className="icon-btn" title="Forward 10 seconds" onClick={() => command(['seek', 10, 'relative'])}>
-            10↻
+          <button className="icon-btn" title="Forward 10 seconds (l)" onClick={() => command(['seek', 10, 'relative'])}>
+            <Forward10Icon />
           </button>
 
           {state.hasPrev && (
-            <button className="icon-btn" title="Previous episode" onClick={() => player?.previous()}>⏮</button>
+            <button className="icon-btn" title="Previous episode" onClick={() => player?.previous()}>
+              <PrevIcon />
+            </button>
           )}
           {state.hasNext && (
-            <button className="icon-btn" title="Next episode" onClick={() => player?.next()}>⏭</button>
+            <button className="icon-btn" title="Next episode" onClick={() => player?.next()}>
+              <NextIcon />
+            </button>
           )}
 
           <div className="volume">
-            <button className="icon-btn" title="Mute" onClick={() => command(['cycle', 'mute'])}>
-              {state.muted ? '🔇' : '🔊'}
+            <button className="icon-btn" title="Mute (m)" onClick={() => command(['cycle', 'mute'])}>
+              {state.muted ? <MuteIcon /> : <VolumeIcon />}
             </button>
             <input
+              className="volume-slider"
               type="range"
               min="0"
               max="130"
-              value={state.volume}
-              onChange={(event) => command(['set_property', 'volume', Number(event.target.value)])}
+              value={state.muted ? 0 : state.volume}
+              onChange={(event) => {
+                if (state.muted) command(['set_property', 'mute', false]);
+                command(['set_property', 'volume', Number(event.target.value)]);
+              }}
             />
           </div>
 
           <span className="overlay-spacer" />
+
+          <span className="overlay-clock">
+            {formatTime(position)}<span className="clock-sep">/</span>{formatTime(duration)}
+          </span>
 
           <button
             className={menu === 'subs' ? 'icon-btn active' : 'icon-btn'}
             title="Subtitles"
             onClick={() => setMenu(menu === 'subs' ? null : 'subs')}
           >
-            CC
+            <SubtitlesIcon />
           </button>
           {state.audioTracks.length > 1 && (
             <button
@@ -229,7 +264,7 @@ export function Overlay() {
               title="Audio track"
               onClick={() => setMenu(menu === 'audio' ? null : 'audio')}
             >
-              🎧
+              <AudioIcon />
             </button>
           )}
         </div>

@@ -5,13 +5,11 @@ import Row from './Row.jsx';
 /**
  * Browse screen for Movies or TV Shows.
  *
- * Defaults to grouping by genre, which is how a large library actually gets
- * navigated. A local filter box and genre chips narrow it down, and either
- * switches the layout to a flat grid, because once a set is small a grid shows
- * more of it at once than a row does.
+ * Searching is handled by the single search box in the header, which scopes
+ * itself to whichever tab is open, so this screen deliberately has no search
+ * field of its own.
  */
-export function Browse({ title, items, onSelect, renderLabel }) {
-  const [query, setQuery] = useState('');
+export function Browse({ title, items, onSelect, renderLabel, query = '' }) {
   const [genre, setGenre] = useState(null);
   const [flat, setFlat] = useState(false);
 
@@ -24,7 +22,27 @@ export function Browse({ title, items, onSelect, renderLabel }) {
     return result;
   }, [items, genre, trimmed]);
 
-  /** Genres present in this collection, most populous first. */
+  /**
+   * Genre rows use only each title's *primary* genre.
+   *
+   * Listing a title under every genre it carries makes a modest library look
+   * duplicated — the same eight posters repeat down the page, because most
+   * things are tagged Animation and Sci-Fi and Action all at once. The chips
+   * below still filter across every genre a title has.
+   */
+  const rows = useMemo(() => {
+    const buckets = new Map();
+    for (const item of filtered) {
+      const primary = item.genres?.[0] ?? 'Other';
+      if (!buckets.has(primary)) buckets.set(primary, []);
+      buckets.get(primary).push(item);
+    }
+    return [...buckets.entries()]
+      .map(([name, entries]) => ({ name, entries }))
+      .sort((a, b) => b.entries.length - a.entries.length || a.name.localeCompare(b.name));
+  }, [filtered]);
+
+  /** Every genre present, for the filter chips. */
   const genres = useMemo(() => {
     const counts = new Map();
     for (const item of items) {
@@ -37,12 +55,7 @@ export function Browse({ title, items, onSelect, renderLabel }) {
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [items]);
 
-  const ungrouped = useMemo(
-    () => filtered.filter((item) => !item.genres?.length),
-    [filtered],
-  );
-
-  // A flat grid is the right layout when the set is already narrow.
+  // A flat grid suits an already-narrow set better than a row does.
   const showGrid = flat || Boolean(trimmed) || Boolean(genre);
 
   return (
@@ -54,35 +67,11 @@ export function Browse({ title, items, onSelect, renderLabel }) {
             ? items.length + ' titles'
             : filtered.length + ' of ' + items.length + ' titles'}
         </span>
-      </div>
-
-      <div className="browse-controls">
-        <div className="search-box browse-search">
-          <span style={{ opacity: 0.5 }}>⌕</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={'Search ' + title.toLowerCase()}
-            spellCheck={false}
-          />
-          {query && (
-            <button className="clear-btn" onClick={() => setQuery('')} aria-label="Clear">×</button>
-          )}
-        </div>
-
-        <button
-          className={flat ? 'chip active' : 'chip'}
-          onClick={() => { setFlat(!flat); setGenre(null); }}
-        >
-          {flat ? 'Grouped by genre' : 'Show all A–Z'}
-        </button>
+        {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
       </div>
 
       <div className="genre-chips">
-        <button
-          className={genre === null ? 'chip active' : 'chip'}
-          onClick={() => setGenre(null)}
-        >
+        <button className={genre === null ? 'chip active' : 'chip'} onClick={() => setGenre(null)}>
           All
         </button>
         {genres.map((entry) => (
@@ -94,6 +83,13 @@ export function Browse({ title, items, onSelect, renderLabel }) {
             {entry.name} <span className="chip-count">{entry.count}</span>
           </button>
         ))}
+        <span style={{ flex: 1 }} />
+        <button
+          className={flat ? 'chip active' : 'chip'}
+          onClick={() => { setFlat(!flat); setGenre(null); }}
+        >
+          {flat ? 'Grouped by genre' : 'Show all A–Z'}
+        </button>
       </div>
 
       {filtered.length === 0 && (
@@ -107,40 +103,22 @@ export function Browse({ title, items, onSelect, renderLabel }) {
           {[...filtered]
             .sort((a, b) => a.title.localeCompare(b.title))
             .map((item) => (
-              <Card
-                key={item.id}
-                item={item}
-                onClick={() => onSelect(item)}
-                label={renderLabel(item)}
-              />
+              <Card key={item.id} item={item} onClick={() => onSelect(item)} label={renderLabel(item)} />
             ))}
         </div>
       )}
 
       {!showGrid && filtered.length > 0 && (
         <div className="rows">
-          {genres.map((entry) => {
-            const inGenre = filtered.filter((item) => item.genres?.includes(entry.name));
-            if (inGenre.length === 0) return null;
-            return (
-              <Row
-                key={entry.name}
-                title={entry.name}
-                items={inGenre}
-                onSelect={onSelect}
-                renderLabel={renderLabel}
-              />
-            );
-          })}
-
-          {ungrouped.length > 0 && (
+          {rows.map((row) => (
             <Row
-              title="Uncategorised"
-              items={ungrouped}
+              key={row.name}
+              title={row.name}
+              items={row.entries}
               onSelect={onSelect}
               renderLabel={renderLabel}
             />
-          )}
+          ))}
         </div>
       )}
     </>
