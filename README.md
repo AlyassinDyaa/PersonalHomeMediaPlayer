@@ -57,6 +57,27 @@ The interesting part. It handles, verified against a real 1,461-file library:
 Anything uncertain is scored and surfaced as a suggestion for confirmation in
 the UI, rather than being guessed at silently.
 
+## Building a portable copy
+
+```bash
+npm run package
+```
+
+Produces a self-contained folder under `release/` holding the app, a Node
+runtime and mpv. Copy it to a USB stick or external SSD and run
+`MediaLibrary.exe` from there: the database, artwork cache and settings are
+written to a `data` folder beside the executable, so the whole library travels
+with the drive. Deleting `portable.txt` switches to storing them under
+`%APPDATA%` instead.
+
+Bundling Node is not incidental — the media server runs under Node rather than
+inside Electron because it uses Node's built-in SQLite, and Electron still ships
+a Node release that predates it.
+
+An installer is configured (`npm run dist`) but needs Windows Developer Mode or
+administrator rights, because electron-builder extracts a code-signing bundle
+containing macOS symlinks that Windows will not create otherwise.
+
 ## Development
 
 ```bash
@@ -65,7 +86,14 @@ npm install
 npm run scan      # scan configured library roots into the database
 npm run server    # start the local API
 npm run dev       # launch the desktop app
+npm run package   # build the portable Windows app
 ```
+
+Machine-specific settings belong in `config.local.json` (gitignored); the TMDB
+API key goes in `.env` or the Library screen.
+
+A `#play/<itemId>` hash starts that title on launch, which makes a shortcut that
+resumes a specific show possible.
 
 Library roots are configuration, not hard-coded paths, so additional drives can
 be added and a disconnected drive degrades gracefully.

@@ -41,8 +41,8 @@ function versionOf(nodePath) {
  * Find a usable Node binary.
  * @returns {{path: string, major: number} | null}
  */
-function resolveNodePath() {
-  const candidates = [process.env.MEDIAPLAYER_NODE, 'node', ...NODE_CANDIDATES].filter(Boolean);
+function resolveNodePath(preferred) {
+  const candidates = [preferred, process.env.MEDIAPLAYER_NODE, 'node', ...NODE_CANDIDATES].filter(Boolean);
 
   for (const candidate of candidates) {
     // "node" relies on PATH; the others must exist on disk.
@@ -59,8 +59,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Start the server and resolve once it answers on /api/health.
  * @param {{entry: string, port: number, cwd: string, onLog?: (line: string) => void}} options
  */
-async function startServerProcess({ entry, port, cwd, env: extraEnv = {}, onLog = () => {} }) {
-  const node = resolveNodePath();
+async function startServerProcess({ entry, port, cwd, nodePath = null, env: extraEnv = {}, onLog = () => {} }) {
+  const node = resolveNodePath(nodePath);
   if (!node) {
     throw new Error(
       'Node ' + MINIMUM_NODE_MAJOR + ' or newer is required to run the media server, '

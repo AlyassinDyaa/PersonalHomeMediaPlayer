@@ -26,8 +26,10 @@ const MPV_CANDIDATES = [
   '/opt/homebrew/bin/mpv',
 ].filter(Boolean);
 
-function resolveMpvPath(configured) {
-  const candidates = [configured, process.env.MPV_PATH, ...MPV_CANDIDATES].filter(Boolean);
+function resolveMpvPath(configured, bundled) {
+  // A copy shipped with the app wins, so a portable build never depends on
+  // what happens to be installed on the machine it is plugged into.
+  const candidates = [bundled, configured, process.env.MPV_PATH, ...MPV_CANDIDATES].filter(Boolean);
   for (const candidate of candidates) {
     try {
       if (fs.existsSync(candidate)) return candidate;

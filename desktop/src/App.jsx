@@ -28,7 +28,7 @@ const VIEWS = [
 export function App({ info }) {
   // Initial view can be deep-linked via the URL hash (#library).
   const [view, setView] = useState(() => {
-    const fromHash = (window.location.hash || '').replace('#', '');
+    const fromHash = (window.location.hash || '').replace('#', '').split('/')[0];
     return VIEWS.some((entry) => entry.id === fromHash) ? fromHash : 'home';
   });
   const [detailId, setDetailId] = useState(null);
@@ -60,6 +60,7 @@ export function App({ info }) {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
 
   // Refresh progress-driven rows when the player closes.
   useEffect(() => {
@@ -154,6 +155,24 @@ export function App({ info }) {
     if (video) play(video, full);
     else setDetailId(item.id);
   }, [play]);
+
+  /**
+   * A `#play/<itemId>` hash starts that title once the library has loaded.
+   *
+   * Makes a desktop shortcut that resumes a specific show possible, and lets
+   * playback be driven without clicking through the UI.
+   */
+  useEffect(() => {
+    if (loading || items.length === 0) return;
+    const hash = window.location.hash || '';
+    const marker = '#play/';
+    if (!hash.startsWith(marker)) return;
+
+    const wanted = hash.slice(marker.length);
+    window.location.hash = '';
+    const target = items.find((entry) => entry.id === wanted);
+    if (target) playItem(target);
+  }, [loading, items, playItem]);
 
   const openDetail = useCallback((entry) => {
     const item = entry.item ?? entry;

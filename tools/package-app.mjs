@@ -68,6 +68,19 @@ const [appPath] = await packager({
   },
 });
 
+// Mark the build as portable, so it keeps its data beside the executable
+// rather than under the user's AppData folder.
+await fsp.writeFile(
+  path.join(appPath, 'portable.txt'),
+  'Delete this file to store the library under %APPDATA% instead.\r\n',
+  'utf8',
+);
+
+// Carry a Node runtime and mpv so the folder runs on a machine with neither
+// installed — the point of putting it on a removable drive.
+const bundledNode = await copyBundledNode(appPath);
+const bundledMpv = await copyBundledMpv(appPath);
+
 // A README beside the app, since the server needs a Node runtime present.
 const notes = [
   'Personal Home Media Player ' + version,
@@ -101,4 +114,52 @@ async function folderSize(dir) {
     else total += (await fsp.stat(full)).size;
   }
   return total;
+}
+
+/**
+ * Copy the running Node executable into the package.
+ *
+ * The media server runs under Node rather than inside Electron, because it uses
+ * Node's built-in SQLite and Electron still bundles a Node release that
+ * predates it. Shipping the runtime keeps the folder self-contained.
+ */
+async function copyBundledNode(appDir) {
+  const source = process.execPath;
+  if (!source || !/node(\.exe)?$/i.test(source)) {
+    console.warn('  ! Could not identify a Node executable to bundle.');
+    return null;
+  }
+  const target = path.join(appDir, 'runtime');
+  await fsp.mkdir(target, { recursive: true });
+  await fsp.copyFile(source, path.join(target, 'node.exe'));
+  console.log('  + bundled Node runtime from ' + source);
+  return true;
+}
+
+/** Copy an installed mpv, with the files it needs, into the package. */
+async function copyBundledMpv(appDir) {
+  const candidates = [
+    'C:/Program Files/MPV Player',
+    'C:/Program Files/mpv',
+    process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs/mpv') : null,
+  ].filter(Boolean);
+
+  const source = candidates.find((dir) => fs.existsSync(path.join(dir, 'mpv.exe')));
+  if (!source) {
+    console.warn('  ! mpv was not found locally, so it is not bundled.');
+    return null;
+  }
+
+  const target = path.join(appDir, 'mpv');
+  await fsp.mkdir(target, { recursive: true });
+
+  // Only the player and the libraries beside it; skip installer leftovers and
+  // documentation, which are large and useless here.
+  for (const entry of await fsp.readdir(source, { withFileTypes: true })) {
+    if (entry.isDirectory()) continue;
+    if (/^unins|\.(txt|md|log|dat)$/i.test(entry.name)) continue;
+    await fsp.copyFile(path.join(source, entry.name), path.join(target, entry.name));
+  }
+  console.log('  + bundled mpv from ' + source);
+  return true;
 }

@@ -64,19 +64,74 @@ function unpackedPath(target) {
   return target.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');
 }
 
+/** The folder holding the executable, which is where a portable build lives. */
+function installDir() {
+  return app.isPackaged ? path.dirname(app.getPath('exe')) : PROJECT_ROOT;
+}
+
+/**
+ * Portable builds keep everything beside the executable, so the whole app —
+ * library database, artwork cache and settings — can live on a removable drive
+ * and follow it between machines. Marked by a `portable.txt` file next to the
+ * executable, which the packaging script writes.
+ */
+function isPortable() {
+  if (process.env.MEDIA_PORTABLE === '0') return false;
+  if (process.env.MEDIA_PORTABLE === '1') return true;
+  try {
+    return fs.existsSync(path.join(installDir(), 'portable.txt'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Where the database, artwork and settings go.
+ *
+ * A portable build writes beside itself; an installed one uses the per-user
+ * data folder, because its own directory is usually not writable. If a portable
+ * build turns out to sit somewhere read-only, fall back rather than fail.
+ */
+function resolveWritableDir() {
+  if (!app.isPackaged) return PROJECT_ROOT;
+
+  if (isPortable()) {
+    const dir = path.join(installDir(), 'data');
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      return dir;
+    } catch {
+      console.warn('Portable data folder is not writable; using the user data folder instead.');
+    }
+  }
+  return app.getPath('userData');
+}
+
+/** A binary shipped alongside a portable build, if present. */
+function bundledBinary(...segments) {
+  const candidate = path.join(installDir(), ...segments);
+  try {
+    return fs.existsSync(candidate) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
 async function startApiServer() {
   const config = readConfig();
   serverPort = Number(process.env.PORT || config.port || 8787);
-  mpvPath = resolveMpvPath(config.mpvPath);
+  // A portable build can carry its own mpv so nothing has to be installed.
+  mpvPath = resolveMpvPath(config.mpvPath ?? null, bundledBinary('mpv', 'mpv.exe'));
   embedPlayer = Boolean(config.embedPlayer);
   // Automated runs mute playback so testing does not disturb the machine.
   startMuted = Boolean(config.startMuted) || process.env.MEDIA_MUTE === '1';
 
-  // In development everything lives beside the source; once packaged, the
-  // database, artwork cache and settings belong in the per-user data folder.
-  const writableDir = app.isPackaged ? app.getPath('userData') : PROJECT_ROOT;
+  const writableDir = resolveWritableDir();
+  console.log('Data folder: ' + writableDir + (isPortable() ? ' (portable)' : ''));
 
   const started = await startServerProcess({
+    nodePath: bundledBinary('runtime', 'node.exe'),
     entry: unpackedPath(path.join(PROJECT_ROOT, 'server', 'src', 'index.js')),
     port: serverPort,
     cwd: unpackedPath(PROJECT_ROOT),
