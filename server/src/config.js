@@ -67,6 +67,9 @@ export const config = {
   tmdbApiKey: process.env.TMDB_API_KEY ?? local.tmdbApiKey ?? null,
   tmdbLanguage: process.env.TMDB_LANGUAGE ?? local.tmdbLanguage ?? 'en-US',
 
+  /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
+  libraryName: local.libraryName ?? defaults.libraryName ?? '',
+
   port: Number(process.env.PORT ?? local.port ?? defaults.port ?? 8787),
 
   /** Path to the mpv binary; resolved at playback time if left null. */
@@ -104,6 +107,7 @@ export function saveSettings(patch) {
         .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
     )];
   }
+  if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
   if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
   if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
 
@@ -119,6 +123,7 @@ export function saveSettings(patch) {
 /** The subset of configuration safe to expose to the UI. */
 export function settingsView() {
   return {
+    libraryName: config.libraryName,
     libraryRoots: config.libraryRoots,
     rootsStatus: config.libraryRoots.map((root) => ({
       path: root,

@@ -61,12 +61,21 @@ function readConfig() {
  * writable has to live outside the archive entirely.
  */
 function unpackedPath(target) {
-  return target.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');
+  // Matches both a path inside the archive and the archive root itself. The
+  // root form matters: it is used as a working directory, and pointing a child
+  // process at the archive file rather than the unpacked folder fails with a
+  // bare ENOENT that names the executable, not the directory.
+  return target.replace(/([\\/])app\.asar($|[\\/])/, '$1app.asar.unpacked$2');
 }
 
 /** The folder holding the executable, which is where a portable build lives. */
 function installDir() {
-  return app.isPackaged ? path.dirname(app.getPath('exe')) : PROJECT_ROOT;
+  if (app.isPackaged) return path.dirname(app.getPath('exe'));
+  // Running an asar directly: the app folder is two levels up, past resources/.
+  if (PROJECT_ROOT.includes('app.asar')) {
+    return path.resolve(PROJECT_ROOT, '..', '..');
+  }
+  return PROJECT_ROOT;
 }
 
 /**
@@ -93,18 +102,29 @@ function isPortable() {
  * build turns out to sit somewhere read-only, fall back rather than fail.
  */
 function resolveWritableDir() {
-  if (!app.isPackaged) return PROJECT_ROOT;
+  // An explicit location always wins. Lets the library live somewhere chosen
+  // deliberately, and lets a packaged build be exercised without installing it.
+  if (process.env.MEDIA_DATA_ROOT) return process.env.MEDIA_DATA_ROOT;
 
+  // The portable marker wins wherever it is found, so a build that declares
+  // itself portable behaves that way however it was launched. This is the base
+  // directory: the database and artwork go in `data` beneath it, and settings
+  // sit alongside, which puts config.local.json next to the executable where it
+  // can be found and edited.
   if (isPortable()) {
-    const dir = path.join(installDir(), 'data');
+    const base = installDir();
     try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.accessSync(dir, fs.constants.W_OK);
-      return dir;
+      fs.accessSync(base, fs.constants.W_OK);
+      return base;
     } catch {
-      console.warn('Portable data folder is not writable; using the user data folder instead.');
+      console.warn('Portable folder is not writable; using the user data folder instead.');
     }
   }
+
+  // In development the project directory is the natural home. Running an asar
+  // directly has no such folder — the app directory is an archive.
+  if (!app.isPackaged && !PROJECT_ROOT.includes('app.asar')) return PROJECT_ROOT;
+
   return app.getPath('userData');
 }
 
@@ -466,10 +486,16 @@ async function detectSkipPoints(duration) {
     }
   }
 
-  // Only offer a heuristic intro skip on something long enough to have one.
-  if (!intro && duration && duration > 8 * 60) {
-    intro = { from: 0, to: introLength, approximate: true };
+  // Without chapters all we have is a convention, so say so. The button shows
+  // where it will land, and the amount is configurable, because an intro that
+  // starts after a cold open cannot be guessed from the runtime alone.
+  if (!intro && duration && duration > 8 * 60 && introLength > 0) {
+    intro = { from: 5, to: introLength, approximate: true };
   }
+
+  // The end marker only decides when to offer the next episode. It never seeks:
+  // an approximate "skip outro" jumped past the last minute of the episode,
+  // which is real content, not credits.
   if (!outro && duration && duration > 8 * 60) {
     outro = { from: Math.max(0, duration - outroLength), approximate: true };
   }

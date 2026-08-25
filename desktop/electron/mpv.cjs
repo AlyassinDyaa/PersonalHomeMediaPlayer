@@ -134,21 +134,23 @@ class MpvPlayer extends EventEmitter {
     if (this.embed && this.windowHandle) {
       args.push('--wid=' + this.windowHandle);
     } else {
-      // mpv owns a borderless fullscreen window, so it receives input directly.
-      args.push('--fullscreen=yes', '--border=no');
+      args.push('--border=no', '--fullscreen=yes');
 
-      // Pin mpv to a specific monitor. Positioning the window inside the target
-      // display makes mpv fullscreen on that display, which avoids mapping
-      // Electron's display list onto mpv's own screen indices — and, critically,
-      // guarantees the control overlay ends up on the same screen as the video.
       if (display) {
-        args.push('--geometry=+' + Math.round(display.x + 20) + '+' + Math.round(display.y + 20));
+        // Put the window well inside the target monitor and let mpv fullscreen
+        // from there, which pins the video to that screen.
+        //
+        // Naming the screen instead would be more direct, but display labels
+        // are not unique — this desktop reports three monitors all called
+        // "LF27T35" — so a name cannot identify one. A point can. An explicit
+        // width and height cannot be used either: mpv clamps a non-fullscreen
+        // window to the work area and to the video's aspect ratio, which left
+        // the video inset from the edges of the screen.
+        args.push(
+          '--geometry=+' + Math.round(display.x + display.width / 4)
+          + '+' + Math.round(display.y + display.height / 4),
+        );
       }
-      // --ontop makes mpv re-assert itself as topmost, which pushes the custom
-      // control overlay behind the video. Fullscreen already covers the desktop,
-      // so it is only needed when mpv is drawing its own controls.
-      if (!this.useOverlay) args.push('--ontop=yes');
-
       if (this.useOverlay) {
         // A window that exactly covers the screen can be handed the display
         // scanout directly by the compositor ("independent flip"), which means

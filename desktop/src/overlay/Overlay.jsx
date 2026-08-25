@@ -6,6 +6,9 @@ import {
 
 const HIDE_AFTER_MS = 3600;
 
+/** Seconds shown before the next episode starts on its own. */
+const NEXT_EPISODE_SECONDS = 12;
+
 function formatTime(seconds) {
   if (seconds == null || Number.isNaN(seconds)) return '--:--';
   const total = Math.max(0, Math.floor(seconds));
@@ -33,9 +36,11 @@ export function Overlay() {
   const [scrubbing, setScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
   const [menu, setMenu] = useState(null);
+  const [countdown, setCountdown] = useState(null);
 
   const hideTimer = useRef(null);
   const interactiveRef = useRef(null);
+  const cancelledRef = useRef(null);
 
   const player = typeof window !== 'undefined' ? window.player : null;
 
@@ -139,6 +144,40 @@ export function Overlay() {
   const showSkipIntro = Boolean(intro) && position >= intro.from && position < intro.to;
   const showOutro = Boolean(outro) && duration > 0 && position >= outro.from;
 
+  /**
+   * Counts down to the next episode once the closing minutes are reached, and
+   * plays it when it hits zero. Cancelling leaves the card in place so the
+   * episode can still be started by hand.
+   */
+  useEffect(() => {
+    if (!showOutro || !state.hasNext) { setCountdown(null); return undefined; }
+    // Only arm once per episode; cancelling sets it to null and must stick.
+    if (cancelledRef.current === state.title) return undefined;
+
+    setCountdown((current) => (current === null ? NEXT_EPISODE_SECONDS : current));
+
+    const timer = setInterval(() => {
+      setCountdown((current) => {
+        if (current === null) return null;
+        if (current <= 1) {
+          clearInterval(timer);
+          player?.next();
+          return null;
+        }
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showOutro, state.hasNext, state.title, player]);
+
+  // Remember a cancellation against the current episode so re-entering the
+  // outro window does not immediately re-arm the countdown.
+  useEffect(() => {
+    if (countdown === null && showOutro) cancelledRef.current = state.title;
+    if (!showOutro) cancelledRef.current = null;
+  }, [countdown, showOutro, state.title]);
+
   return (
     <div
       className={visible ? 'overlay visible' : 'overlay'}
@@ -149,7 +188,7 @@ export function Overlay() {
       }}
     >
       <div className="overlay-top">
-        <button className="icon-btn" title="Back to library (Esc)" onClick={() => player?.stop()}>
+        <button className="icon-btn" data-tip="Back to library (Esc)" onClick={() => player?.stop()}>
           <BackIcon />
         </button>
         <span className="overlay-title">{state.title}</span>
@@ -157,13 +196,13 @@ export function Overlay() {
         {state.displayCount > 1 && (
           <button
             className="icon-btn"
-            title="Move to the next screen"
+            data-tip="Move to next screen"
             onClick={() => player?.moveScreen()}
           >
             <ScreenIcon />
           </button>
         )}
-        <button className="icon-btn close" title="Close player (Esc)" onClick={() => player?.stop()}>
+        <button className="icon-btn close" data-tip="Close (Esc)" onClick={() => player?.stop()}>
           <CloseIcon />
         </button>
       </div>
@@ -172,18 +211,29 @@ export function Overlay() {
       <div className="overlay-prompts">
         {showSkipIntro && (
           <button className="prompt-btn" onClick={() => seekTo(intro.to)}>
-            Skip Intro
+            {/* When the point came from a convention rather than a chapter
+                marker, show where it lands so the jump is never a surprise. */}
+            {intro.approximate ? 'Skip Intro → ' + formatTime(intro.to) : 'Skip Intro'}
           </button>
         )}
+
         {showOutro && state.hasNext && (
-          <button className="prompt-btn primary" onClick={() => player?.next()}>
-            Next Episode{state.nextTitle ? ' · ' + state.nextTitle : ''}
-          </button>
-        )}
-        {showOutro && !state.hasNext && outro.from < duration && (
-          <button className="prompt-btn" onClick={() => seekTo(duration - 1)}>
-            Skip Outro
-          </button>
+          <div className="next-card">
+            <div className="next-card-label">
+              {countdown === null ? 'Up next' : 'Next episode in ' + countdown}
+            </div>
+            <div className="next-card-title">{state.nextTitle ?? 'Next episode'}</div>
+            <div className="next-card-actions">
+              <button className="prompt-btn primary" onClick={() => player?.next()}>
+                Play now
+              </button>
+              {countdown !== null && (
+                <button className="prompt-btn" onClick={() => setCountdown(null)}>
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
@@ -206,31 +256,31 @@ export function Overlay() {
         </div>
 
         <div className="overlay-controls">
-          <button className="icon-btn primary" title="Play/pause (space)" onClick={() => command(['cycle', 'pause'])}>
-            {state.paused ? <PlayIcon size={26} /> : <PauseIcon size={26} />}
+          <button className="icon-btn primary" data-tip="Play / pause (space)" onClick={() => command(['cycle', 'pause'])}>
+            {state.paused ? <PlayIcon size={34} /> : <PauseIcon size={34} />}
           </button>
 
-          <button className="icon-btn" title="Back 10 seconds (j)" onClick={() => command(['seek', -10, 'relative'])}>
-            <Back10Icon />
+          <button className="icon-btn" data-tip="Back 10s (j)" onClick={() => command(['seek', -10, 'relative'])}>
+            <Back10Icon size={28} />
           </button>
-          <button className="icon-btn" title="Forward 10 seconds (l)" onClick={() => command(['seek', 10, 'relative'])}>
-            <Forward10Icon />
+          <button className="icon-btn" data-tip="Forward 10s (l)" onClick={() => command(['seek', 10, 'relative'])}>
+            <Forward10Icon size={28} />
           </button>
 
           {state.hasPrev && (
-            <button className="icon-btn" title="Previous episode" onClick={() => player?.previous()}>
-              <PrevIcon />
+            <button className="icon-btn" data-tip="Previous episode" onClick={() => player?.previous()}>
+              <PrevIcon size={26} />
             </button>
           )}
           {state.hasNext && (
-            <button className="icon-btn" title="Next episode" onClick={() => player?.next()}>
-              <NextIcon />
+            <button className="icon-btn" data-tip="Next episode" onClick={() => player?.next()}>
+              <NextIcon size={26} />
             </button>
           )}
 
           <div className="volume">
-            <button className="icon-btn" title="Mute (m)" onClick={() => command(['cycle', 'mute'])}>
-              {state.muted ? <MuteIcon /> : <VolumeIcon />}
+            <button className="icon-btn" data-tip="Mute (m)" onClick={() => command(['cycle', 'mute'])}>
+              {state.muted ? <MuteIcon size={26} /> : <VolumeIcon size={26} />}
             </button>
             <input
               className="volume-slider"
@@ -253,25 +303,25 @@ export function Overlay() {
 
           <button
             className={menu === 'subs' ? 'icon-btn active' : 'icon-btn'}
-            title="Subtitles"
+            data-tip="Subtitles"
             onClick={() => setMenu(menu === 'subs' ? null : 'subs')}
           >
-            <SubtitlesIcon />
+            <SubtitlesIcon size={26} />
           </button>
           {state.audioTracks.length > 1 && (
             <button
               className={menu === 'audio' ? 'icon-btn active' : 'icon-btn'}
-              title="Audio track"
+              data-tip="Audio"
               onClick={() => setMenu(menu === 'audio' ? null : 'audio')}
             >
-              <AudioIcon />
+              <AudioIcon size={26} />
             </button>
           )}
         </div>
 
         {menu === 'subs' && (
           <TrackMenu
-            title="Subtitles"
+            data-tip="Subtitles"
             tracks={[{ id: null, label: 'Off' }, ...state.subtitles]}
             activeId={state.subtitleId}
             emptyNote="This file has no subtitles"

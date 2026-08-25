@@ -1,18 +1,21 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
+import { headerPreview } from '../branding.js';
 
 /**
  * Library settings: which folders to scan, and running a scan with live
  * progress. Scan progress arrives over server-sent events so the bar reflects
  * real work rather than an animation.
  */
-export function Settings({ onScanned }) {
+export function Settings({ onScanned, onSettingsChanged }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
   const [picking, setPicking] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
+  const [name, setName] = useState('');
+  const [nameSaved, setNameSaved] = useState(false);
   const [error, setError] = useState(null);
 
   const [scan, setScan] = useState(null); // { percent, message, phase }
@@ -24,6 +27,7 @@ export function Settings({ onScanned }) {
       .then(([loadedSettings, loadedStats]) => {
         setSettings(loadedSettings);
         setStats(loadedStats);
+        setName(loadedSettings.libraryName ?? '');
       })
       .catch((err) => setError(err.message));
   }, []);
@@ -32,6 +36,18 @@ export function Settings({ onScanned }) {
 
   // Close any open event stream when leaving the screen.
   useEffect(() => () => { sourceRef.current?.close(); }, []);
+
+  const saveName = async () => {
+    try {
+      const saved = await api.saveSettings({ libraryName: name });
+      setSettings(saved);
+      setNameSaved(true);
+      setError(null);
+      onSettingsChanged?.(saved);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   const saveRoots = async (roots) => {
     try {
@@ -109,6 +125,30 @@ export function Settings({ onScanned }) {
 
       <div className="settings">
         {error && <div className="banner" style={{ margin: '0 0 18px' }}>{error}</div>}
+
+        <section className="settings-card">
+          <h2>Name</h2>
+          <p className="settings-hint">
+            Your name appears in the header, so the library reads as yours.
+          </p>
+          <div className="key-row">
+            <input
+              className="key-input"
+              value={name}
+              placeholder="Your name"
+              maxLength={40}
+              spellCheck={false}
+              onChange={(event) => { setName(event.target.value); setNameSaved(false); }}
+              onKeyDown={(event) => { if (event.key === 'Enter') saveName(); }}
+            />
+            <button className="btn btn-secondary" onClick={saveName}>Save</button>
+          </div>
+          <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+            {nameSaved
+              ? 'Saved.'
+              : 'Header will read “' + headerPreview(name) + '”.'}
+          </p>
+        </section>
 
         <section className="settings-card">
           <h2>Folders</h2>

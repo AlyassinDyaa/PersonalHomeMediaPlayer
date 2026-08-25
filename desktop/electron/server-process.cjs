@@ -74,6 +74,9 @@ async function startServerProcess({ entry, port, cwd, nodePath = null, env: extr
   // Node child, where it changes how the runtime starts up.
   delete env.ELECTRON_RUN_AS_NODE;
 
+  onLog('starting: ' + node.path + ' ' + entry);
+  onLog('  cwd: ' + cwd);
+
   const child = spawn(node.path, [entry], {
     cwd,
     env,
@@ -84,11 +87,20 @@ async function startServerProcess({ entry, port, cwd, nodePath = null, env: extr
   child.stderr.on('data', (chunk) => onLog(String(chunk).trimEnd()));
 
   let exited = null;
+  let spawnError = null;
+  // A spawn failure emits 'error' and never 'exit'. Without this the wait below
+  // just times out, reporting that the server was slow rather than that it
+  // could not be started at all.
+  child.on('error', (error) => { spawnError = error; });
   child.on('exit', (code, signal) => { exited = { code, signal }; });
 
   // Poll until the server answers, so the window never loads against a dead API.
   const healthUrl = 'http://127.0.0.1:' + port + '/api/health';
   for (let attempt = 0; attempt < 100; attempt++) {
+    if (spawnError) {
+      throw new Error('Could not start the media server process: ' + spawnError.message
+        + '\nTried: ' + node.path + '\nScript: ' + entry);
+    }
     if (exited) {
       throw new Error('The media server exited immediately (code ' + exited.code + '). Check the log for details.');
     }

@@ -14,11 +14,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'release');
+// Overridable so a build can go elsewhere when the previous output is still
+// locked by an indexer or a running copy.
+const OUT = process.env.PACKAGE_OUT || path.join(ROOT, 'release');
 
 /** Everything the app does not need at runtime. */
 const IGNORE = [
-  /^\/release($|\/)/,
+  // Any previous build output, so one package never folds into the next.
+  /^\/release\d*($|\/)/,
   /^\/data($|\/)/,
   /^\/tools($|\/)/,
   /^\/\.git($|\/)/,
@@ -88,14 +91,25 @@ const notes = [
   'Run MediaLibrary.exe to start.',
   '',
   'Requirements',
-  '  * Node.js 22 or newer must be installed (nodejs.org). The media server',
-  '    runs as a separate process and uses Node\'s built-in SQLite, which',
-  '    Electron does not yet bundle.',
-  '  * mpv must be installed for playback (winget install shinchiro.mpv).',
+  bundledNode
+    ? '  * Node runtime: included (runtime\\node.exe).'
+    : '  * Node.js 22 or newer must be installed (nodejs.org).',
+  bundledMpv
+    ? '  * mpv player: included (mpv\\mpv.exe).'
+    : '  * mpv must be installed (winget install shinchiro.mpv).',
   '',
-  'On first run, open the Library tab, add the folder holding your movies and',
-  'shows, and press Scan. Settings and the database are stored per-user under',
-  '%APPDATA%\\Personal Home Media Player.',
+  'Portable',
+  '  This folder is self-contained. Copy it to a USB stick or external SSD and',
+  '  run it from there. The library database, artwork cache and settings are',
+  '  written to the data folder beside MediaLibrary.exe, so everything travels',
+  '  with the drive. Delete portable.txt to store them under %APPDATA% instead.',
+  '',
+  'First run',
+  '  Open the Library tab, add the folder holding your movies and shows, paste',
+  '  a TMDB API key for artwork and descriptions, then press Scan.',
+  '',
+  'If Windows blocks the app, that is SmartScreen or Smart App Control warning',
+  'about an unsigned program. Choose "More info" then "Run anyway".',
   '',
 ].join('\r\n');
 

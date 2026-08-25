@@ -6,6 +6,7 @@ import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
 import Settings from './components/Settings.jsx';
+import { headerPreview } from './branding.js';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
@@ -40,14 +41,17 @@ export function App({ info }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [scrolled, setScrolled] = useState(false);
+  const [libraryName, setLibraryName] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, genreList] = await Promise.all([
+      const [allItems, continueWatching, genreList, settings] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
         api.genres(),
+        api.settings().catch(() => ({})),
       ]);
+      setLibraryName(settings.libraryName ?? '');
       setItems(allItems);
       setResume(continueWatching);
       setGenres(genreList);
@@ -191,15 +195,21 @@ export function App({ info }) {
   if (detailId) {
     return (
       <>
-        <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled />
-        <Detail itemId={detailId} onBack={() => setDetailId(null)} onPlay={play} />
+        <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled brand={headerPreview(libraryName)} />
+        {/* Keyed so moving between titles replays the entrance rather than
+            swapping content in place, which reads as a jump. */}
+        <div className="view" key={detailId}>
+          <Detail itemId={detailId} onBack={() => setDetailId(null)} onPlay={play} />
+        </div>
       </>
     );
   }
 
   return (
     <>
-      <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled} />
+      <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled} brand={headerPreview(libraryName)} />
+
+      <div className="view" key={view + (query.trim() ? ':search' : '')}>
 
       {info && info.mpvAvailable === false && (
         <div className="banner">
@@ -231,7 +241,7 @@ export function App({ info }) {
             <h1 className="page-title">Welcome</h1>
             <span className="page-sub">Add the folder holding your movies and shows to get started</span>
           </div>
-          <Settings onScanned={reload} />
+          <Settings onScanned={reload} onSettingsChanged={(next) => setLibraryName(next.libraryName ?? '')} />
         </>
       )}
 
@@ -290,6 +300,7 @@ export function App({ info }) {
           )}
         />
       )}
+      </div>
     </>
   );
 }
@@ -301,10 +312,10 @@ const SEARCH_PLACEHOLDER = {
   library: 'Search your library',
 };
 
-function Nav({ view, goto, query, setQuery, scrolled }) {
+function Nav({ view, goto, query, setQuery, scrolled, brand }) {
   return (
     <nav className={scrolled ? 'nav scrolled' : 'nav'}>
-      <div className="nav-brand">MY LIBRARY</div>
+      <div className="nav-brand" title={brand}>{brand}</div>
       <div className="nav-links">
         {VIEWS.map((entry) => (
           <button
