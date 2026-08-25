@@ -13,6 +13,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
 const { startServerProcess } = require('./server-process.cjs');
+const { deviceNameFor } = require('./displays.cjs');
 
 const HERE = __dirname;
 const PROJECT_ROOT = path.resolve(HERE, '..', '..');
@@ -46,6 +47,7 @@ let mainFocused = false;
 /** mpv's own view of whether its (embedded) window has focus. */
 let mpvFocused = false;
 let mpvFocusReported = false;
+let overlayHideTimer = null;
 let lastProgressWrite = 0;
 
 /** Read committed defaults plus any local overrides, without importing ESM. */
@@ -304,22 +306,30 @@ function syncOverlayVisibility() {
   // not support it), fall back to assuming the video has it rather than
   // hiding controls that would then never come back.
   const videoFocused = mpvFocusReported ? mpvFocused : true;
-  const shouldShow = (playerFocused || overlayFocused || videoFocused) && !mainFocused;
-  const isShowing = overlayWindow.isVisible();
+  const shouldShow = (overlayFocused || videoFocused) && !mainFocused;
 
-  console.log('overlay: player=' + playerFocused + ' overlay=' + overlayFocused
-    + ' mpv=' + videoFocused + ' main=' + mainFocused + ' -> ' + (shouldShow ? 'show' : 'hide')
-    + (shouldShow === isShowing ? ' (no change)' : ''));
-
-  if (shouldShow === isShowing) return;
+  // Focus bounces between the video window and the controls as they are shown
+  // and raised, and every bounce briefly looks like the user leaving. Showing
+  // is immediate; hiding waits, so a flicker never blanks the controls while
+  // genuinely switching away still dismisses them promptly.
+  clearTimeout(overlayHideTimer);
 
   if (shouldShow) {
-    overlayWindow.showInactive();
-    startCursorWatch();
-  } else {
-    stopCursorWatch();
-    overlayWindow.hide();
+    if (!overlayWindow.isVisible()) overlayWindow.showInactive();
+    // Keep the controls above the video window, which is itself topmost.
+    overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+    overlayWindow.moveTop();
+    return;
   }
+
+  overlayHideTimer = setTimeout(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    const stillWatching = (overlayFocused
+      || (mpvFocusReported ? mpvFocused : true)) && !mainFocused;
+    if (stillWatching) return;
+    overlayWindow.setAlwaysOnTop(false);
+    overlayWindow.hide();
+  }, 400);
 }
 
 /**
@@ -335,13 +345,16 @@ function createOverlayWindow(targetDisplay) {
   const { x, y, width, height } = display.bounds;
 
   overlayWindow = new BrowserWindow({
-    // Owned by the window the video is drawn in. This is what keeps the two
-    // together: Windows holds a child window directly above its parent and
-    // moves and hides it with the parent, so the controls cannot end up on a
-    // different monitor or drift out of alignment. It also means they are
-    // never above anything else — an always-on-top overlay used to sit over
-    // whatever application had been switched to.
-    parent: playerWindow ?? undefined,
+    // Deliberately NOT owned by the player window. Making it a child seemed
+    // tidy — Windows keeps a child above its parent and moves it along — but a
+    // transparent (layered) child sitting over mpv's Direct3D child surface
+    // stops that surface being composited, and the video goes black while mpv
+    // carries on decoding perfectly happily.
+    //
+    // So it is a separate always-on-top window aligned to the same bounds.
+    // Focus tracking, not ownership, is what stops it floating over other
+    // applications: it hides as soon as neither the video nor the controls
+    // hold focus.
     x,
     y,
     width,
@@ -537,7 +550,7 @@ function closePlayerWindow() {
     overlayWindow.hide();
   }
   if (playerWindow && !playerWindow.isDestroyed()) {
-    playerWindow.setFullScreen(false);
+    playerWindow.setAlwaysOnTop(false);
     playerWindow.hide();
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -640,21 +653,16 @@ async function startQueueEntry(index, startPosition) {
 
   const display = playbackDisplay();
 
-  // The video is drawn inside a window we own and place, so it cannot end up on
-  // a different monitor from the controls.
-  if (!playerWindow || playerWindow.isDestroyed()) createPlayerWindow(display);
-  // Place first, then go fullscreen: fullscreen is applied to whichever screen
-  // the window is currently on, so the order decides which monitor it covers.
-  playerWindow.setFullScreen(false);
-  playerWindow.setBounds(display.bounds);
-  playerWindow.show();
-  playerWindow.setFullScreen(true);
-  playerWindow.focus();
-  const windowHandle = nativeHandleOf(playerWindow);
+  ensurePlayer(null);
 
-  ensurePlayer(windowHandle);
-  player.windowHandle = windowHandle;
-  player.embed = true;
+  // mpv gets its own window rather than being embedded in one of ours. A
+  // transparent window layered over mpv's Direct3D surface stops that surface
+  // being composited: with the controls visible the picture went black while
+  // mpv carried on decoding. Two separate top-level windows composite normally.
+  player.embed = false;
+  player.windowHandle = null;
+
+  const screenName = await deviceNameFor(display);
 
   try {
     await player.start({
@@ -664,6 +672,7 @@ async function startQueueEntry(index, startPosition) {
       subtitleFiles: entry.subtitleFiles ?? [],
       title: entry.title ?? '',
       display: display.bounds,
+      screenName,
       muted: startMuted,
     });
 
@@ -686,6 +695,7 @@ async function startQueueEntry(index, startPosition) {
         skip: { intro: null, outro: null },
       };
       showOverlay(display);
+      startCursorWatch();
       sendOverlayState(overlayState);
 
       // Track lists and chapters only exist once mpv has loaded the file.

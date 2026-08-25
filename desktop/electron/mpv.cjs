@@ -111,6 +111,8 @@ class MpvPlayer extends EventEmitter {
     title = '',
     /** Screen rect mpv should open on, so the overlay can be aligned to it. */
     display = null,
+    /** Windows device name of the screen to fullscreen on. */
+    screenName = null,
     muted = false,
   }) {
     if (this.isRunning) await this.stop();
@@ -140,38 +142,26 @@ class MpvPlayer extends EventEmitter {
       '--volume=100',
     ];
 
+    // A transparent window layered over a Direct3D surface stops that surface
+    // being composited, and the video goes black while mpv carries on decoding.
+    // Disabling flip presentation restores normal composition. Needed whenever
+    // the custom overlay is drawn on top, embedded or not.
+    if (this.useOverlay) args.push('--d3d11-flip=no');
+
     if (this.embed && this.windowHandle) {
       args.push('--wid=' + this.windowHandle);
     } else {
       args.push('--border=no', '--fullscreen=yes');
 
-      if (display) {
-        // Put the window well inside the target monitor and let mpv fullscreen
-        // from there, which pins the video to that screen.
-        //
-        // Naming the screen instead would be more direct, but display labels
-        // are not unique — this desktop reports three monitors all called
-        // "LF27T35" — so a name cannot identify one. A point can. An explicit
-        // width and height cannot be used either: mpv clamps a non-fullscreen
-        // window to the work area and to the video's aspect ratio, which left
-        // the video inset from the edges of the screen.
-        args.push(
-          '--geometry=+' + Math.round(display.x + display.width / 4)
-          + '+' + Math.round(display.y + display.height / 4),
-        );
-      }
-    }
-
-    if (this.useOverlay && !(this.embed && this.windowHandle)) {
-      // A top-level window that exactly covers the screen can be handed the
-      // display scanout directly by the compositor ("independent flip"), so
-      // anything layered above it is never blended in and the control overlay
-      // becomes invisible despite being above it in the z-order. Disabling flip
-      // presentation forces normal composition.
+      // Name the monitor mpv must use.
       //
-      // Only for a window mpv owns. Applied to an embedded child window it
-      // produced a black picture instead.
-      args.push('--d3d11-flip=no');
+      // Positioning it with --geometry does not work: aiming at two different
+      // displays was measured putting the video on the same one both times,
+      // which is how it ended up on a different screen from the controls.
+      // Electron's own display labels cannot identify a monitor either — this
+      // desktop reports three called "LF27T35" — but the Windows device name
+      // is unique, and displays.cjs maps a display's bounds onto it.
+      if (screenName) args.push('--fs-screen-name=' + screenName);
     }
 
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
