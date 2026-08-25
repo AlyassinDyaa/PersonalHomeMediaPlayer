@@ -16,6 +16,17 @@ contextBridge.exposeInMainWorld('player', {
   next: () => ipcRenderer.invoke('player:next'),
   previous: () => ipcRenderer.invoke('player:previous'),
   moveScreen: () => ipcRenderer.invoke('player:moveScreen'),
+  setFullscreen: (next) => ipcRenderer.invoke('player:setFullscreen', Boolean(next)),
+  toggleFullscreen: () => ipcRenderer.invoke('player:toggleFullscreen'),
+
+  /**
+   * Drag and resize the video window from the controls, which stand in for the
+   * title bar the borderless video window does not have. Points are in screen
+   * coordinates, so they stay valid as the window moves out from under them.
+   */
+  gestureStart: (kind, point) => ipcRenderer.send('player:gestureStart', { kind, point }),
+  gestureMove: (point) => ipcRenderer.send('player:gestureMove', point),
+  gestureEnd: (point) => ipcRenderer.send('player:gestureEnd', point),
 
   /**
    * Toggle whether the overlay window accepts mouse input. False makes it

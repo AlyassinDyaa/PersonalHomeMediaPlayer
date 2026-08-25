@@ -13,7 +13,12 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
 const { startServerProcess } = require('./server-process.cjs');
-const { moveWindowTo } = require('./window-move.cjs');
+const { moveWindowTo, releaseWindowMover } = require('./window-move.cjs');
+const {
+  windowedBounds, fullscreenBounds, dragBounds, resizeBounds, clampToDisplay,
+  pastThreshold,
+} = require('./video-frame.cjs');
+const { validateTarget, copyLibrary, saveDataDir } = require('./data-location.cjs');
 
 const HERE = __dirname;
 const PROJECT_ROOT = path.resolve(HERE, '..', '..');
@@ -49,13 +54,46 @@ let mpvFocused = false;
 let mpvFocusReported = false;
 let overlayHideTimer = null;
 let lastProgressWrite = 0;
+/** Where mpv's window is, and whether it is covering a whole display. */
+let videoBounds = null;
+let videoFullscreen = true;
+/** The video's shape, so a resized window never adds bars the file lacks. */
+let videoAspect = null;
+/** mpv's window handle, cached so a drag does not ask for it per frame. */
+let videoHwnd = null;
+/** An in-flight pointer gesture from the controls acting as a title bar. */
+let gesture = null;
+/** Newest rectangle waiting on the previous move, so a drag coalesces. */
+let movePending = false;
+let queuedBounds = null;
 
-/** Read committed defaults plus any local overrides, without importing ESM. */
+/**
+ * Read committed defaults plus any local overrides, without importing ESM.
+ *
+ * Settings saved from the UI are written next to the writable data folder, not
+ * into the project, so a packaged build has to be told to look there as well —
+ * otherwise a chosen data folder or mpv path is stored and then ignored.
+ */
 function readConfig() {
   const merged = {};
-  for (const name of ['config.json', 'config.local.json']) {
+  const sources = [
+    path.join(PROJECT_ROOT, 'config.json'),
+    path.join(PROJECT_ROOT, 'config.local.json'),
+  ];
+  try {
+    const writable = resolveWritableDir();
+    const saved = path.join(writable, 'config.local.json');
+    if (!sources.includes(saved)) sources.push(saved);
+  } catch {
+    // Before the app is ready there is no writable folder to consult.
+  }
+
+  for (const source of sources) {
     try {
-      Object.assign(merged, JSON.parse(fs.readFileSync(path.join(PROJECT_ROOT, name), 'utf8')));
+      // A byte-order mark is stripped first: these files can be edited by hand,
+      // and one saved by a Windows editor would otherwise fail to parse and be
+      // ignored without a word.
+      Object.assign(merged, JSON.parse(fs.readFileSync(source, 'utf8').replace(/^\uFEFF/, '')));
     } catch {
       // Absent or unreadable config files fall back to defaults.
     }
@@ -146,6 +184,53 @@ function bundledBinary(...segments) {
   }
 }
 
+/** The data folder in use right now. */
+function currentDataDir() {
+  const config = readConfig();
+  return config.dataDir || path.join(resolveWritableDir(), 'data');
+}
+
+/**
+ * Point the library at a different folder, bringing what is already there.
+ *
+ * The scan and its artwork represent real time spent, so moving the folder
+ * copies them rather than starting over. The server holds the database open,
+ * so it is stopped for the duration and started again against the new path.
+ *
+ * @param {string} target folder chosen by the user
+ */
+async function relocateDataDir(target) {
+  const source = currentDataDir();
+  const checked = validateTarget(source, target);
+  if (!checked.ok) return checked;
+  if (checked.sameFolder) return { ok: true, dataDir: checked.destination };
+
+  const { destination } = checked;
+
+  // The server holds the database open, so nothing can be copied until it lets
+  // go, and SQLite needs a moment after the process exits to release its files.
+  stopApiServer();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  let outcome;
+  try {
+    outcome = copyLibrary(source, destination);
+  } catch (error) {
+    await startApiServer();
+    return { ok: false, error: 'Could not copy the library: ' + error.message };
+  }
+
+  try {
+    saveDataDir(resolveWritableDir(), destination);
+  } catch (error) {
+    await startApiServer();
+    return { ok: false, error: 'Could not save the setting: ' + error.message };
+  }
+
+  await startApiServer();
+  return { ok: true, dataDir: destination, adopted: outcome.adopted };
+}
+
 async function startApiServer() {
   const config = readConfig();
   serverPort = Number(process.env.PORT || config.port || 8787);
@@ -155,7 +240,10 @@ async function startApiServer() {
   startMuted = Boolean(config.startMuted) || process.env.MEDIA_MUTE === '1';
 
   const writableDir = resolveWritableDir();
-  console.log('Data folder: ' + writableDir + (isPortable() ? ' (portable)' : ''));
+  // A folder the user picked wins over the default beside the app, so a large
+  // library can live on whichever drive has room for it.
+  const dataDir = config.dataDir || path.join(writableDir, 'data');
+  console.log('Data folder: ' + dataDir + (isPortable() ? ' (portable)' : ''));
 
   const started = await startServerProcess({
     nodePath: bundledBinary('runtime', 'node.exe'),
@@ -164,7 +252,7 @@ async function startApiServer() {
     cwd: unpackedPath(PROJECT_ROOT),
     env: {
       MEDIA_CONFIG_DIR: writableDir,
-      MEDIA_DATA_DIR: path.join(writableDir, 'data'),
+      MEDIA_DATA_DIR: dataDir,
     },
     onLog: (line) => { if (line) console.log('[server]', line); },
   });
@@ -431,24 +519,145 @@ function playbackDisplay() {
  * every option and property mpv offers for choosing a monitor was measured
  * doing nothing on this machine.
  */
-async function placeVideoWindow(display) {
+async function applyVideoBounds(bounds, options) {
   if (!player || !player.isRunning) return false;
+  videoBounds = bounds;
 
+  // The controls are one of our own windows, so they move immediately and
+  // exactly; mpv's window is chased into place behind them.
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.setBounds(bounds);
+
+  if (!videoHwnd) {
+    try { videoHwnd = await player.getWindowHandle(); } catch { videoHwnd = null; }
+  }
+  if (!videoHwnd) return false;
+
+  // A drag produces pointer events faster than Windows finishes moving a
+  // window. Queueing every one of them made the video trail the cursor, so
+  // only the newest rectangle is kept while a move is in flight.
+  if (movePending && !(options && options.flush)) {
+    queuedBounds = bounds;
+    return true;
+  }
+
+  movePending = true;
+  let moved = false;
   try {
-    const hwnd = await player.getWindowHandle();
-    if (!hwnd) return false;
-    const moved = await moveWindowTo(hwnd, display.bounds);
-    console.log('video window -> ' + display.bounds.x + ',' + display.bounds.y
-      + ' ' + display.bounds.width + 'x' + display.bounds.height
-      + (moved ? ' ok' : ' FAILED'));
-    if (moved && overlayWindow && !overlayWindow.isDestroyed()) {
-      overlayWindow.setBounds(display.bounds);
-    }
-    return moved;
+    // Only the settled position raises the window. Doing it on every frame of
+    // a drag would be wasted work, and the window is already in front by then.
+    moved = await moveWindowTo(videoHwnd, bounds, {
+      raise: Boolean(options && options.flush),
+    });
   } catch (error) {
     console.warn('Could not place the video window: ' + error.message);
-    return false;
+  } finally {
+    movePending = false;
   }
+
+  if (queuedBounds) {
+    const next = queuedBounds;
+    queuedBounds = null;
+    return applyVideoBounds(next);
+  }
+  return moved;
+}
+
+/** Cover a whole display: what fullscreen means for a borderless window. */
+async function placeVideoWindow(display) {
+  videoFullscreen = true;
+  const bounds = fullscreenBounds(display);
+  const moved = await applyVideoBounds(bounds, { flush: true });
+  sendOverlayState({ fullscreen: true });
+  console.log('video window -> ' + bounds.x + ',' + bounds.y
+    + ' ' + bounds.width + 'x' + bounds.height + (moved ? ' ok' : ' FAILED'));
+  return moved;
+}
+
+/** The display the video window is sitting on right now. */
+function videoDisplay() {
+  if (!videoBounds) return playbackDisplay();
+  return screen.getDisplayMatching(videoBounds);
+}
+
+/** Switch between covering a display and being a window that can be dragged. */
+async function setFullscreen(next) {
+  if (!player || !player.isRunning) return { ok: false, error: 'Nothing is playing' };
+  const display = videoDisplay();
+  displayOverride = display;
+
+  videoFullscreen = Boolean(next);
+  const bounds = videoFullscreen
+    ? fullscreenBounds(display)
+    : windowedBounds(display, videoAspect);
+  await applyVideoBounds(bounds, { flush: true });
+  sendOverlayState({ fullscreen: videoFullscreen });
+  return { ok: true, fullscreen: videoFullscreen };
+}
+
+/**
+ * Start a pointer gesture. The control bar doubles as the window's title bar,
+ * because a borderless window does not have one to grab.
+ */
+function beginGesture(kind, point) {
+  if (!player || !player.isRunning || !videoBounds) return { ok: false };
+
+  gesture = {
+    kind,
+    origin: point,
+    startBounds: { ...videoBounds },
+    // Nothing happens until the pointer moves: a press on the control bar is
+    // how the window is focused, and how a button is reached.
+    armed: false,
+    // Dragging a fullscreen window restores it under the pointer, the way
+    // dragging a maximised window does everywhere else in Windows.
+    restoreTo: kind === 'move' && videoFullscreen
+      ? windowedBounds(videoDisplay(), videoAspect)
+      : null,
+  };
+  return { ok: true };
+}
+
+/** Whether the press has become a drag, arming it the first time it has. */
+function gestureArmed(point) {
+  if (gesture.armed) return true;
+  if (!pastThreshold(gesture.origin, point)) return false;
+
+  gesture.armed = true;
+  if (gesture.restoreTo) {
+    videoFullscreen = false;
+    sendOverlayState({ fullscreen: false });
+  }
+  return true;
+}
+
+/** The rectangle a gesture has reached. */
+function gestureBounds(point) {
+  return gesture.kind === 'move'
+    ? dragBounds(gesture, point)
+    : resizeBounds(gesture, point, videoAspect);
+}
+
+function continueGesture(point) {
+  if (!gesture || !gestureArmed(point)) return;
+  applyVideoBounds(gestureBounds(point));
+}
+
+async function endGesture(point) {
+  if (!gesture) return { ok: false };
+  // A press that never travelled is a click, and must leave the window alone.
+  if (!gesture.armed) {
+    gesture = null;
+    return { ok: true, moved: false };
+  }
+  const bounds = gestureBounds(point);
+  gesture = null;
+
+  // Settle on whichever display it was dropped on, so the next episode and the
+  // "move to next screen" control both agree about where the video lives.
+  const landed = screen.getDisplayMatching(bounds);
+  displayOverride = landed;
+  await applyVideoBounds(clampToDisplay(bounds, landed), { flush: true });
+  return { ok: true };
 }
 
 /** Displays ordered the way they sit on the desk, so "next" means next along. */
@@ -467,7 +676,9 @@ async function moveToNextScreen() {
 
   // Moving the window is enough: no restart, so playback never pauses, the
   // position is kept and there is no black frame.
-  const moved = await placeVideoWindow(displayOverride);
+  const moved = videoFullscreen
+    ? await placeVideoWindow(displayOverride)
+    : await applyVideoBounds(windowedBounds(displayOverride, videoAspect), { flush: true });
   sendOverlayState({ displayCount: displays.length });
   return moved
     ? { ok: true }
@@ -482,7 +693,7 @@ function showOverlay(targetDisplay) {
   // the controls must match. (An earlier version measured a BrowserWindow we
   // used to embed the video in; that window is gone, and reading its stale
   // bounds put the controls on the display the video had previously been on.)
-  overlayWindow.setBounds(display.bounds);
+  overlayWindow.setBounds(videoBounds ?? display.bounds);
 
   // The overlay takes focus deliberately. An unfocused window on Windows
   // consumes the first click to activate itself, which made every control feel
@@ -573,6 +784,14 @@ async function writeProgress(videoId, position, duration, options) {
 }
 
 function closePlayerWindow() {
+  // Nothing left to move, so the window helper does not need to stay running.
+  releaseWindowMover();
+  videoHwnd = null;
+  videoBounds = null;
+  gesture = null;
+  queuedBounds = null;
+  videoFullscreen = true;
+
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     stopCursorWatch();
     overlayWindow.hide();
@@ -700,6 +919,12 @@ async function startQueueEntry(index, startPosition) {
   player.embed = false;
   player.windowHandle = null;
 
+  // A new file means a new mpv window: the cached handle would point at the
+  // old one, and dragging would move a window that is no longer there.
+  videoHwnd = null;
+  gesture = null;
+  queuedBounds = null;
+
 
 
   try {
@@ -733,6 +958,7 @@ async function startQueueEntry(index, startPosition) {
         displayCount: screen.getAllDisplays().length,
         hasNext: queueIndex < queue.length - 1,
         hasPrev: queueIndex > 0,
+        fullscreen: videoFullscreen,
         nextTitle: queue[queueIndex + 1]?.title ?? null,
         skip: { intro: null, outro: null },
       };
@@ -749,6 +975,29 @@ async function startQueueEntry(index, startPosition) {
         .then((duration) => detectSkipPoints(duration))
         .then((skip) => sendOverlayState({ skip }))
         .catch(() => { /* skip buttons stay hidden */ });
+
+      // Keys reach whichever window has focus, and while watching that is
+      // usually mpv rather than the controls. Pointing mpv's own bindings at
+      // the app means one key does one thing either way — before this, f
+      // toggled mpv's idea of fullscreen and fought with the window placement.
+      for (const [key, message] of [
+        ['f', 'app-fullscreen'],
+        ['F11', 'app-fullscreen'],
+        ['DBL_MBTN_LEFT', 'app-fullscreen'],
+        ['ESC', 'app-escape'],
+      ]) {
+        player.command(['keybind', key, 'script-message ' + message])
+          .catch(() => { /* an older mpv simply keeps its own bindings */ });
+      }
+
+      // The video's shape, so resizing the window cannot introduce bars the
+      // file does not have. Falling back to 16:9 is close enough to be
+      // invisible for the rare file that does not report it.
+      player.command(['get_property', 'video-params/aspect'])
+        .then((aspect) => {
+          videoAspect = typeof aspect === 'number' && aspect > 0 ? aspect : 16 / 9;
+        })
+        .catch(() => { videoAspect = 16 / 9; });
     }
 
     return { ok: true };
@@ -790,6 +1039,22 @@ function ensurePlayer(windowHandle) {
     }
   });
 
+  // Keys pressed while mpv has focus arrive here, because mpv was told to
+  // forward them rather than act on them itself.
+  player.on('event', (message) => {
+    if (message.event !== 'client-message') return;
+    const name = (message.args ?? [])[0];
+
+    if (name === 'app-fullscreen') {
+      setFullscreen(!videoFullscreen);
+    } else if (name === 'app-escape') {
+      // Escape leaves fullscreen first and only then closes, so it is never a
+      // single keystroke between watching and losing the picture.
+      if (videoFullscreen) setFullscreen(false);
+      else player.stop().then(() => { hideOverlay(); closePlayerWindow(); });
+    }
+  });
+
   // Reaching the end of a file is what triggers autoplay, as distinct from the
   // user quitting, which must not roll on to the next episode.
   player.on('ended', ({ reason }) => {
@@ -826,6 +1091,9 @@ function registerIpc() {
     platform: process.platform,
   }));
 
+  ipcMain.handle('library:dataDir', () => currentDataDir());
+  ipcMain.handle('library:setDataDir', async (event, target) => relocateDataDir(target));
+
   ipcMain.handle('player:play', async (event, options) => {
     // A show sends its remaining episodes so the player can advance on its own.
     queue = Array.isArray(options.queue) && options.queue.length
@@ -837,6 +1105,17 @@ function registerIpc() {
 
   ipcMain.handle('player:next', async () => startQueueEntry(queueIndex + 1, 0));
   ipcMain.handle('player:moveScreen', async () => moveToNextScreen());
+  ipcMain.handle('player:setFullscreen', async (event, next) => setFullscreen(Boolean(next)));
+  ipcMain.handle('player:toggleFullscreen', async () => setFullscreen(!videoFullscreen));
+
+  // Dragging and resizing are sent one-way. Waiting for a reply per pointer
+  // event would put a round trip between the cursor and the window, which is
+  // exactly the lag that makes a dragged window feel broken.
+  ipcMain.on('player:gestureStart', (event, payload) => {
+    if (payload && payload.point) beginGesture(payload.kind, payload.point);
+  });
+  ipcMain.on('player:gestureMove', (event, point) => { if (point) continueGesture(point); });
+  ipcMain.on('player:gestureEnd', (event, point) => { if (point) endGesture(point); });
   ipcMain.handle('player:previous', async () => startQueueEntry(queueIndex - 1, 0));
 
   ipcMain.on('overlay:ready', (event) => {

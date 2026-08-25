@@ -312,3 +312,44 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
 
 .next-card-actions { display: flex; gap: 10px; }
 .next-card-actions .prompt-btn { padding: 9px 20px; font-size: 14px; }
+
+/* ------------------------------------------------------- window handles --- */
+
+/*
+ * The video is a separate borderless window, so it has no title bar. This
+ * region is it: dragging moves both windows together, and double-clicking
+ * toggles fullscreen, which is what a title bar does everywhere else.
+ */
+.overlay-drag {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  align-self: stretch;
+  cursor: grab;
+  /* The title must not swallow the drag by being dragged as text. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.overlay-drag:active { cursor: grabbing; }
+
+/* The corner grip, shown only while the video is a window. */
+.resize-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 4px;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: nwse-resize;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: color 160ms ease;
+}
+
+.resize-grip:hover { color: rgba(255, 255, 255, 0.95); }

@@ -14,7 +14,8 @@
     "build": "npm run build -w @mediaplayer/desktop",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",
-    "package": "npm run build && node tools/package-app.mjs"
+    "package": "npm run build && node tools/package-app.mjs",
+    "test": "node test/video-frame.test.cjs && node test/data-location.test.cjs"
   },
   "engines": {
     "node": ">=22.5.0"

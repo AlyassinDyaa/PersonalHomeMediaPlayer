@@ -30,7 +30,10 @@ loadDotEnv();
 
 function readJson(file) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    // Strip a byte-order mark first. These files can be edited by hand, and a
+    // Windows editor that saves one would otherwise make the whole file parse
+    // as nothing at all — settings silently ignored, with no error anywhere.
+    return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
   } catch {
     return {};
   }
@@ -119,6 +122,11 @@ export function saveSettings(patch) {
   if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
   if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
+  // Where the database and artwork live. Applying it needs a restart, which the
+  // desktop app performs; the value is stored here so both processes agree.
+  if (typeof patch.dataDir === 'string' && patch.dataDir.trim()) {
+    allowed.dataDir = patch.dataDir.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  }
   if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
 
   const current = readJson(LOCAL_CONFIG_PATH);

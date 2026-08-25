@@ -66,3 +66,18 @@ export const BackIcon = svg(<path d="M15.5 4 7 12l8.5 8 1.4-1.4L9.8 12l7.1-6.6z"
 export const ScreenIcon = svg(
   <path d="M3 4h13a1 1 0 0 1 1 1v7h-2V6H4v8h6v2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm10 10h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1zm1 2v3h6v-3h-6z" />,
 );
+
+/** Fullscreen: four corners pushing outwards, as every streaming app draws it. */
+export const ExpandIcon = svg(
+  <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z" />,
+);
+
+/** Leave fullscreen: the same corners pulled inwards. */
+export const CompressIcon = svg(
+  <path d="M10 4h2v6H6V8h4V4zm4 0h2v4h4v2h-6V4zM4 14h6v6H8v-4H4v-2zm10 0h6v2h-4v4h-2v-6z" />,
+);
+
+/** Diagonal ribs, the conventional mark for a window's resize corner. */
+export const GripIcon = svg(
+  <path d="M21 13.5 13.5 21H16l5-5v-2.5zm0 5L18.5 21H21v-2.5zm0-10L8.5 21H11l10-10V8.5z" />,
+);

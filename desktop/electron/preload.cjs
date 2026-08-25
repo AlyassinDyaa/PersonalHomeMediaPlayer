@@ -8,6 +8,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('media', {
+  /** Where the library database and artwork are kept. */
+  dataDir: () => ipcRenderer.invoke('library:dataDir'),
+
+  /**
+   * Move the library to another folder, bringing the existing scan with it.
+   * The server is restarted, so the UI should reload once this resolves.
+   */
+  setDataDir: (target) => ipcRenderer.invoke('library:setDataDir', target),
+
   info: () => ipcRenderer.invoke('app:info'),
 
   play: (options) => ipcRenderer.invoke('player:play', options),

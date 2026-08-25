@@ -867,3 +867,13 @@ button {
   .view, .rows .row { animation: none; }
   .card, .card-poster, .nav-link, .chip, .season-tab, .btn { transition: none; }
 }
+
+/* A spinner sitting on a line of text rather than centred in a panel. */
+.spinner.inline {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+  margin-right: 8px;
+  vertical-align: -1px;
+}

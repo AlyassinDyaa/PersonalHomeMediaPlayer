@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   PlayIcon, PauseIcon, NextIcon, PrevIcon, Back10Icon, Forward10Icon,
   VolumeIcon, MuteIcon, SubtitlesIcon, AudioIcon, CloseIcon, BackIcon, ScreenIcon,
+  ExpandIcon, CompressIcon, GripIcon,
 } from './Icons.jsx';
 
 const HIDE_AFTER_MS = 3600;
@@ -31,6 +32,7 @@ export function Overlay() {
     title: '', position: 0, duration: null, paused: false, volume: 100, muted: false,
     subtitles: [], audioTracks: [], subtitleId: null, audioId: null,
     hasNext: false, hasPrev: false, nextTitle: null, skip: { intro: null, outro: null },
+    fullscreen: true,
   });
   const [visible, setVisible] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
@@ -41,6 +43,7 @@ export function Overlay() {
   const hideTimer = useRef(null);
   const interactiveRef = useRef(null);
   const cancelledRef = useRef(null);
+  const gestureRef = useRef(null);
 
   const player = typeof window !== 'undefined' ? window.player : null;
 
@@ -62,6 +65,42 @@ export function Overlay() {
     player.ready();
     wake();
     return () => { unsubscribe?.(); clearTimeout(hideTimer.current); };
+  }, [player, wake]);
+
+  /**
+   * Move and resize the video window from these controls.
+   *
+   * The video is a separate borderless window with no title bar of its own, so
+   * this bar becomes its title bar: the main process applies one rectangle to
+   * the video and to this window together, which is what stops them drifting
+   * apart the way they used to.
+   *
+   * Screen coordinates are sent rather than deltas, because this window is
+   * being moved out from under the pointer while the drag is in progress.
+   */
+  const onGestureDown = useCallback((kind) => (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    gestureRef.current = kind;
+    player?.gestureStart(kind, { x: event.screenX, y: event.screenY });
+  }, [player]);
+
+  const onGestureMove = useCallback((event) => {
+    if (!gestureRef.current) return;
+    player?.gestureMove({ x: event.screenX, y: event.screenY });
+  }, [player]);
+
+  const onGestureUp = useCallback((event) => {
+    if (!gestureRef.current) return;
+    gestureRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    player?.gestureEnd({ x: event.screenX, y: event.screenY });
+  }, [player]);
+
+  const toggleFullscreen = useCallback(() => {
+    wake();
+    player?.toggleFullscreen();
   }, [player, wake]);
 
   /** Only tell the main process when the value actually changes. */
@@ -114,7 +153,18 @@ export function Overlay() {
         j: ['seek', -10, 'relative'],
         l: ['seek', 10, 'relative'],
       };
-      if (event.key === 'Escape') { player?.stop(); return; }
+      // Escape leaves fullscreen first, the way it does in a browser, and
+      // only closes the player once the video is already windowed.
+      if (event.key === 'Escape') {
+        if (state.fullscreen) player?.setFullscreen(false);
+        else player?.stop();
+        return;
+      }
+      if (event.key === 'f' || event.key === 'F11') {
+        event.preventDefault();
+        toggleFullscreen();
+        return;
+      }
       const command = keys[event.key];
       if (!command) return;
       event.preventDefault();
@@ -123,7 +173,7 @@ export function Overlay() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [player, wake]);
+  }, [player, wake, toggleFullscreen, state.fullscreen]);
 
   const duration = state.duration ?? 0;
   const position = scrubbing ? scrubValue : state.position;
@@ -186,13 +236,31 @@ export function Overlay() {
         if (event.target !== event.currentTarget) return;
         command(['cycle', 'pause']);
       }}
+      onDoubleClick={(event) => {
+        if (event.target !== event.currentTarget) return;
+        // A double-click arrives after a click that has already toggled pause,
+        // so undo that: sizing the picture should not also stop it.
+        command(['cycle', 'pause']);
+        toggleFullscreen();
+      }}
     >
       <div className="overlay-top">
         <button className="icon-btn" data-tip="Back to library (Esc)" onClick={() => player?.stop()}>
           <BackIcon />
         </button>
-        <span className="overlay-title">{state.title}</span>
-        <span className="overlay-spacer" />
+        {/* The draggable region. Double-clicking it toggles fullscreen, the
+            same gesture a title bar answers to everywhere else in Windows. */}
+        <div
+          className="overlay-drag"
+          data-tip="Drag to move · double-click for fullscreen"
+          onPointerDown={onGestureDown('move')}
+          onPointerMove={onGestureMove}
+          onPointerUp={onGestureUp}
+          onPointerCancel={onGestureUp}
+          onDoubleClick={toggleFullscreen}
+        >
+          <span className="overlay-title">{state.title}</span>
+        </div>
         {state.displayCount > 1 && (
           <button
             className="icon-btn"
@@ -202,7 +270,14 @@ export function Overlay() {
             <ScreenIcon />
           </button>
         )}
-        <button className="icon-btn close" data-tip="Close (Esc)" onClick={() => player?.stop()}>
+        <button
+          className="icon-btn"
+          data-tip={state.fullscreen ? 'Exit fullscreen (f)' : 'Fullscreen (f)'}
+          onClick={toggleFullscreen}
+        >
+          {state.fullscreen ? <CompressIcon /> : <ExpandIcon />}
+        </button>
+        <button className="icon-btn close" data-tip="Close" onClick={() => player?.stop()}>
           <CloseIcon />
         </button>
       </div>
@@ -317,6 +392,14 @@ export function Overlay() {
               <AudioIcon size={26} />
             </button>
           )}
+
+          <button
+            className="icon-btn"
+            data-tip={state.fullscreen ? 'Exit fullscreen (f)' : 'Fullscreen (f)'}
+            onClick={toggleFullscreen}
+          >
+            {state.fullscreen ? <CompressIcon size={26} /> : <ExpandIcon size={26} />}
+          </button>
         </div>
 
         {menu === 'subs' && (
@@ -341,6 +424,20 @@ export function Overlay() {
           />
         )}
       </div>
+
+      {/* Only a window can be resized; fullscreen has nowhere to grow into. */}
+      {!state.fullscreen && (
+        <div
+          className="resize-grip"
+          data-tip="Drag to resize"
+          onPointerDown={onGestureDown('resize')}
+          onPointerMove={onGestureMove}
+          onPointerUp={onGestureUp}
+          onPointerCancel={onGestureUp}
+        >
+          <GripIcon size={18} />
+        </div>
+      )}
     </div>
   );
 }

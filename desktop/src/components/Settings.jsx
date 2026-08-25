@@ -11,7 +11,10 @@ import { headerPreview } from '../branding.js';
 export function Settings({ onScanned, onSettingsChanged }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
-  const [picking, setPicking] = useState(false);
+  // Which folder the picker is choosing: a library root, or where the
+  // library's own files are kept.
+  const [picking, setPicking] = useState(null);
+  const [moving, setMoving] = useState(null);
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [name, setName] = useState('');
@@ -73,8 +76,36 @@ export function Settings({ onScanned, onSettingsChanged }) {
     }
   };
 
+  /**
+   * Move the library's database and artwork to a folder the user chooses.
+   *
+   * The app restarts its server around the copy, so the screen reloads once it
+   * lands rather than showing figures from a database that is no longer open.
+   */
+  const chooseDataDir = async (folder) => {
+    setPicking(null);
+    if (!folder || !window.media?.setDataDir) return;
+
+    setMoving({ busy: true, message: 'Moving your library…' });
+    try {
+      const result = await window.media.setDataDir(folder);
+      if (!result?.ok) {
+        setMoving(null);
+        setError(result?.error ?? 'Could not move the library folder.');
+        return;
+      }
+      setMoving({ busy: false, message: 'Library now stored in ' + result.dataDir });
+      setError(null);
+      load();
+      onScanned?.();
+    } catch (err) {
+      setMoving(null);
+      setError(err.message);
+    }
+  };
+
   const addRoot = (folder) => {
-    setPicking(false);
+    setPicking(null);
     if (!folder) return;
     const roots = settings?.libraryRoots ?? [];
     if (roots.includes(folder)) return;
@@ -198,6 +229,40 @@ export function Settings({ onScanned, onSettingsChanged }) {
         </section>
 
         <section className="settings-card">
+          <h2>Storage</h2>
+          <p className="settings-hint">
+            Where this app keeps its own files — the index of your library and the
+            downloaded artwork. Your movies and shows are not moved. Put it on a
+            drive with room to spare, or on the same portable drive as the app so
+            it travels with you.
+          </p>
+
+          <div className="root-row">
+            <span className="root-dot ok" />
+            <code className="root-path">{settings.dataDir}</code>
+          </div>
+
+          {moving ? (
+            <p className="settings-hint" style={{ marginTop: 12 }}>
+              {moving.busy && <span className="spinner inline" />}
+              {moving.message}
+            </p>
+          ) : (
+            <button
+              className="btn btn-secondary"
+              style={{ marginTop: 14 }}
+              disabled={!window.media?.setDataDir}
+              onClick={() => setPicking('data')}
+            >
+              Change folder
+            </button>
+          )}
+          {!window.media?.setDataDir && (
+            <p className="settings-empty">Available in the desktop app.</p>
+          )}
+        </section>
+
+        <section className="settings-card">
           <h2>Folders</h2>
           <p className="settings-hint">
             Point at any folder containing movies or TV shows. Sub-folders are searched
@@ -217,7 +282,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
             </div>
           ))}
 
-          <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking(true)}>
+          <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
             + Add folder
           </button>
         </section>
@@ -310,14 +375,15 @@ export function Settings({ onScanned, onSettingsChanged }) {
               {settings.mpvPath || 'mpv not found'}
             </span>
           </div>
-          <div className="status-row">
-            <span>Data folder</span>
-            <code style={{ fontSize: 12, color: 'var(--text-faint)' }}>{settings.dataDir}</code>
-          </div>
         </section>
       </div>
 
-      {picking && <FolderPicker onChoose={addRoot} onCancel={() => setPicking(false)} />}
+      {picking && (
+        <FolderPicker
+          onChoose={picking === 'data' ? chooseDataDir : addRoot}
+          onCancel={() => setPicking(null)}
+        />
+      )}
     </>
   );
 }
