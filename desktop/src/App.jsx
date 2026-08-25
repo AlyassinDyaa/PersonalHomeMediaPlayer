@@ -199,7 +199,13 @@ export function App({ info }) {
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
         <div className="view" key={detailId}>
-          <Detail itemId={detailId} onBack={() => setDetailId(null)} onPlay={play} />
+          <Detail
+            itemId={detailId}
+            onBack={() => setDetailId(null)}
+            onPlay={play}
+            library={items}
+            onSelect={openDetail}
+          />
         </div>
       </>
     );

@@ -877,3 +877,194 @@ button {
   margin-right: 8px;
   vertical-align: -1px;
 }
+
+/* ------------------------------------------------------------- episodes --- */
+
+/* Season tabs on the left, the layout choice on the right. */
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.section-head .season-tabs { flex: 1; }
+
+.view-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--surface);
+  margin: 8px 0 22px;
+  flex: 0 0 auto;
+}
+
+.view-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 15px;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 13px;
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.view-btn:hover { color: var(--text); }
+.view-btn.active { background: var(--bg-raised); color: var(--text); font-weight: 600; }
+
+/*
+ * The larger way to read a season: big stills, so an episode can be picked out
+ * by what it looks like rather than by its number.
+ */
+.episode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 26px 22px;
+  margin-top: 4px;
+}
+
+.episode-tile { cursor: pointer; }
+
+.episode-tile-still {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.episode-tile-still img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.episode-tile:hover .episode-tile-still {
+  transform: scale(1.03);
+  box-shadow: var(--shadow);
+}
+
+.episode-tile-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  min-width: 26px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The play mark only appears on hover, so the artwork is not covered. */
+.episode-tile-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.8);
+}
+
+.episode-tile:hover .episode-tile-play { opacity: 1; }
+
+.episode-tile-title {
+  margin-top: 10px;
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.episode-tile-note { margin-top: 3px; font-size: 12.5px; color: var(--text-faint); }
+
+.episode-tile-overview {
+  margin: 7px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  /* Three lines keeps the tiles on a common grid however long the text is. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- about --- */
+
+/*
+ * The lower half of a detail page. A film has no episode list, so without this
+ * there was nothing below the artwork but a single line of file details.
+ */
+.about {
+  margin-top: 54px;
+  padding-top: 34px;
+  border-top: 1px solid var(--border);
+}
+
+.about-heading { margin: 0 0 14px; font-size: 22px; font-weight: 600; }
+
+.about-tagline {
+  margin: 0 0 14px;
+  font-size: 17px;
+  font-style: italic;
+  color: var(--text-dim);
+}
+
+.about-overview {
+  margin: 0 0 26px;
+  max-width: 72ch;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+/*
+ * Separate cards rather than one bordered slab. A slab leaves the unused part
+ * of the last row showing as a stray block whenever the facts do not divide
+ * evenly into columns, which they usually do not.
+ */
+.about-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.about-fact {
+  padding: 14px 18px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.about-fact dt {
+  font-size: 11.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.about-fact dd { margin: 5px 0 0; font-size: 14.5px; }
+
+.about-path {
+  margin: 18px 0 0;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-path code { color: var(--text-dim); }
+
+/* A rail inside the detail page sits flush with its text, not the page edge. */
+.detail-rail { margin: 46px -42px 0; }
