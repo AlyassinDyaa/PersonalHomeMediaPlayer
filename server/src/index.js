@@ -8,6 +8,7 @@
 import express from 'express';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, ensureDataDirs, hasTmdb, saveSettings, settingsView, listDirectories } from './config.js';
@@ -16,6 +17,14 @@ import { runScan, setOverride } from './scan/index.js';
 import * as library from './library.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
+import {
+  requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
+  setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
+} from './auth.js';
+import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
+import { ffmpegAvailable, probeFile } from './stream/ffmpeg.js';
+import { planDelivery } from './stream/plan.js';
+import { webAppDir, loginPage } from './webapp.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -39,6 +48,50 @@ function openEventStream(res) {
 // ---------------------------------------------------------------------------
 // Library
 // ---------------------------------------------------------------------------
+
+// ------------------------------------------------------------ signing in ---
+// These have to sit above the guard, or there would be no way through it.
+
+app.get('/login', (req, res) => {
+  if (requestAuthorised(req)) {
+    res.redirect('/');
+    return;
+  }
+  res.type('html').send(loginPage({ configured: config.remoteAccess }));
+});
+
+app.post('/api/login', (req, res) => {
+  const address = req.socket?.remoteAddress ?? 'unknown';
+
+  const blockedFor = loginBlockedFor(address);
+  if (blockedFor > 0) {
+    res.status(429).json({ error: 'Too many attempts. Try again in ' + blockedFor + 's.' });
+    return;
+  }
+
+  if (!config.remoteAccess) {
+    res.status(403).json({ error: 'This library is not shared on the network' });
+    return;
+  }
+
+  if (!passcodeMatches(req.body?.passcode)) {
+    recordFailure(address);
+    res.status(401).json({ error: 'That passcode is not right' });
+    return;
+  }
+
+  recordSuccess(address);
+  setSessionCookie(res, issueToken());
+  res.json({ ok: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+// Everything past this point needs to be either local or signed in.
+app.use(requireAuth);
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, tmdb: hasTmdb(), roots: config.libraryRoots });
@@ -132,13 +185,35 @@ app.post('/api/suggestions/:id/resolve', (req, res) => {
 // Settings: library locations, browsing the filesystem to choose them
 // ---------------------------------------------------------------------------
 
+/**
+ * Settings, plus the address other devices would use.
+ *
+ * The address is worked out here rather than stored, because it changes with
+ * the network the machine is on and a remembered one would send people to a
+ * dead link.
+ */
+function settingsWithNetwork() {
+  const view = settingsView();
+  const address = lanAddress();
+  return {
+    ...view,
+    networkUrl: config.remoteAccess && address
+      ? 'http://' + address + ':' + config.port
+      : null,
+    // Whether a browser could be served at all, so the interface can explain
+    // rather than simply failing when someone presses play.
+    streamingReady: ffmpegAvailable(),
+  };
+}
+
 app.get('/api/settings', (req, res) => {
-  res.json(settingsView());
+  res.json(settingsWithNetwork());
 });
 
 app.put('/api/settings', (req, res) => {
   try {
-    res.json(saveSettings(req.body ?? {}));
+    saveSettings(req.body ?? {});
+    res.json(settingsWithNetwork());
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -198,6 +273,111 @@ app.get('/api/artwork/prefetch', async (req, res) => {
 // ---------------------------------------------------------------------------
 // Artwork: fetched once from TMDB, then served from disk
 // ---------------------------------------------------------------------------
+
+// -------------------------------------------------------------- streaming ---
+
+/**
+ * Whether a browser can be served at all, and what this file would take.
+ * Asked before playing so the interface can say what is about to happen rather
+ * than simply stalling.
+ */
+app.get('/api/stream/:videoId/info', async (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) {
+    res.status(404).json({ error: 'No such video' });
+    return;
+  }
+  if (!ffmpegAvailable()) {
+    res.status(503).json({ error: 'ffmpeg is not installed, so browsers cannot be served' });
+    return;
+  }
+
+  try {
+    const plan = planDelivery(await probeFile(video.path));
+    res.json({ ...plan, duration: video.duration ?? null, position: video.position ?? 0 });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Start (or re-join) a stream and hand back its playlist.
+ *
+ * The offset is part of the session: seeking past what has been produced starts
+ * a new one rather than waiting for ffmpeg to catch up.
+ */
+app.get('/api/stream/:videoId/start', async (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) {
+    res.status(404).json({ error: 'No such video' });
+    return;
+  }
+
+  const startSeconds = Number(req.query.start ?? 0) || 0;
+  try {
+    const session = await openSession({
+      videoId: video.id,
+      filePath: video.path,
+      startSeconds,
+    });
+    res.json({
+      id: session.id,
+      plan: session.plan,
+      startSeconds,
+      playlistUrl: '/api/stream/session/' + session.id + '/index.m3u8',
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** The playlist and its segments, read straight from the session's folder. */
+app.get('/api/stream/session/:id/:file', (req, res) => {
+  const session = touchSession(req.params.id);
+  if (!session) {
+    res.status(404).json({ error: 'That stream has ended' });
+    return;
+  }
+
+  // Only files this session produced: the name is never allowed to walk out of
+  // the folder it belongs to.
+  const name = path.basename(req.params.file);
+  if (!/^[\w.-]+$/.test(name)) {
+    res.status(400).json({ error: 'Bad file name' });
+    return;
+  }
+
+  const target = path.join(session.dir, name);
+  if (!target.startsWith(session.dir)) {
+    res.status(400).json({ error: 'Bad file name' });
+    return;
+  }
+
+  if (name.endsWith('.m3u8')) {
+    res.type('application/vnd.apple.mpegurl');
+    // A playlist that is still growing must never be cached.
+    res.setHeader('Cache-Control', 'no-store');
+  } else {
+    res.type('video/iso.segment');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  }
+
+  res.sendFile(target, (error) => {
+    if (error && !res.headersSent) res.status(404).end();
+  });
+});
+
+/** A file the browser can play as it is, served with range support. */
+app.get('/api/stream/:videoId/direct', (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) {
+    res.status(404).json({ error: 'No such video' });
+    return;
+  }
+  res.sendFile(video.path, (error) => {
+    if (error && !res.headersSent) res.status(404).end();
+  });
+});
 
 const VALID_SIZES = new Set(['w200', 'w300', 'w500', 'w780', 'w1280', 'original']);
 
@@ -288,6 +468,19 @@ app.post('/api/scan', async (req, res) => {
   }
 });
 
+// The browser interface. Last, so it never shadows an API route.
+app.use(express.static(webAppDir(), { index: 'index.html', maxAge: '1h' }));
+
+// Anything else that is not an API call is the single-page app being deep-linked.
+app.get(/^\/(?!api\/|artwork\/).*/, (req, res, next) => {
+  const index = path.join(webAppDir(), 'index.html');
+  if (!fs.existsSync(index)) {
+    next();
+    return;
+  }
+  res.sendFile(index);
+});
+
 // ---------------------------------------------------------------------------
 
 app.use((error, req, res, next) => {
@@ -295,14 +488,43 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: error.message });
 });
 
+/** The address on this machine that other devices would use to reach it. */
+export function lanAddress() {
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) return entry.address;
+    }
+  }
+  return null;
+}
+
 export function startServer(port = config.port) {
   ensureDataDirs();
   getDb();
+  // Segments from a previous run can be gigabytes, and none of them are useful.
+  clearStreamCache();
+
+  // Listening on every interface is what sharing means, so it follows the
+  // setting rather than being on by default — and never happens without a
+  // passcode, however the settings file came to say otherwise.
+  const sharing = config.remoteAccess && Boolean(config.passcodeHash);
+  if (config.remoteAccess && !sharing) {
+    console.warn('Sharing is switched on but no passcode is set, so it stays off.');
+  }
+  const host = sharing ? '0.0.0.0' : '127.0.0.1';
+
   return new Promise((resolve) => {
-    const server = app.listen(port, '127.0.0.1', () => {
+    const server = app.listen(port, host, () => {
       console.log('Media server listening on http://127.0.0.1:' + port);
+      if (sharing) {
+        const address = lanAddress();
+        console.log('Shared on the network at http://' + (address ?? '<this machine>') + ':' + port);
+      }
       resolve(server);
     });
+
+    server.on('close', () => { closeAllSessions(); });
   });
 }
 

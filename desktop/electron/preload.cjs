@@ -8,6 +8,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('media', {
+  /** Apply a setting that only takes effect when the server starts. */
+  restartServer: () => ipcRenderer.invoke('library:restartServer'),
+
   /** Where the library database and artwork are kept. */
   dataDir: () => ipcRenderer.invoke('library:dataDir'),
 

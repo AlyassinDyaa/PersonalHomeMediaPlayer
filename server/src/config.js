@@ -5,6 +5,7 @@
  * machine-specific paths and secrets), then config.json (committed defaults).
  */
 
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,6 +87,33 @@ export const config = {
 
   /** Path to the mpv binary; resolved at playback time if left null. */
   mpvPath: process.env.MPV_PATH ?? local.mpvPath ?? defaults.mpvPath ?? null,
+
+  /** Folder holding ffmpeg and ffprobe; found automatically when left null. */
+  ffmpegDir: process.env.FFMPEG_DIR ?? local.ffmpegDir ?? defaults.ffmpegDir ?? null,
+
+  /**
+   * Whether other devices on the home network may reach the library.
+   *
+   * Off by default. Turning it on makes the server listen on every interface
+   * rather than only on this machine, so it is a deliberate choice rather than
+   * something that happens quietly.
+   */
+  remoteAccess: local.remoteAccess ?? defaults.remoteAccess ?? false,
+
+  /**
+   * The passcode that guards remote access, kept only as a hash.
+   *
+   * A browser on the home network is not the same as a trusted desktop app, so
+   * remote access is refused outright unless a passcode has been set.
+   */
+  passcodeHash: local.passcodeHash ?? null,
+  passcodeSalt: local.passcodeSalt ?? null,
+
+  /**
+   * Signs the cookie that keeps a browser logged in. Generated once and kept,
+   * so a restart does not sign everyone out.
+   */
+  sessionSecret: local.sessionSecret ?? null,
 };
 
 export function ensureDataDirs() {
@@ -99,6 +127,47 @@ export function hasTmdb() {
 }
 
 const LOCAL_CONFIG_PATH = path.join(CONFIG_DIR, 'config.local.json');
+
+/**
+ * Hash a passcode.
+ *
+ * scrypt rather than a plain digest: it is deliberately slow, so a stolen
+ * settings file cannot be run through a word list at speed.
+ */
+export function hashPasscode(passcode, salt) {
+  return crypto.scryptSync(passcode, salt, 32).toString('hex');
+}
+
+/**
+ * Whether a passcode matches the stored one.
+ * Compared in constant time, so a wrong guess reveals nothing by how long it
+ * took to reject.
+ */
+export function passcodeMatches(passcode) {
+  if (!config.passcodeHash || !config.passcodeSalt) return false;
+  const attempt = Buffer.from(hashPasscode(String(passcode ?? ''), config.passcodeSalt), 'hex');
+  const stored = Buffer.from(config.passcodeHash, 'hex');
+  if (attempt.length !== stored.length) return false;
+  return crypto.timingSafeEqual(attempt, stored);
+}
+
+/** The secret used to sign login cookies, created on first use. */
+export function sessionSecret() {
+  if (!config.sessionSecret) {
+    const secret = crypto.randomBytes(32).toString('hex');
+    // Written straight to disk: a secret that changed every restart would sign
+    // every browser out whenever the app was reopened.
+    const current = readJson(LOCAL_CONFIG_PATH);
+    fs.mkdirSync(path.dirname(LOCAL_CONFIG_PATH), { recursive: true });
+    fs.writeFileSync(
+      LOCAL_CONFIG_PATH,
+      JSON.stringify({ ...current, sessionSecret: secret }, null, 2) + '\n',
+      'utf8',
+    );
+    config.sessionSecret = secret;
+  }
+  return config.sessionSecret;
+}
 
 /**
  * Persist user-editable settings to config.local.json and apply them to the
@@ -130,6 +199,32 @@ export function saveSettings(patch) {
     allowed.libraryColor = /^#[0-9a-fA-F]{6}$/.test(wanted) ? wanted.toLowerCase() : '';
   }
   if (typeof patch.mpvPath === 'string') allowed.mpvPath = patch.mpvPath.trim() || null;
+  if (typeof patch.remoteAccess === 'boolean') {
+    // An unguarded library on a shared network is not something to allow by
+    // accident, so this is refused rather than quietly corrected.
+    if (patch.remoteAccess && !config.passcodeHash && typeof patch.passcode !== 'string') {
+      throw new Error('Set a passcode before sharing the library');
+    }
+    allowed.remoteAccess = patch.remoteAccess;
+  }
+
+  // The passcode is never stored, only a hash of it. Clearing it is done by
+  // sending an empty string, which also switches remote access off, because
+  // an unguarded library on the network is not something to leave running.
+  if (typeof patch.passcode === 'string') {
+    const wanted = patch.passcode.trim();
+    if (!wanted) {
+      allowed.passcodeHash = null;
+      allowed.passcodeSalt = null;
+      allowed.remoteAccess = false;
+    } else if (wanted.length < 4) {
+      throw new Error('A passcode needs at least four characters');
+    } else {
+      const salt = crypto.randomBytes(16).toString('hex');
+      allowed.passcodeSalt = salt;
+      allowed.passcodeHash = hashPasscode(wanted, salt);
+    }
+  }
   // Where the database and artwork live. Applying it needs a restart, which the
   // desktop app performs; the value is stored here so both processes agree.
   if (typeof patch.dataDir === 'string' && patch.dataDir.trim()) {
@@ -160,6 +255,9 @@ export function settingsView() {
     })),
     dataDir: config.dataDir,
     mpvPath: config.mpvPath,
+    remoteAccess: config.remoteAccess,
+    // Whether one is set, never what it is.
+    passcodeSet: Boolean(config.passcodeHash),
     // Never return the key itself, only whether one is present.
     tmdbConfigured: hasTmdb(),
     port: config.port,

@@ -31,7 +31,13 @@ const IGNORE = [
   /^\/desktop\/index\.html$/,
   /^\/desktop\/overlay\.html$/,
   /^\/desktop\/vite\.config\.js$/,
+  /^\/desktop\/vite\.web\.config\.js$/,
+  /^\/desktop\/web($|\/)/,
   /^\/desktop\/scripts($|\/)/,
+  // ffmpeg is copied beside the executable rather than packed into the archive,
+  // where the server process could not read it anyway.
+  /^\/vendor($|\/)/,
+  /^\/test($|\/)/,
   // Build-time only dependencies; large and never loaded at runtime.
   /^\/node_modules\/(electron|@electron|electron-builder|app-builder-lib|vite|@vitejs|esbuild|@esbuild|rollup|@rollup|7zip-bin|dmg-license|builder-util.*|electron-publish|app-builder-bin)($|\/)/,
 ];
@@ -60,7 +66,9 @@ const [appPath] = await packager({
     // The server runs under a real Node process, which cannot read an asar
     // archive. Its sources, its dependencies and the config it loads all have
     // to exist as ordinary files on disk.
-    unpack: '{**/server/**/*,**/node_modules/**/*,**/config.json}',
+    // dist-web is served over HTTP by the server process, which is a plain
+    // Node process and cannot read an archive, so it has to be a real folder.
+    unpack: '{**/server/**/*,**/node_modules/**/*,**/config.json,**/desktop/dist-web/**/*}',
   },
   prune: false,
   ignore: IGNORE,
@@ -83,6 +91,7 @@ await fsp.writeFile(
 // installed — the point of putting it on a removable drive.
 const bundledNode = await copyBundledNode(appPath);
 const bundledMpv = await copyBundledMpv(appPath);
+const bundledFfmpeg = await copyBundledFfmpeg(appPath);
 
 // A README beside the app, since the server needs a Node runtime present.
 const notes = [
@@ -94,6 +103,9 @@ const notes = [
   bundledNode
     ? '  * Node runtime: included (runtime\\node.exe).'
     : '  * Node.js 22 or newer must be installed (nodejs.org).',
+  bundledFfmpeg
+    ? '  * ffmpeg: included, for watching on phones and tablets.'
+    : '  * ffmpeg: not included, so only this computer can play video.',
   bundledMpv
     ? '  * mpv player: included (mpv\\mpv.exe).'
     : '  * mpv must be installed (winget install shinchiro.mpv).',
@@ -137,6 +149,26 @@ async function folderSize(dir) {
  * Node's built-in SQLite and Electron still bundles a Node release that
  * predates it. Shipping the runtime keeps the folder self-contained.
  */
+/**
+ * ffmpeg, which is what lets a phone or tablet play a Matroska file: the
+ * picture is repackaged rather than re-encoded, so it costs little, but it
+ * cannot happen without this.
+ */
+async function copyBundledFfmpeg(appDir) {
+  const source = path.join(ROOT, 'vendor', 'ffmpeg');
+  if (!fs.existsSync(path.join(source, 'ffmpeg.exe'))) {
+    console.warn('  ! ffmpeg was not found in vendor/, so browsers cannot be served.');
+    return null;
+  }
+  const target = path.join(appDir, 'ffmpeg');
+  await fsp.mkdir(target, { recursive: true });
+  for (const name of ['ffmpeg.exe', 'ffprobe.exe']) {
+    await fsp.copyFile(path.join(source, name), path.join(target, name));
+  }
+  console.log('  + bundled ffmpeg from ' + source);
+  return true;
+}
+
 async function copyBundledNode(appDir) {
   const source = process.execPath;
   if (!source || !/node(\.exe)?$/i.test(source)) {

@@ -13,6 +13,11 @@ export async function initApi() {
     apiBase = info.apiBase.replace(/\/$/, '');
     return info;
   }
+  // Served over HTTP means a browser on some other device, and the library is
+  // whatever served this page — not a fixed address on this machine.
+  if (typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)) {
+    apiBase = window.location.origin;
+  }
   return { apiBase, mpvAvailable: false, platform: 'browser' };
 }
 
@@ -49,6 +54,21 @@ export const api = {
   item: (id) => request('/api/items/' + id),
   video: (id) => request('/api/videos/' + id),
   continueWatching: () => request('/api/continue'),
+
+  /** Where playback got to, shared by every device watching this library. */
+  saveProgress: (body) => request('/api/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+
+  /** What this file would take to play in a browser, before trying to. */
+  streamInfo: (videoId) => request('/api/stream/' + videoId + '/info'),
+
+  /** Begin a stream at a point in the file, and get back its playlist. */
+  streamStart: (videoId, startSeconds) => request(
+    '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0)),
+  ),
   genres: () => request('/api/genres'),
   search: (query) => request('/api/search?q=' + encodeURIComponent(query)),
   suggestions: () => request('/api/suggestions'),

@@ -15,6 +15,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
   // library's own files are kept.
   const [picking, setPicking] = useState(null);
   const [moving, setMoving] = useState(null);
+  const [passcode, setPasscode] = useState('');
+  const [sharingBusy, setSharingBusy] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
   const [name, setName] = useState('');
@@ -88,6 +90,42 @@ export function Settings({ onScanned, onSettingsChanged }) {
     try {
       const saved = await api.saveSettings({ libraryRoots: roots });
       setSettings(saved);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  /**
+   * Turn network sharing on or off.
+   *
+   * Which addresses the server answers on is decided when it starts, so the
+   * server is restarted rather than left to disagree with the setting.
+   */
+  const setSharing = async (enabled) => {
+    if (enabled && !settings.passcodeSet) {
+      setError('Set a passcode first — the library is not shared without one.');
+      return;
+    }
+    setSharingBusy(true);
+    try {
+      const saved = await api.saveSettings({ remoteAccess: enabled });
+      setSettings(saved);
+      setError(null);
+      await window.media?.restartServer?.();
+      // The address only exists once the server is listening on it.
+      setTimeout(load, 800);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSharingBusy(false);
+    }
+  };
+
+  const savePasscode = async () => {
+    try {
+      setSettings(await api.saveSettings({ passcode: passcode.trim() }));
+      setPasscode('');
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -269,6 +307,79 @@ export function Settings({ onScanned, onSettingsChanged }) {
               <span className="toggle-note">Appears over the closing minutes of an episode</span>
             </span>
           </label>
+        </section>
+
+        <section className="settings-card">
+          <h2>Watch on other devices</h2>
+          <p className="settings-hint">
+            Share the library with phones and tablets on your home network. They
+            open it in a browser — nothing to install, and the films stay on this
+            computer. What you watch stays in step across every device.
+          </p>
+
+          {!settings.streamingReady && (
+            <p className="settings-empty">
+              ffmpeg was not found, so browsers cannot be served. It ships with the
+              app; a development checkout needs it in vendor/ffmpeg.
+            </p>
+          )}
+
+          <div className="key-row">
+            <input
+              type="password"
+              className="key-input"
+              value={passcode}
+              placeholder={settings.passcodeSet ? 'Replace the passcode' : 'Choose a passcode'}
+              autoComplete="new-password"
+              spellCheck={false}
+              onChange={(event) => setPasscode(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') savePasscode(); }}
+            />
+            <button className="btn btn-secondary" disabled={!passcode.trim()} onClick={savePasscode}>
+              Save
+            </button>
+          </div>
+          <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+            {settings.passcodeSet
+              ? 'A passcode is set. Anyone opening the library in a browser has to enter it.'
+              : 'At least four characters. Sharing cannot be turned on without one.'}
+          </p>
+
+          <label className="toggle-row" style={{ marginTop: 16 }}>
+            <input
+              type="checkbox"
+              checked={settings.remoteAccess === true}
+              disabled={sharingBusy || !settings.passcodeSet}
+              onChange={(event) => setSharing(event.target.checked)}
+            />
+            <span>
+              <strong>Share on my network</strong>
+              <span className="toggle-note">
+                {sharingBusy
+                  ? 'Restarting the library…'
+                  : 'Other devices in the house can reach this library'}
+              </span>
+            </span>
+          </label>
+
+          {settings.remoteAccess && settings.networkUrl && (
+            <div className="scan-result" style={{ marginTop: 14 }}>
+              Open this on the iPad:
+              <div className="root-row" style={{ marginTop: 8 }}>
+                <code className="root-path" style={{ fontSize: 15 }}>{settings.networkUrl}</code>
+              </div>
+              <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+                Both devices must be on the same Wi-Fi, and this computer has to be
+                awake. Windows may ask to allow the connection the first time.
+              </p>
+            </div>
+          )}
+
+          {settings.remoteAccess && !settings.networkUrl && (
+            <p className="settings-empty">
+              Sharing is on, but this computer has no network address yet.
+            </p>
+          )}
         </section>
 
         <section className="settings-card">

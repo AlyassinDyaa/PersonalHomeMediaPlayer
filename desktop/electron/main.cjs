@@ -253,6 +253,11 @@ async function startApiServer() {
     env: {
       MEDIA_CONFIG_DIR: writableDir,
       MEDIA_DATA_DIR: dataDir,
+      // Where a packaged build keeps ffmpeg and the browser interface. Both sit
+      // beside the executable, which the server has no other way of finding
+      // once its own files are inside an archive.
+      MEDIA_INSTALL_DIR: installDir(),
+      MEDIA_WEB_DIR: unpackedPath(path.join(PROJECT_ROOT, 'desktop', 'dist-web')),
     },
     onLog: (line) => { if (line) console.log('[server]', line); },
   });
@@ -1093,6 +1098,24 @@ function registerIpc() {
   }));
 
   ipcMain.handle('library:dataDir', () => currentDataDir());
+
+  /**
+   * Restart the server.
+   *
+   * Sharing the library on the network changes which addresses the server
+   * listens on, and that is decided when it starts — so turning it on or off
+   * only takes effect after this.
+   */
+  ipcMain.handle('library:restartServer', async () => {
+    try {
+      stopApiServer();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await startApiServer();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
   ipcMain.handle('library:setDataDir', async (event, target) => relocateDataDir(target));
 
   ipcMain.handle('player:play', async (event, options) => {

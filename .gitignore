@@ -32,3 +32,5 @@ desktop.ini
 npm-debug.log*
 release/
 release*/
+vendor/
+dist-web/
