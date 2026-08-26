@@ -21,9 +21,12 @@ import {
   requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
 } from './auth.js';
-import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
+import {
+  openSession, touchSession, keepAlive, sessionStatus, clearStreamCache, closeAllSessions,
+} from './stream/sessions.js';
 import { ffmpegAvailable, probeFile } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
+import { warmUpEncoder } from './stream/encoders.js';
 import { webAppDir, loginPage } from './webapp.js';
 
 const app = express();
@@ -294,6 +297,22 @@ app.get('/api/artwork/prefetch', async (req, res) => {
 // -------------------------------------------------------------- streaming ---
 
 /**
+ * What a device says it can cope with.
+ *
+ * The player sends these because only it knows how it is connected. Absent or
+ * nonsense values fall through to the defaults in the plan, which are chosen to
+ * work on an ordinary house network rather than an ideal one.
+ */
+function limitsFrom(query) {
+  const limits = {};
+  const bitrate = Number(query.maxBitrate);
+  const height = Number(query.maxHeight);
+  if (Number.isFinite(bitrate) && bitrate > 0) limits.maxBitrate = bitrate;
+  if (Number.isFinite(height) && height > 0) limits.maxHeight = height;
+  return limits;
+}
+
+/**
  * Whether a browser can be served at all, and what this file would take.
  * Asked before playing so the interface can say what is about to happen rather
  * than simply stalling.
@@ -310,8 +329,19 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
   }
 
   try {
-    const plan = planDelivery(await probeFile(video.path));
-    res.json({ ...plan, duration: video.duration ?? null, position: video.position ?? 0 });
+    const probed = await probeFile(video.path);
+    const plan = planDelivery(probed, limitsFrom(req.query));
+    // The file's own duration beats the database's, which is only filled in
+    // once something has played far enough to report it. The player needs a
+    // real total before the first frame, or its timeline has nothing to draw.
+    const probedDuration = Number(probed?.format?.duration);
+    res.json({
+      ...plan,
+      duration: Number.isFinite(probedDuration) && probedDuration > 0
+        ? probedDuration
+        : (video.duration ?? null),
+      position: video.position ?? 0,
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -336,16 +366,50 @@ app.get('/api/stream/:videoId/start', async (req, res) => {
       videoId: video.id,
       filePath: video.path,
       startSeconds,
+      limits: limitsFrom(req.query),
     });
     res.json({
       id: session.id,
       plan: session.plan,
-      startSeconds,
+      // Where the stream this points at actually begins, which is not always
+      // where the player asked to start: an existing session covering that
+      // point is handed back instead of a new one, and the player seeks within
+      // it. Everything the video element reports is relative to this.
+      startSeconds: session.startSeconds,
+      requestedSeconds: startSeconds,
+      reused: session.reused,
       playlistUrl: '/api/stream/session/' + session.id + '/index.m3u8',
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+/**
+ * How a running stream is getting on.
+ *
+ * Polled when playback stops unexpectedly. A stream that has ended, one still
+ * being converted and one whose ffmpeg died all look identical to a video
+ * element — it simply stops — so the difference has to be asked for.
+ */
+app.get('/api/stream/session/:id/status', async (req, res) => {
+  const status = await sessionStatus(req.params.id);
+  if (!status) {
+    res.status(404).json({ error: 'That stream has ended' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(status);
+});
+
+/** A paused player saying it is still there. */
+app.post('/api/stream/session/:id/keepalive', (req, res) => {
+  if (!keepAlive(req.params.id)) {
+    res.status(404).json({ error: 'That stream has ended' });
+    return;
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ok: true });
 });
 
 /** The playlist and its segments, read straight from the session's folder. */
@@ -384,14 +448,25 @@ app.get('/api/stream/session/:id/:file', (req, res) => {
   });
 });
 
-/** A file the browser can play as it is, served with range support. */
+/**
+ * A file the browser can play as it is, served with range support.
+ *
+ * Only reached when the plan says 'direct', which means the container is
+ * already one of the MP4 family however the file happens to be named. The type
+ * is stated rather than guessed from the extension, because a mis-named file
+ * would otherwise be announced as something Safari refuses to open.
+ */
 app.get('/api/stream/:videoId/direct', (req, res) => {
   const video = library.getVideo(req.params.videoId);
   if (!video) {
     res.status(404).json({ error: 'No such video' });
     return;
   }
-  res.sendFile(video.path, (error) => {
+  res.type('video/mp4');
+  // Seeking in an untouched file is done with byte ranges, and a player that
+  // is not told ranges are available will not try.
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.sendFile(video.path, { acceptRanges: true }, (error) => {
     if (error && !res.headersSent) res.status(404).end();
   });
 });
@@ -538,6 +613,10 @@ export function startServer(port = config.port) {
   getDb();
   // Segments from a previous run can be gigabytes, and none of them are useful.
   clearStreamCache();
+  // Finding out which encoder this machine can use costs a few hundred
+  // milliseconds of asking the graphics hardware. Done now, in the background,
+  // so the first person to press play does not wait for it.
+  warmUpEncoder();
 
   // Listening on every interface is what sharing means, so it follows the
   // setting rather than being on by default — and never happens without a

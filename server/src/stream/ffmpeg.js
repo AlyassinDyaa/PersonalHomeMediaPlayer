@@ -82,7 +82,7 @@ export function probeFile(filePath) {
   const args = [
     '-v', 'error',
     '-show_entries',
-    'format=format_name,duration:stream=index,codec_type,codec_name,profile,pix_fmt,channels,disposition',
+    'format=format_name,duration,size,bit_rate:stream=index,codec_type,codec_name,profile,pix_fmt,width,height,channels,bit_rate,avg_frame_rate,r_frame_rate,disposition',
     '-of', 'json',
     filePath,
   ];

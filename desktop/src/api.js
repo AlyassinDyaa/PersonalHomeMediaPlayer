@@ -43,6 +43,23 @@ export function apiBaseUrl() {
   return apiBase;
 }
 
+/**
+ * Picture size and bitrate ceilings, as a query string.
+ *
+ * Sent by the player rather than decided by the server, because only the device
+ * knows how it is connected: the same library serves a laptop on Ethernet and a
+ * tablet on the far side of the house, and one ceiling cannot suit both.
+ */
+function streamLimits(limits, append = false) {
+  if (!limits) return '';
+  const query = new URLSearchParams();
+  if (limits.maxHeight) query.set('maxHeight', String(limits.maxHeight));
+  if (limits.maxBitrate) query.set('maxBitrate', String(limits.maxBitrate));
+  const text = query.toString();
+  if (!text) return '';
+  return (append ? '&' : '?') + text;
+}
+
 export const api = {
   stats: () => request('/api/stats'),
   settings: () => request('/api/settings'),
@@ -71,11 +88,24 @@ export const api = {
   }),
 
   /** What this file would take to play in a browser, before trying to. */
-  streamInfo: (videoId) => request('/api/stream/' + videoId + '/info'),
+  streamInfo: (videoId, limits) => request(
+    '/api/stream/' + videoId + '/info' + streamLimits(limits),
+  ),
 
   /** Begin a stream at a point in the file, and get back its playlist. */
-  streamStart: (videoId, startSeconds) => request(
-    '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0)),
+  streamStart: (videoId, startSeconds, limits) => request(
+    '/api/stream/' + videoId + '/start?start='
+    + Math.max(0, Math.floor(startSeconds || 0))
+    + streamLimits(limits, true),
+  ),
+
+  /** How far a running stream has got, and whether it is still running. */
+  streamStatus: (sessionId) => request('/api/stream/session/' + sessionId + '/status'),
+
+  /** Tell the computer a paused player is still open, so it keeps the stream. */
+  streamKeepAlive: (sessionId) => request(
+    '/api/stream/session/' + sessionId + '/keepalive',
+    { method: 'POST' },
   ),
   genres: () => request('/api/genres'),
   search: (query) => request('/api/search?q=' + encodeURIComponent(query)),

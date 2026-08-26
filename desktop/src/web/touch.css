@@ -111,40 +111,178 @@ html, body {
   inset: 0;
   z-index: 40;
   background: #000;
+}
+
+.player-video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  /* The whole frame, letterboxed. Filling would crop faces off the top of a
+     scope film, which is worse than black bars. */
+  object-fit: contain;
+}
+
+/*
+ * Everything drawn over the picture.
+ *
+ * One layer rather than a bar above and a bar below, so it fades as a unit and
+ * the video keeps the whole screen — the old arrangement gave the title bar a
+ * permanent strip of the display, which on a tablet held sideways is the
+ * difference between a film and a film with a shelf over it.
+ */
+.player-chrome {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  opacity: 1;
+  transition: opacity 220ms ease;
+  /* Only the controls themselves take touches; the picture beneath stays
+     tappable for play and pause. */
+  pointer-events: none;
 }
+
+.player-chrome > * { pointer-events: auto; }
+
+.player-idle .player-chrome {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.player-idle { cursor: none; }
 
 .player-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: calc(env(safe-area-inset-top, 0) + 10px) max(16px, env(safe-area-inset-left, 0)) 10px;
-  background: #000;
+  padding: calc(env(safe-area-inset-top, 0) + 12px) max(16px, env(safe-area-inset-right, 0))
+           28px max(16px, env(safe-area-inset-left, 0));
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
 }
 
 .player-close {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
   font-size: 16px;
-  color: var(--text-dim);
-  padding: 8px 4px;
+  color: #f4f4f6;
+  padding: 8px 6px;
   background: none;
   border: none;
   cursor: pointer;
 }
 
 .player-title {
+  flex: 1;
   font-size: 15px;
+  color: #f4f4f6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.player-video {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  background: #000;
+.player-quality { flex: none; }
+
+.player-quality select {
+  background: rgba(20, 20, 26, 0.85);
+  color: #f4f4f6;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  font-size: 14px;
 }
+
+.player-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 36px max(16px, env(safe-area-inset-right, 0))
+           calc(env(safe-area-inset-bottom, 0) + 14px) max(16px, env(safe-area-inset-left, 0));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0));
+}
+
+.player-scrub {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.player-time {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: #d8d8e0;
+  /* Fixed width, or the whole bar jolts sideways every time the seconds tick
+     from a one-digit value to a two-digit one. */
+  min-width: 52px;
+  text-align: center;
+}
+
+.player-seek {
+  flex: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  /* A thin line is hard to hit with a thumb; the padding is the target. */
+  padding: 12px 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.player-seek::-webkit-slider-runnable-track,
+.player-seek::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.player-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin-top: -5.5px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+}
+
+.player-seek::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+}
+
+.player-seek:disabled { opacity: 0.4; cursor: default; }
+
+.player-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.player-buttons button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Comfortably past the smallest target a finger can be expected to hit. */
+  min-width: 46px;
+  min-height: 46px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #f4f4f6;
+  cursor: pointer;
+}
+
+.player-buttons button:active { background: rgba(255, 255, 255, 0.16); }
+
+.player-play { color: #fff; }
+
+.player-spacer { flex: 1; }
 
 .player-note {
   position: absolute;
@@ -159,8 +297,28 @@ html, body {
   background: rgba(0, 0, 0, 0.75);
 }
 
+/*
+ * Buffering is not an error and should not black the picture out. The last
+ * frame stays visible behind a spinner, which is the difference between "this
+ * is catching up" and "this has broken".
+ */
+.player-note-quiet {
+  background: rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
 .player-note p { margin: 0; color: var(--text-dim); }
+.player-note-quiet p { color: #e8e8ee; }
 .player-error { color: #ff6b74; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 /* The page beneath must not scroll while the player is over it. */
 body:has(.player) { overflow: hidden; }

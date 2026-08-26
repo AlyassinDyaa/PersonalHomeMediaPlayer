@@ -23,8 +23,8 @@ desktop/    Electron + React UI, driving mpv for playback.
 tools/      Development scripts for profiling a library and testing the parser.
 ```
 
-The server is a separate process from the UI on purpose: it keeps the door open
-for phone/TV clients later without restructuring anything.
+The server is a separate process from the UI on purpose, which is what makes
+the browser client below possible without restructuring anything.
 
 Playback is handled by **mpv** rather than an HTML `<video>` element. A browser
 engine cannot open Matroska at all, and cannot decode DTS or TrueHD, which rules
@@ -36,6 +36,50 @@ and keyboard events never reach mpv's child window, so its on-screen controls
 never appear and seeking is impossible. Both modes were compared by screenshot
 before choosing. Embedding remains available behind `embedPlayer` in config for
 future work on a custom overlay.
+
+## Watching on a phone or tablet
+
+Switch sharing on under Library, set a passcode, and the library is reachable
+from any browser on the house network. Safari gets the same interface the
+desktop window runs, not a cut-down one.
+
+Getting a file to play there is the interesting part, because Safari opens
+almost nothing this library is stored as. Each file is judged before playback:
+
+- **Handed over untouched** when it is already H.264 or HEVC in an MP4.
+- **Repackaged** when the picture is fine but the container is not — most of
+  the library, and cheap, because the picture is copied rather than re-encoded.
+- **Re-encoded** when the picture genuinely cannot be played, or when it is too
+  large to send. A Blu-ray remux is H.264 and could be copied byte for byte,
+  but thirty megabits a second is more than household Wi-Fi carries; copying it
+  produces a player that buffers forever while looking, by every other measure,
+  correct. Bitrate and picture size are therefore weighed alongside codec, and
+  anything over the ceiling is sent smaller.
+
+Re-encoding uses the machine's graphics hardware — NVENC, Quick Sync or
+VideoToolbox — chosen at startup by making each candidate encode a fraction of a
+second and seeing which one actually works, since being listed by ffmpeg says
+nothing about whether the hardware is present. Software encoding is the
+fallback, and is the difference between a film that plays and one that stalls
+every few seconds.
+
+Conversion runs from the point being watched and is served over HLS as it is
+produced, so playback starts in a few seconds rather than after the whole file
+has been through ffmpeg. Seeking within what has already been produced is
+instant and reuses the same conversion; only a jump past the end of it starts a
+new one. A viewer whose player is paused says so every half minute, so a pause
+does not end the stream.
+
+The player's controls are the app's rather than Safari's. They have to be: a
+stream produced from the middle of an episode makes the video element believe
+the episode is nought seconds long and growing, so its own timeline shows a
+fraction of the runtime. Ours counts in absolute time within the film, whatever
+the stream underneath is doing.
+
+Quality can be forced down from the player for a device at the far end of the
+house, and the choice is remembered.
+
+Subtitles are not carried to browsers yet; the desktop player has them.
 
 ## Scanner
 
