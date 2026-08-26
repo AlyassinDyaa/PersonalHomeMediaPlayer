@@ -369,6 +369,14 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 <code className="root-path" style={{ fontSize: 15 }}>{settings.networkUrl}</code>
               </div>
               <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+                Type it including <code>http://</code>. Most browsers now assume
+                <code> https://</code> for an address typed without one, and this
+                library is served over plain HTTP on your own network — so a
+                browser that guesses reports a connection error rather than
+                asking. In Chrome, turning off “Always use secure connections”
+                stops it guessing.
+              </p>
+              <p className="settings-hint" style={{ margin: '8px 0 0' }}>
                 Both devices must be on the same Wi-Fi, and this computer has to be
                 awake. Windows may ask to allow the connection the first time.
               </p>
