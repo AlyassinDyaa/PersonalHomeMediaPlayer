@@ -7,6 +7,7 @@ import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
 import Settings from './components/Settings.jsx';
 import { headerPreview, brandColor } from './branding.js';
+import { useSwipe } from './useSwipe.js';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
@@ -26,7 +27,15 @@ const VIEWS = [
   { id: 'library', label: 'Library' },
 ];
 
-export function App({ info }) {
+/**
+ * The library.
+ *
+ * The same component serves the desktop window and a browser on the network, so
+ * a tablet gets the real interface rather than a reduced one. Only playback
+ * differs: the desktop app hands the file to mpv, a browser plays it in the
+ * page, and onPlayVideo is how that is supplied.
+ */
+export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   // Initial view can be deep-linked via the URL hash (#library).
   const [view, setView] = useState(() => {
     const fromHash = (window.location.hash || '').replace('#', '').split('/')[0];
@@ -66,6 +75,12 @@ export function App({ info }) {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Something finished playing elsewhere in the app; pick up where it got to
+  // rather than reloading the page and losing the reader's place.
+  useEffect(() => {
+    if (refreshSignal) reload();
+  }, [refreshSignal, reload]);
 
   /** Reflect a settings change in the header without waiting for a reload. */
   const applyBranding = useCallback((next) => {
@@ -127,12 +142,20 @@ export function App({ info }) {
    * only an id and a title, and their file paths resolve as each one starts.
    */
   const play = useCallback(async (video, item) => {
-    if (!window.media?.play) {
-      setError('Playback is only available in the desktop app.');
-      return;
-    }
     try {
       const full = await api.video(video.id);
+
+      // In a browser the page plays the video itself. There is no queue: the
+      // file is streamed on demand, so the next episode is started when it is
+      // asked for rather than handed over in advance.
+      if (onPlayVideo) {
+        onPlayVideo({ ...video, ...full }, item);
+        return;
+      }
+      if (!window.media?.play) {
+        setError('Playback is only available in the desktop app.');
+        return;
+      }
 
       const episodes = (item.seasons ?? [])
         .flatMap((season) => season.episodes)
@@ -158,7 +181,7 @@ export function App({ info }) {
     } catch (err) {
       setError(err.message);
     }
-  }, []);
+  }, [onPlayVideo]);
 
   /** Play from an item tile: movies play directly, shows play their next episode. */
   const playItem = useCallback(async (item) => {
@@ -192,6 +215,25 @@ export function App({ info }) {
     window.scrollTo(0, 0);
   }, []);
 
+  /**
+   * Swiping left and right moves along the tabs, and swiping right out of a
+   * title goes back to where it was opened from — the gesture a tablet expects
+   * where a desktop would reach for the Back button.
+   */
+  const step = (direction) => {
+    const at = VIEWS.findIndex((entry) => entry.id === view);
+    const next = VIEWS[at + direction];
+    if (next) goto(next.id);
+  };
+
+  const swipe = useSwipe({
+    onLeft: () => { if (!detailId) step(1); },
+    onRight: () => {
+      if (detailId) setDetailId(null);
+      else step(-1);
+    },
+  });
+
   const goto = (next) => {
     setView(next);
     setDetailId(null);
@@ -207,7 +249,7 @@ export function App({ info }) {
              brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
-        <div className="view" key={detailId}>
+        <div className="view" key={detailId} {...swipe}>
           <Detail
             itemId={detailId}
             onBack={() => setDetailId(null)}
@@ -225,9 +267,11 @@ export function App({ info }) {
       <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled}
            brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
 
-      <div className="view" key={view + (query.trim() ? ':search' : '')}>
+      <div className="view" key={view + (query.trim() ? ':search' : '')} {...swipe}>
 
-      {info && info.mpvAvailable === false && (
+      {/* Only worth saying on the computer that would be running mpv. A
+          browser plays the video itself and has no use for the advice. */}
+      {info && info.mpvAvailable === false && !onPlayVideo && (
         <div className="banner">
           mpv was not found, so playback is disabled. Install mpv, or set <code>mpvPath</code> in config.json.
         </div>

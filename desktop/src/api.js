@@ -23,6 +23,14 @@ export async function initApi() {
 
 async function request(pathname, options) {
   const response = await fetch(apiBase + pathname, options);
+
+  // A lapsed session in a browser means the passcode is wanted again. Every
+  // call would otherwise fail with an error the page can do nothing about.
+  if (response.status === 401 && typeof window !== 'undefined' && !window.media) {
+    window.location.href = '/login';
+    throw new Error('Not signed in');
+  }
+
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
     throw new Error(detail.error || response.status + ' ' + response.statusText);

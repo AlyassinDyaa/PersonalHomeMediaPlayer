@@ -485,8 +485,24 @@ app.post('/api/scan', async (req, res) => {
   }
 });
 
-// The browser interface. Last, so it never shadows an API route.
-app.use(express.static(webAppDir(), { index: 'index.html', maxAge: '1h' }));
+/*
+ * The browser interface. Last, so it never shadows an API route.
+ *
+ * Everything but the entry page is named with a hash of its contents and can be
+ * kept for good. The entry page cannot be cached at all: it is what names those
+ * files, so a stale copy pins a tablet to the previous build — which is exactly
+ * what happened after the first rebuild.
+ */
+app.use(express.static(webAppDir(), {
+  index: 'index.html',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('index.html')) {
+      res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
 
 // Anything else that is not an API call is the single-page app being deep-linked.
 app.get(/^\/(?!api\/|artwork\/).*/, (req, res, next) => {
@@ -495,6 +511,7 @@ app.get(/^\/(?!api\/|artwork\/).*/, (req, res, next) => {
     next();
     return;
   }
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(index);
 });
 

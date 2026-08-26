@@ -1,0 +1,183 @@
+/*
+ * What a touch screen needs on top of the desktop stylesheet.
+ *
+ * The interface is the same one the computer runs, so this changes nothing
+ * about how it looks — only how it answers a finger. Everything here is either
+ * a target that was sized for a mouse pointer, an effect that only a hover can
+ * reach, or a piece of the screen an iPad puts something else on top of.
+ */
+
+/* Stops Safari waiting 300ms for a possible double-tap before acting. */
+* { touch-action: manipulation; }
+
+html, body {
+  /* Never scrolls sideways, whatever a row does inside itself. */
+  overflow-x: hidden;
+  /* Rubber-banding at the top drags the fixed header away with it. */
+  overscroll-behavior-y: none;
+}
+
+/* Nothing should look selectable except the things that are. */
+.nav, .row, .card, .hero-actions, .season-tabs, .view-toggle {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* --------------------------------------------------------------- header --- */
+
+.nav {
+  /* Clear of the camera housing and the rounded corners. */
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: max(24px, env(safe-area-inset-left, 0));
+  padding-right: max(24px, env(safe-area-inset-right, 0));
+}
+
+@media (pointer: coarse) {
+  .nav-link {
+    /* A finger is about 44px across; a mouse pointer is one pixel. */
+    padding: 10px 4px;
+    font-size: 15px;
+  }
+
+  .nav-links { gap: 18px; }
+
+  /* In portrait, or a Split View pane, the tabs matter more than the name. */
+  @media (max-width: 860px) {
+    .nav-brand { max-width: 34vw; overflow: hidden; text-overflow: ellipsis; }
+    .nav-links { gap: 14px; }
+    .search-box { max-width: 180px; }
+  }
+
+  @media (max-width: 640px) {
+    .nav-brand { display: none; }
+  }
+}
+
+/* ---------------------------------------------------------------- rows --- */
+
+@media (pointer: coarse) {
+  /* The arrows only appear on hover, which a finger cannot do — and swiping
+     the row is the natural gesture anyway. */
+  .row-arrow { display: none; }
+
+  .row-scroller {
+    /* Momentum, and each poster coming to rest at the edge. */
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    scroll-padding-left: 42px;
+  }
+
+  .row-scroller > * { scroll-snap-align: start; }
+
+  /* Hover growth leaves a tile stuck large after a tap; press feedback is
+     what a touch screen wants instead. */
+  .card:hover { transform: none; }
+  .card:active { transform: scale(0.97); }
+  .card-poster { transition: transform 0.14s ease; }
+
+  .season-tabs, .season-row {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .season-tabs::-webkit-scrollbar, .season-row::-webkit-scrollbar { display: none; }
+  .season-tab { flex: 0 0 auto; }
+}
+
+/* ------------------------------------------------------------- controls --- */
+
+@media (pointer: coarse) {
+  .btn, .season-tab, .view-btn, .chip {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .episode { padding: 18px 12px; }
+
+  /* 16px or Safari zooms the whole page when the field takes focus. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Tooltips are hover-only; on a touch screen they never appear and their
+     absence is invisible, but the reserved space is not. */
+  [data-tip]::after { display: none; }
+}
+
+/* --------------------------------------------------------------- player --- */
+
+.player {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(env(safe-area-inset-top, 0) + 10px) max(16px, env(safe-area-inset-left, 0)) 10px;
+  background: #000;
+}
+
+.player-close {
+  font-size: 16px;
+  color: var(--text-dim);
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.player-title {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-video {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: #000;
+}
+
+.player-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.player-note p { margin: 0; color: var(--text-dim); }
+.player-error { color: #ff6b74; }
+
+/* The page beneath must not scroll while the player is over it. */
+body:has(.player) { overflow: hidden; }
+
+/*
+ * At Split View widths the four tabs no longer fit on one line, and "TV Shows"
+ * broke across two, which made the row of tabs look accidental. They stay on
+ * one line and the strip scrolls instead.
+ */
+@media (pointer: coarse) and (max-width: 700px) {
+  .nav-links {
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-link { white-space: nowrap; flex: 0 0 auto; }
+  .search-box { max-width: 132px; }
+}
