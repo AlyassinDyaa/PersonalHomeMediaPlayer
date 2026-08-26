@@ -90,6 +90,23 @@ app.post('/api/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+/*
+ * The icon and the manifest are served to anyone who asks.
+ *
+ * They sit behind nothing because they reveal nothing — a red triangle and an
+ * application name — and because they are needed before signing in: the login
+ * page shows the icon, and adding the library to a Home Screen fetches it.
+ */
+app.get(['/icon-180.png', '/icon-512.png', '/manifest.webmanifest'], (req, res, next) => {
+  const file = path.join(webAppDir(), path.basename(req.path));
+  if (!fs.existsSync(file)) {
+    next();
+    return;
+  }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(file);
+});
+
 // Everything past this point needs to be either local or signed in.
 app.use(requireAuth);
 
