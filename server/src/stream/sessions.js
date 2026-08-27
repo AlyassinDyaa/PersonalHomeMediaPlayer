@@ -386,6 +386,21 @@ export async function sessionStatus(id) {
   };
 }
 
+/**
+ * How many streams are being produced right now.
+ *
+ * Asked by the desktop app, which uses it to decide whether the computer may
+ * be allowed to fall asleep. Someone watching is the clearest possible reason
+ * not to.
+ */
+export function activeSessionCount() {
+  let live = 0;
+  for (const session of sessions.values()) {
+    if (!session.stopped && !session.failed) live++;
+  }
+  return live;
+}
+
 /** Close every session; used when the server is shutting down. */
 export async function closeAllSessions() {
   await Promise.all([...sessions.values()].map((s) => destroySession(s, 'shutting down')));

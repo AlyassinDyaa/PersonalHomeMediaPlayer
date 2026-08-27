@@ -23,7 +23,8 @@ import {
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
 } from './auth.js';
 import {
-  openSession, touchSession, keepAlive, sessionStatus, clearStreamCache, closeAllSessions,
+  openSession, touchSession, keepAlive, sessionStatus, activeSessionCount,
+  clearStreamCache, closeAllSessions,
 } from './stream/sessions.js';
 import { ffmpegAvailable, probeFile } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
@@ -32,6 +33,20 @@ import { webAppDir, loginPage } from './webapp.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+/**
+ * When another device on the network last asked for anything.
+ *
+ * The desktop app reads this to decide whether the computer may sleep. A
+ * request from this machine does not count: the desktop app polls constantly,
+ * and counting its own traffic would keep the computer awake forever.
+ */
+let lastRemoteRequestAt = 0;
+
+app.use((req, res, next) => {
+  if (!isLocalRequest(req)) lastRemoteRequestAt = Date.now();
+  next();
+});
 
 /**
  * Begin a server-sent event response and return a send(event, data) function.
@@ -226,6 +241,25 @@ function settingsWithNetwork() {
     streamingReady: ffmpegAvailable(),
   };
 }
+
+/**
+ * Whether anything would be lost by this computer going to sleep.
+ *
+ * Read by the desktop app rather than acted on here: only the app has the
+ * means to hold the machine awake, and only the server knows whether anyone
+ * is watching.
+ */
+app.get('/api/activity', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    sharing: config.remoteAccess && Boolean(config.passcodeHash),
+    keepAwakeWhileSharing: config.keepAwakeWhileSharing,
+    streams: activeSessionCount(),
+    secondsSinceRemoteRequest: lastRemoteRequestAt
+      ? Math.round((Date.now() - lastRemoteRequestAt) / 1000)
+      : null,
+  });
+});
 
 app.get('/api/settings', (req, res) => {
   res.json(settingsWithNetwork());

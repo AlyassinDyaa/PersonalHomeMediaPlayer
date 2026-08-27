@@ -8,7 +8,9 @@
  * across versions, and the renderer's module format is independent of this.
  */
 
-const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron');
+const {
+  app, BrowserWindow, ipcMain, shell, dialog, screen, powerSaveBlocker,
+} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
@@ -275,6 +277,85 @@ function stopApiServer() {
 
 function apiUrl(pathname) {
   return 'http://127.0.0.1:' + serverPort + pathname;
+}
+
+// ------------------------------------------------------------ staying up ---
+
+/**
+ * Keeping the computer awake while the library is being shared.
+ *
+ * A sleeping computer serves nobody. Watching on a tablet while the laptop's
+ * screen was off simply stopped, because a few minutes later the machine
+ * suspended and the server suspended with it — and a laptop already asleep
+ * cannot be reached at all, so nothing could be started either.
+ *
+ * Only system suspension is blocked, never the display: the screen turning
+ * itself off is wanted, and holding that up would leave a laptop lit all night
+ * for no reason.
+ */
+let awakeHandle = null;
+let awakeTimer = null;
+
+/** How often to reconsider. Sleep is not sudden; half a minute is ample. */
+const AWAKE_POLL_MS = 30_000;
+
+/**
+ * A stream still running matters even after sharing is switched off mid-episode,
+ * so recent activity keeps the machine up for a while on its own.
+ */
+const RECENT_ACTIVITY_SECONDS = 15 * 60;
+
+function holdAwake(reason) {
+  if (awakeHandle !== null && powerSaveBlocker.isStarted(awakeHandle)) return;
+  awakeHandle = powerSaveBlocker.start('prevent-app-suspension');
+  console.log('Staying awake: ' + reason);
+}
+
+function releaseAwake() {
+  if (awakeHandle === null) return;
+  if (powerSaveBlocker.isStarted(awakeHandle)) powerSaveBlocker.stop(awakeHandle);
+  awakeHandle = null;
+  console.log('Allowing the computer to sleep again.');
+}
+
+async function reviewSleep() {
+  let activity;
+  try {
+    const response = await fetch(apiUrl('/api/activity'));
+    if (!response.ok) return;
+    activity = await response.json();
+  } catch {
+    // The server is starting, or gone. Neither is a reason to change what the
+    // machine is currently doing.
+    return;
+  }
+
+  if (activity.streams > 0) {
+    holdAwake('something is being watched');
+    return;
+  }
+  if (activity.sharing && activity.keepAwakeWhileSharing) {
+    holdAwake('the library is shared on the network');
+    return;
+  }
+  const since = activity.secondsSinceRemoteRequest;
+  if (since !== null && since < RECENT_ACTIVITY_SECONDS) {
+    holdAwake('another device was using the library recently');
+    return;
+  }
+  releaseAwake();
+}
+
+function watchForSleep() {
+  if (awakeTimer) return;
+  reviewSleep();
+  awakeTimer = setInterval(reviewSleep, AWAKE_POLL_MS);
+}
+
+function stopWatchingForSleep() {
+  if (awakeTimer) clearInterval(awakeTimer);
+  awakeTimer = null;
+  releaseAwake();
 }
 
 function createMainWindow() {
@@ -1214,6 +1295,7 @@ app.whenReady().then(async () => {
 
   registerIpc();
   createMainWindow();
+  watchForSleep();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
@@ -1225,6 +1307,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  stopWatchingForSleep();
   if (player) await player.stop();
   stopApiServer();
 });

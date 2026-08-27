@@ -143,6 +143,32 @@ check('an empty value removes the key rather than storing a blank one', () => {
   assert.strictEqual(resolveConfig(dir).tmdbApiKey, null);
 });
 
+// --- staying awake ---------------------------------------------------------
+
+check('the computer is kept awake while sharing unless told otherwise', () => {
+  // A sleeping computer serves nobody, so this defaults on rather than off.
+  const dir = sandboxWith({});
+  assert.strictEqual(resolveConfig(dir).view.keepAwakeWhileSharing, true);
+});
+
+check('turning off keep-awake sticks', () => {
+  const dir = sandboxWith({});
+  resolveConfig(dir, {}, 'saveSettings({ keepAwakeWhileSharing: false });');
+  assert.strictEqual(resolveConfig(dir).view.keepAwakeWhileSharing, false);
+});
+
+check('keep-awake can be turned back on', () => {
+  const dir = sandboxWith({ keepAwakeWhileSharing: false });
+  resolveConfig(dir, {}, 'saveSettings({ keepAwakeWhileSharing: true });');
+  assert.strictEqual(resolveConfig(dir).view.keepAwakeWhileSharing, true);
+});
+
+check('anything that is not a yes or no is ignored rather than stored', () => {
+  const dir = sandboxWith({});
+  resolveConfig(dir, {}, "saveSettings({ keepAwakeWhileSharing: 'yes please' });");
+  assert.strictEqual(resolveConfig(dir).view.keepAwakeWhileSharing, true);
+});
+
 // --- what the interface is allowed to see ---------------------------------
 
 check('the interface is shown enough of the key to recognise it', () => {

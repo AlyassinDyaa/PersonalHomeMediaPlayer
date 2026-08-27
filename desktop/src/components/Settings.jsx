@@ -382,6 +382,25 @@ export function Settings({ onScanned, onSettingsChanged }) {
             </span>
           </label>
 
+          {settings.remoteAccess && (
+            <label className="toggle-row" style={{ marginTop: 14 }}>
+              <input
+                type="checkbox"
+                checked={settings.keepAwakeWhileSharing !== false}
+                onChange={(event) => saveToggle('keepAwakeWhileSharing', event.target.checked)}
+              />
+              <span>
+                <strong>Keep this computer awake while sharing</strong>
+                <span className="toggle-note">
+                  A sleeping computer serves nobody: watching on the iPad stops
+                  a few minutes after this screen goes dark, and a computer
+                  already asleep cannot be reached at all. The screen still
+                  turns itself off — only sleeping is held back.
+                </span>
+              </span>
+            </label>
+          )}
+
           {settings.remoteAccess && settings.networkUrl && (
             <div className="scan-result" style={{ marginTop: 14 }}>
               Open this on the iPad:
@@ -397,8 +416,11 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 stops it guessing.
               </p>
               <p className="settings-hint" style={{ margin: '8px 0 0' }}>
-                Both devices must be on the same Wi-Fi, and this computer has to be
-                awake. Windows may ask to allow the connection the first time.
+                Both devices must be on the same Wi-Fi, and this app has to be
+                running. Windows may ask to allow the connection the first time.
+                Closing the lid still sleeps a laptop whatever this app asks for
+                — that is a Windows power setting, not something an application
+                can overrule.
               </p>
             </div>
           )}

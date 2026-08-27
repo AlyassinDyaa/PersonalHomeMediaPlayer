@@ -108,6 +108,18 @@ export const config = {
   skipIntroEnabled: local.skipIntroEnabled ?? defaults.skipIntroEnabled ?? true,
   skipOutroEnabled: local.skipOutroEnabled ?? defaults.skipOutroEnabled ?? true,
 
+  /**
+   * Whether the computer stays awake while the library is shared.
+   *
+   * On by default, because a sleeping computer serves nobody: a tablet halfway
+   * through an episode simply loses the picture, and one that has not started
+   * yet cannot reach the library at all. Sharing is already a deliberate choice
+   * rather than something that happens quietly, so staying awake to honour it
+   * is the behaviour that matches the intent. Only the system is kept up — the
+   * screen is still free to turn itself off.
+   */
+  keepAwakeWhileSharing: local.keepAwakeWhileSharing ?? defaults.keepAwakeWhileSharing ?? true,
+
   /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
   libraryName: local.libraryName ?? defaults.libraryName ?? '',
   libraryColor: local.libraryColor ?? defaults.libraryColor ?? '',
@@ -217,6 +229,9 @@ export function saveSettings(patch) {
         .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
     )];
   }
+  if (typeof patch.keepAwakeWhileSharing === 'boolean') {
+    allowed.keepAwakeWhileSharing = patch.keepAwakeWhileSharing;
+  }
   if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
   if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
@@ -285,6 +300,7 @@ export function settingsView() {
   return {
     libraryName: config.libraryName,
     libraryColor: config.libraryColor,
+    keepAwakeWhileSharing: config.keepAwakeWhileSharing,
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
     libraryRoots: config.libraryRoots,

@@ -79,6 +79,14 @@ the stream underneath is doing.
 Quality can be forced down from the player for a device at the far end of the
 house, and the choice is remembered.
 
+While the library is shared, the computer is held awake — system suspension
+only, so the screen still turns itself off. A sleeping computer serves nobody:
+watching on a tablet stops a few minutes after the laptop's screen goes dark,
+and a laptop already asleep cannot be reached at all. Closing a laptop's lid
+still sleeps it; that is an operating system power setting rather than
+something an application can overrule, and it is the strongest argument for
+moving the server onto something that stays on.
+
 Subtitles are not carried to browsers yet; the desktop player has them.
 
 ## Scanner
