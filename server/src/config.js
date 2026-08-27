@@ -24,10 +24,36 @@ function loadDotEnv() {
     if (eq === -1) continue;
     const key = line.slice(0, eq).trim();
     const value = line.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+    // A key left behind with nothing after the equals sign means "no value",
+    // not "the empty value". Loading it would mask the saved setting below.
+    if (!value) continue;
     if (!(key in process.env)) process.env[key] = value;
   }
 }
 loadDotEnv();
+
+/**
+ * The first of these values that is actually set.
+ *
+ * `??` alone is not enough, because an empty string is neither null nor
+ * undefined and therefore wins. That is how a saved API key could appear to
+ * vanish on every restart: a blank TMDB_API_KEY — a line left in .env after
+ * the key was removed, or a system variable set to nothing — took precedence
+ * over the key in the settings file, every time, however many times it was
+ * entered again.
+ */
+function firstSet(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      return trimmed;
+    }
+    return value;
+  }
+  return null;
+}
 
 function readJson(file) {
   try {
@@ -52,24 +78,27 @@ export const CONFIG_DIR = process.env.MEDIA_CONFIG_DIR || PROJECT_ROOT;
 const defaults = readJson(path.join(PROJECT_ROOT, 'config.json'));
 const local = readJson(path.join(CONFIG_DIR, 'config.local.json'));
 
-const dataDir = process.env.MEDIA_DATA_DIR
-  ?? local.dataDir
-  ?? defaults.dataDir
+const dataDir = firstSet(process.env.MEDIA_DATA_DIR, local.dataDir, defaults.dataDir)
   ?? path.join(PROJECT_ROOT, 'data');
 
 export const config = {
   /** Directories to scan. A missing root is reported, not fatal. */
-  libraryRoots: (process.env.MEDIA_LIBRARY_ROOTS?.split(path.delimiter).filter(Boolean))
-    ?? local.libraryRoots
-    ?? defaults.libraryRoots
-    ?? [],
+  libraryRoots: firstSet(
+    // An empty list is not an answer either: a blank variable must fall
+    // through to the settings file rather than emptying the library.
+    process.env.MEDIA_LIBRARY_ROOTS?.split(path.delimiter).filter(Boolean).length
+      ? process.env.MEDIA_LIBRARY_ROOTS.split(path.delimiter).filter(Boolean)
+      : null,
+    local.libraryRoots?.length ? local.libraryRoots : null,
+    defaults.libraryRoots?.length ? defaults.libraryRoots : null,
+  ) ?? [],
 
   dataDir,
   databasePath: path.join(dataDir, 'library.db'),
   artworkDir: path.join(dataDir, 'artwork'),
 
-  tmdbApiKey: process.env.TMDB_API_KEY ?? local.tmdbApiKey ?? null,
-  tmdbLanguage: process.env.TMDB_LANGUAGE ?? local.tmdbLanguage ?? 'en-US',
+  tmdbApiKey: firstSet(process.env.TMDB_API_KEY, local.tmdbApiKey),
+  tmdbLanguage: firstSet(process.env.TMDB_LANGUAGE, local.tmdbLanguage) ?? 'en-US',
 
   /**
    * Skip Intro and Skip Outro prompts. Both can be turned off: without chapter
@@ -86,10 +115,10 @@ export const config = {
   port: Number(process.env.PORT ?? local.port ?? defaults.port ?? 8787),
 
   /** Path to the mpv binary; resolved at playback time if left null. */
-  mpvPath: process.env.MPV_PATH ?? local.mpvPath ?? defaults.mpvPath ?? null,
+  mpvPath: firstSet(process.env.MPV_PATH, local.mpvPath, defaults.mpvPath),
 
   /** Folder holding ffmpeg and ffprobe; found automatically when left null. */
-  ffmpegDir: process.env.FFMPEG_DIR ?? local.ffmpegDir ?? defaults.ffmpegDir ?? null,
+  ffmpegDir: firstSet(process.env.FFMPEG_DIR, local.ffmpegDir, defaults.ffmpegDir),
 
   /**
    * Whether other devices on the home network may reach the library.
@@ -230,7 +259,11 @@ export function saveSettings(patch) {
   if (typeof patch.dataDir === 'string' && patch.dataDir.trim()) {
     allowed.dataDir = patch.dataDir.trim().replace(/\\/g, '/').replace(/\/+$/, '');
   }
-  if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
+  // An empty value is how the key is removed. Storing it as a blank string
+  // would leave a setting that reads as present and behaves as absent.
+  if (typeof patch.tmdbApiKey === 'string') {
+    allowed.tmdbApiKey = patch.tmdbApiKey.trim() || null;
+  }
 
   const current = readJson(LOCAL_CONFIG_PATH);
   const next = { ...current, ...allowed };
@@ -239,6 +272,12 @@ export function saveSettings(patch) {
 
   Object.assign(config, allowed);
   return settingsView();
+}
+
+/** Enough of a secret to recognise it by, and no more. */
+function keyHint(key) {
+  if (!key) return null;
+  return key.length <= 4 ? '••••' : '••••' + key.slice(-4);
 }
 
 /** The subset of configuration safe to expose to the UI. */
@@ -258,8 +297,12 @@ export function settingsView() {
     remoteAccess: config.remoteAccess,
     // Whether one is set, never what it is.
     passcodeSet: Boolean(config.passcodeHash),
-    // Never return the key itself, only whether one is present.
+    // Never return the key itself, only whether one is present and enough of
+    // it to recognise. Without that the field is always blank, there is no way
+    // to tell a saved key from a lost one, and the natural response is to paste
+    // it again — which is what made this look like it was never being saved.
     tmdbConfigured: hasTmdb(),
+    tmdbKeyHint: keyHint(config.tmdbApiKey),
     port: config.port,
   };
 }

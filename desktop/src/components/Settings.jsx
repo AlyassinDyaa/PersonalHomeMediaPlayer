@@ -8,6 +8,24 @@ import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
  * progress. Scan progress arrives over server-sent events so the bar reflects
  * real work rather than an animation.
  */
+/**
+ * What to say about a key that has just been stored.
+ *
+ * The key is kept in every case — an unreachable service says nothing about
+ * whether the key is good, and a library on an isolated network still needs to
+ * be able to store one ready for the next time it is connected.
+ */
+function keyMessage(result) {
+  if (!result) {
+    return 'A free key from themoviedb.org supplies posters, descriptions and episode titles.';
+  }
+  if (result.ok === true) return 'Saved and working. Run a scan to fetch artwork and descriptions.';
+  if (result.ok === null || result.reachable === false) {
+    return 'Saved, but TMDB could not be reached to check it. It will be used next time there is a connection.';
+  }
+  return 'Saved, but ' + (result.error ?? 'TMDB rejected it') + '. Artwork will stay missing until it is replaced.';
+}
+
 export function Settings({ onScanned, onSettingsChanged }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
@@ -18,7 +36,9 @@ export function Settings({ onScanned, onSettingsChanged }) {
   const [passcode, setPasscode] = useState('');
   const [sharingBusy, setSharingBusy] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
+  // null until a key is saved, then whatever TMDB said about it.
+  const [keyResult, setKeyResult] = useState(null);
+  const [keyBusy, setKeyBusy] = useState(false);
   const [name, setName] = useState('');
   const [nameSaved, setNameSaved] = useState(false);
   const [color, setColor] = useState('');
@@ -501,35 +521,62 @@ export function Settings({ onScanned, onSettingsChanged }) {
             </span>
           </div>
 
+          {settings.tmdbConfigured && (
+            <div className="status-row">
+              <span>Stored key</span>
+              <span className="key-stored">
+                <code>{settings.tmdbKeyHint ?? '••••'}</code>
+                <button
+                  className="btn-link"
+                  onClick={async () => {
+                    try {
+                      setSettings(await api.saveSettings({ tmdbApiKey: '' }));
+                      setKeyResult(null);
+                    } catch (err) {
+                      setError(err.message);
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+              </span>
+            </div>
+          )}
+
           <div className="key-row">
             <input
               type="password"
               className="key-input"
               value={apiKey}
               placeholder={settings.tmdbConfigured ? 'Replace TMDB API key' : 'Paste your TMDB API key'}
-              onChange={(event) => { setApiKey(event.target.value); setKeySaved(false); }}
+              onChange={(event) => { setApiKey(event.target.value); setKeyResult(null); }}
               spellCheck={false}
             />
             <button
               className="btn btn-secondary"
-              disabled={!apiKey.trim()}
+              disabled={!apiKey.trim() || keyBusy}
               onClick={async () => {
+                setKeyBusy(true);
                 try {
-                  setSettings(await api.saveSettings({ tmdbApiKey: apiKey.trim() }));
+                  const saved = await api.saveSettings({ tmdbApiKey: apiKey.trim() });
+                  setSettings(saved);
                   setApiKey('');
-                  setKeySaved(true);
+                  setKeyResult(saved.tmdbKeyCheck ?? { ok: true, reachable: true });
                 } catch (err) {
                   setError(err.message);
+                } finally {
+                  setKeyBusy(false);
                 }
               }}
             >
-              Save key
+              {keyBusy ? 'Checking…' : 'Save key'}
             </button>
           </div>
-          <p className="settings-hint" style={{ margin: '8px 0 0' }}>
-            {keySaved
-              ? 'Saved. Run a scan to fetch artwork and descriptions.'
-              : 'A free key from themoviedb.org supplies posters, descriptions and episode titles.'}
+          <p
+            className={'settings-hint' + (keyResult && keyResult.ok === false ? ' warn-text' : '')}
+            style={{ margin: '8px 0 0' }}
+          >
+            {keyMessage(keyResult)}
           </p>
           <div className="status-row">
             <span>Player</span>

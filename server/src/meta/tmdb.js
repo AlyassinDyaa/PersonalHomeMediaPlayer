@@ -66,6 +66,45 @@ function cachePut(url, body) {
 }
 
 /**
+ * Whether a key actually works, asked before it is trusted.
+ *
+ * A mistyped or revoked key saves perfectly happily and then produces no
+ * artwork and no descriptions, with nothing anywhere saying why. That is
+ * indistinguishable from the key not having been saved, and the natural
+ * response is to enter it again — so it is worth one request to find out.
+ *
+ * Deliberately outside the cache and the queue: this is testing a candidate,
+ * not fetching anything, and it must not be answered from a previous key's
+ * results.
+ *
+ * No connection is not a bad key. A library on an isolated network has no way
+ * to reach TMDB and must still be able to store a key for the next time it is
+ * plugged in, so an unreachable service is reported as unknown rather than as
+ * a rejection.
+ *
+ * @param {string} key
+ * @returns {Promise<{ok: boolean|null, reachable: boolean, error?: string}>}
+ */
+export async function verifyApiKey(key) {
+  const candidate = String(key ?? '').trim();
+  if (!candidate) return { ok: false, reachable: true, error: 'No key was given' };
+
+  try {
+    const response = await fetch(
+      BASE + '/configuration?api_key=' + encodeURIComponent(candidate),
+      { signal: AbortSignal.timeout(10_000) },
+    );
+    if (response.ok) return { ok: true, reachable: true };
+    if (response.status === 401) {
+      return { ok: false, reachable: true, error: 'TMDB did not recognise that key' };
+    }
+    return { ok: false, reachable: true, error: 'TMDB answered ' + response.status };
+  } catch {
+    return { ok: null, reachable: false };
+  }
+}
+
+/**
  * GET a TMDB path with caching, concurrency limiting and retries.
  * @param {string} path Path beginning with "/", may include a query string.
  * @returns {Promise<any|null>} Parsed body, or null for 404 / permanent failure.

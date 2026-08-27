@@ -17,6 +17,7 @@ import { runScan, setOverride } from './scan/index.js';
 import * as library from './library.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
+import { verifyApiKey } from './meta/tmdb.js';
 import {
   requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
@@ -230,10 +231,19 @@ app.get('/api/settings', (req, res) => {
   res.json(settingsWithNetwork());
 });
 
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', async (req, res) => {
+  const patch = req.body ?? {};
   try {
-    saveSettings(req.body ?? {});
-    res.json(settingsWithNetwork());
+    // A key is checked before it is stored, not because a bad one is refused —
+    // it is saved either way, since the network may simply be absent — but so
+    // the interface can say whether it worked instead of leaving the viewer to
+    // deduce it from missing artwork an hour later.
+    const tmdbKeyCheck = typeof patch.tmdbApiKey === 'string' && patch.tmdbApiKey.trim()
+      ? await verifyApiKey(patch.tmdbApiKey)
+      : null;
+
+    saveSettings(patch);
+    res.json({ ...settingsWithNetwork(), tmdbKeyCheck });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

@@ -706,6 +706,29 @@ button {
 .chip-count { opacity: 0.55; margin-left: 4px; font-size: 12px; }
 .chip.active .chip-count { opacity: 0.6; }
 
+/* The stored key, shown as a few closing characters so it can be recognised
+   without being revealed, next to the way to get rid of it. */
+.key-stored { display: flex; align-items: center; gap: 12px; }
+
+.key-stored code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  color: var(--text);
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.btn-link:hover { color: var(--text); }
+
 .key-row { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
 
 .key-input {
