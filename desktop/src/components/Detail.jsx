@@ -278,6 +278,21 @@ function EpisodeTile({ episode, onPlay }) {
   );
 }
 
+/** The last segment of a path, whichever separator the machine uses. */
+function fileNameOf(fullPath) {
+  if (!fullPath) return null;
+  return String(fullPath).split(/[\\/]/).filter(Boolean).pop() ?? null;
+}
+
+/** Everything before that. */
+function folderOf(fullPath) {
+  if (!fullPath) return null;
+  const parts = String(fullPath).split(/[\\/]/);
+  parts.pop();
+  const folder = parts.join('/');
+  return folder || null;
+}
+
 /**
  * The lower half of the page.
  *
@@ -306,13 +321,22 @@ function AboutPanel({ item }) {
       formatSize(video.size),
     ].filter(Boolean).join(' · ');
     if (format) facts.push(['File', format]);
+    // The name on disk, which is the only thing here that came from the drive
+    // rather than from TMDB. Everything else on this page — the title, the
+    // year, the artwork — is what the scanner decided this file was, and when
+    // that decision is wrong there was previously no way to tell which file
+    // was being described, or to go and look at it.
+    const name = fileNameOf(video.path);
+    if (name) facts.push(['Named on disk', name]);
     if (item.subtitles?.length) {
       facts.push(['Subtitles', item.subtitles.length + ' track'
         + (item.subtitles.length === 1 ? '' : 's')]);
     }
   }
 
-  const folder = item.sourceFolders?.[0];
+  // The film's own folder is more precise than the library root it was found
+  // under, which for a single title is the whole drive.
+  const folder = folderOf(video?.path) ?? item.sourceFolders?.[0];
 
   return (
     <section className="about">
