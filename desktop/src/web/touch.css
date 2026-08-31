@@ -108,24 +108,61 @@ html, body {
 
 .player {
   position: fixed;
-  inset: 0;
-  z-index: 40;
+  top: 0;
+  left: 0;
+  right: 0;
+  /*
+   * Above the library's own top bar, which is fixed at 100. At 40 the header
+   * stayed painted over the player: the library name and the tabs sat on top of
+   * the film's title, both legible at once and neither readable.
+   */
+  z-index: 200;
   background: #000;
   display: flex;
   flex-direction: column;
+
+  /*
+   * Measured against what can actually be seen, not against the window.
+   *
+   * iOS moves its toolbars in and out and changes the visible height again when
+   * the app is left and returned to. Laid out against the window, the controls
+   * ended up below the bottom of the screen — cut off, and dead where they
+   * still appeared, because they were no longer where they looked. The variable
+   * is kept up to date from visualViewport; the two fallbacks cover a browser
+   * that has neither.
+   */
+  height: 100vh;
+  height: 100dvh;
+  height: var(--player-height, 100dvh);
 }
 
-.player-bar {
+/*
+ * Floats over the picture instead of taking a strip of its own.
+ *
+ * The solid bar it replaces cost real height on a tablet in landscape and was
+ * shown whether or not anyone wanted it. A gradient keeps the title readable
+ * over a bright frame without painting a block across the top.
+ */
+.player-chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: calc(env(safe-area-inset-top, 0) + 10px) max(16px, env(safe-area-inset-left, 0)) 10px;
-  background: #000;
+  gap: 14px;
+  padding: calc(env(safe-area-inset-top, 0) + 10px) max(16px, env(safe-area-inset-left, 0)) 24px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0) 100%);
+  transition: opacity 0.25s ease;
 }
+
+/* Out of the way while something is playing; back on pause. */
+.player-chrome.hidden { opacity: 0; pointer-events: none; }
 
 .player-close {
   font-size: 16px;
-  color: var(--text-dim);
+  color: #fff;
   padding: 8px 4px;
   background: none;
   border: none;
@@ -134,16 +171,70 @@ html, body {
 
 .player-title {
   font-size: 15px;
+  color: #fff;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Episode stepping and the sound-track chooser, pushed to the right. */
+.player-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.player-step {
+  font-size: 13px;
+  color: #fff;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.player-step:hover { background: rgba(0, 0, 0, 0.7); }
+
+/* Sound track chooser, for a file carrying more than one. */
+.player-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.player-pick select {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font: inherit;
+  max-width: 40vw;
+}
+
+.player-pick option { background: #16161d; color: #f4f4f6; }
+
 .player-video {
   flex: 1;
   width: 100%;
+  height: 100%;
   min-height: 0;
   background: #000;
+  /*
+   * Clear of the home indicator, which on a tablet in landscape sits over the
+   * bottom edge of the picture — and therefore over the corner where Safari
+   * draws its own full-screen button.
+   */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  box-sizing: border-box;
 }
 
 .player-note {

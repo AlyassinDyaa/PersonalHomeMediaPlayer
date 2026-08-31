@@ -46,25 +46,34 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   const [items, setItems] = useState([]);
   const [resume, setResume] = useState([]);
+  const [favourites, setFavourites] = useState([]);
   const [genres, setGenres] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [scrolled, setScrolled] = useState(false);
+  /** Whether each screen arranges titles by genre; set in Settings. */
+  const [grouping, setGrouping] = useState({ movies: true, shows: true });
   const [libraryName, setLibraryName] = useState('');
   const [libraryColor, setLibraryColor] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, genreList, settings] = await Promise.all([
+      const [allItems, continueWatching, kept, genreList, settings] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
+        api.favourites(),
         api.genres(),
         api.settings().catch(() => ({})),
       ]);
       setLibraryName(settings.libraryName ?? '');
       setLibraryColor(settings.libraryColor ?? '');
+      setGrouping({
+        movies: settings.groupMoviesByGenre ?? true,
+        shows: settings.groupShowsByGenre ?? true,
+      });
       setItems(allItems);
       setResume(continueWatching);
+      setFavourites(kept);
       setGenres(genreList);
       setError(null);
     } catch (err) {
@@ -81,6 +90,25 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   useEffect(() => {
     if (refreshSignal) reload();
   }, [refreshSignal, reload]);
+
+  /**
+   * Drop a title from Continue Watching.
+   *
+   * Removed from the row first and reconciled afterwards: the row is the thing
+   * being dismissed, so it has to respond at once, and a failed request puts
+   * the title back rather than leaving the row lying about what was kept.
+   */
+  const forgetProgress = useCallback(async (entry) => {
+    const itemId = entry.item.id;
+    const previous = resume;
+    setResume((current) => current.filter((row) => row.item.id !== itemId));
+    try {
+      await api.removeFromContinue(itemId);
+    } catch (err) {
+      setResume(previous);
+      setError(err.message);
+    }
+  }, [resume]);
 
   /** Reflect a settings change in the header without waiting for a reload. */
   const applyBranding = useCallback((next) => {
@@ -314,6 +342,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
               items={resume}
               wide
               onSelect={(entry) => play(entry.video, entry.item)}
+              onRemove={forgetProgress}
               renderLabel={(entry) => (
                 <>
                   <strong>{entry.item.title}</strong>
@@ -321,6 +350,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
                 </>
               )}
             />
+            <Row title="Your List" items={favourites} onSelect={openDetail}
+                 renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="Recently Released" items={recentlyAdded} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="TV Shows" items={shows} onSelect={openDetail}
@@ -352,6 +383,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
           items={view === 'movies' ? movies : shows}
           onSelect={openDetail}
           query={query}
+          groupByGenre={view === 'movies' ? grouping.movies : grouping.shows}
           renderLabel={(item) => (
             <>
               <strong>{item.title}</strong>

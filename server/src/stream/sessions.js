@@ -37,8 +37,8 @@ function streamRoot() {
   return path.join(config.dataDir, 'stream');
 }
 
-function keyFor(videoId, startSeconds) {
-  return videoId + '@' + Math.max(0, Math.floor(startSeconds));
+function keyFor(videoId, startSeconds, audioTrack) {
+  return videoId + '@' + Math.max(0, Math.floor(startSeconds)) + '#a' + audioTrack;
 }
 
 /** Remove a session's process and its segments. */
@@ -104,7 +104,8 @@ async function waitForPlaylist(session) {
 export async function openSession(request) {
   const { videoId, filePath } = request;
   const startSeconds = Math.max(0, Math.floor(request.startSeconds ?? 0));
-  const key = keyFor(videoId, startSeconds);
+  const audioTrack = Math.max(0, Number(request.audioTrack ?? 0) || 0);
+  const key = keyFor(videoId, startSeconds, audioTrack);
 
   const existing = sessions.get(key);
   if (existing && !existing.stopped) {
@@ -138,6 +139,7 @@ export async function openSession(request) {
   const args = hlsArguments(plan, {
     input: filePath,
     startSeconds,
+    audioTrack,
     playlist: playlistPath,
     segmentPattern: path.join(dir, 'seg%05d.m4s'),
     initFile: 'init.mp4',

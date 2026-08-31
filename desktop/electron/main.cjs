@@ -53,6 +53,15 @@ let mainFocused = false;
 let mpvFocused = false;
 let mpvFocusReported = false;
 let overlayHideTimer = null;
+/**
+ * Whether the controls currently want the mouse.
+ *
+ * Kept here because the overlay window outlives any one video: the renderer
+ * only reports this when it changes, so on the second and every later video
+ * there was nothing to re-send, and a window forced back to click-through
+ * stayed that way for the whole film.
+ */
+let overlayInteractive = false;
 let lastProgressWrite = 0;
 /** Where mpv's window is, and whether it is covering a whole display. */
 let videoBounds = null;
@@ -470,6 +479,7 @@ function createOverlayWindow(targetDisplay) {
     },
   });
 
+  overlayInteractive = false;
   overlayWindow.setIgnoreMouseEvents(true, { forward: true });
 
   if (DEV_SERVER_URL) {
@@ -518,6 +528,37 @@ function playbackDisplay() {
  * position instead. That costs a brief black frame and is completely reliable.
  */
 /**
+ * mpv's window handle, waited for rather than asked for once.
+ *
+ * mpv answers its IPC socket well before it has a window: measured here, the
+ * socket accepts commands after about 70ms and `window-id` only becomes
+ * readable 200-650ms later. Asking once, immediately, therefore always came
+ * back empty — every play logged "video window -> FAILED", which meant the
+ * video was never positioned or raised, dragging it did nothing because the
+ * handle stayed null for the whole film, and the controls were shown over a
+ * window that did not exist yet, so mpv's window was created on top of them
+ * and they were invisible until something else raised them.
+ *
+ * Polling rather than waiting on an event because mpv offers no notification
+ * for this; the interval is short enough to be imperceptible and the timeout
+ * long enough for a slow first launch, when Windows is still scanning mpv.exe.
+ */
+async function waitForVideoWindow(timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!player || !player.isRunning) return null;
+    try {
+      const handle = await player.getWindowHandle();
+      if (handle) return handle;
+    } catch {
+      // The window does not exist yet; that is what we are waiting for.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return null;
+}
+
+/**
  * Put the video window over a display, and align the controls to it.
  *
  * mpv reports its own window handle, which is the only reliable way to place it:
@@ -532,9 +573,9 @@ async function applyVideoBounds(bounds, options) {
   // exactly; mpv's window is chased into place behind them.
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.setBounds(bounds);
 
-  if (!videoHwnd) {
-    try { videoHwnd = await player.getWindowHandle(); } catch { videoHwnd = null; }
-  }
+  // Only the first placement of a new file waits: after that the handle is
+  // known, so a drag never pays for this.
+  if (!videoHwnd) videoHwnd = await waitForVideoWindow();
   if (!videoHwnd) return false;
 
   // A drag produces pointer events faster than Windows finishes moving a
@@ -707,7 +748,27 @@ function showOverlay(targetDisplay) {
   // overlay and forwarded to mpv, so nothing is lost by holding focus here.
   overlayWindow.show();
   overlayWindow.focus();
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+
+  // Raised here rather than left to the focus handler. That handler does the
+  // same thing, but only once Windows has delivered a focus event, and on the
+  // first play of a session the overlay window has just been created and its
+  // page is still loading when the video window is raised in front of it — so
+  // the controls came up behind the video and stayed there. Asserting it
+  // directly makes the first play behave like every later one.
+  overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+  overlayWindow.moveTop();
+
+  /*
+   * Restore what the controls last asked for rather than forcing the window
+   * back to click-through.
+   *
+   * Forcing it was the reason skipping, the time bar and the close button all
+   * stopped working after the first video of a session: this runs on every
+   * play, the window is reused between videos, and the renderer had no reason
+   * to say "I want the mouse" a second time — so the clicks went straight
+   * through to mpv and nothing happened.
+   */
+  overlayWindow.setIgnoreMouseEvents(!overlayInteractive, { forward: true });
   startCursorWatch();
 }
 
@@ -1149,6 +1210,7 @@ function registerIpc() {
   });
 
   ipcMain.on('overlay:interactive', (event, interactive) => {
+    overlayInteractive = Boolean(interactive);
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
     // `forward: true` keeps mousemove flowing to the overlay even while it is
     // click-through, which is how it knows when the pointer reaches the bar.

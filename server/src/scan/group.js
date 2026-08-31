@@ -21,6 +21,16 @@ import {
 const EPISODE_RATIO_THRESHOLD = 0.6;
 
 /**
+ * Episode markers strong enough to identify a series from a single file.
+ *
+ * "S01E01", "1x01" and "Season 1 Episode 2" say what they are and mean nothing
+ * else; no film is named that way. The weaker patterns are excluded on purpose:
+ * a bare "E01", or three digits read as season-and-episode, appear often enough
+ * in ordinary titles that one of them alone proves nothing.
+ */
+const STRONG_EPISODE_PATTERNS = new Set(['SxxExx', 'NxNN', 'verbose']);
+
+/**
  * Resolve the season for an episode file whose name did not carry one, by
  * looking at the folder chain from nearest parent outward.
  * @param {string[]} chain
@@ -69,11 +79,25 @@ function classifyFolder(topFolder, videos) {
   const folderSaysSeries =
     parseSeasonFolder(topFolder) !== null || parseSeasonRange(topFolder) !== null;
 
+  const strongCount = parsed
+    .filter((p) => p.episode && STRONG_EPISODE_PATTERNS.has(p.episode.pattern)).length;
+
+  /*
+   * Two episodes normally have to agree before a folder counts as a series,
+   * which is what stops a stray number in a film's name from turning it into a
+   * show. One unmistakable marker is enough on its own, though: a folder
+   * holding only "Lanterns.2026.S01E01.mkv" — the first episode of a series
+   * still airing — is a show with one episode, not a film. Without this it was
+   * searched for among films and came back as an unrelated title.
+   *
+   * The ratio still has to hold, so a single oddly-named file among a folder of
+   * films cannot drag the whole folder across.
+   */
   const isSeries =
-    (ratio >= EPISODE_RATIO_THRESHOLD && episodeCount >= 2) ||
+    (ratio >= EPISODE_RATIO_THRESHOLD && (episodeCount >= 2 || strongCount >= 1)) ||
     (folderSaysSeries && episodeCount >= 1);
 
-  return { parsed, ratio, episodeCount, isSeries, folderSaysSeries };
+  return { parsed, ratio, episodeCount, strongCount, isSeries, folderSaysSeries };
 }
 
 /**
@@ -299,6 +323,11 @@ function mergeSeriesFolders(seriesFolders) {
   return shows;
 }
 
+/** A stable name for a pair of shows, whichever order they arrive in. */
+export function pairKey(shows) {
+  return [...shows].sort().join('|');
+}
+
 /**
  * Find shows whose titles are near-misses of one another. Returned as
  * suggestions rather than applied, for the user to accept or reject.
@@ -390,7 +419,21 @@ function languageOf(name) {
  * Group a walked library into movies and shows.
  * @param {{videos: import('./walk.js').MediaFile[], subtitles: import('./walk.js').MediaFile[]}} walked
  */
-export function groupLibrary({ videos, subtitles = [] }) {
+/**
+ * Group a walked library into movies and shows.
+ *
+ * `mergeInto` maps a series key onto the key it should be folded into, which
+ * is how an accepted "these are one show" suggestion survives every later
+ * scan. Without it the scanner would re-ask the same question every time,
+ * because nothing about the folders on disk has changed.
+ *
+ * @param {{videos: import('./walk.js').MediaFile[], subtitles: import('./walk.js').MediaFile[]}} walked
+ * @param {{mergeInto?: Record<string, string>}} [options]
+ */
+export function groupLibrary(
+  { videos, subtitles = [] },
+  { mergeInto = {}, keepApart = new Set() } = {},
+) {
   // Keyed on the folder's absolute path so names containing spaces or
   // separators cannot collide.
   const byFolder = new Map();
@@ -414,8 +457,29 @@ export function groupLibrary({ videos, subtitles = [] }) {
     }
   }
 
+  /*
+   * Applied before merging rather than after, so folded-together folders share
+   * one key and go through the same episode-conflict handling as a series that
+   * was split across folders in the first place.
+   */
+  for (const folder of seriesFolders) {
+    const target = mergeInto[folder.key];
+    if (target && target !== folder.key) folder.key = target;
+  }
+
   const shows = mergeSeriesFolders(seriesFolders);
-  const suggestions = findMergeSuggestions(shows);
+  /*
+   * A pair already decided upon must not be raised again — in either
+   * direction.
+   *
+   * Answering "keep separate" used to be forgotten at the next scan, because
+   * the suggestion was rebuilt from the folders and nothing recorded the
+   * answer. The question came back every time, and one stray press turned two
+   * series into one with no way back. Now both answers are remembered.
+   */
+  const suggestions = findMergeSuggestions(shows)
+    .filter((entry) => !entry.shows.some((key) => mergeInto[key]))
+    .filter((entry) => !keepApart.has(pairKey(entry.shows)));
 
   attachSubtitles([...movies, ...shows], subtitles);
 

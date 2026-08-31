@@ -302,6 +302,27 @@ function pickBest(candidates, parsed, kind) {
 // Details
 // ---------------------------------------------------------------------------
 
+/**
+ * Candidates for a title, as a person would search for them.
+ *
+ * Unlike findBestMatch this does no scoring and picks nothing: the whole point
+ * is that the automatic choice was wrong, so the list is returned as TMDB
+ * ordered it and a human decides.
+ */
+export async function searchTitles(kind, query) {
+  const path = '/search/' + (kind === 'show' ? 'tv' : 'movie')
+    + '?query=' + encodeURIComponent(query);
+  const body = await tmdbGet(path);
+  return (body?.results ?? []).slice(0, 12).map((result) => ({
+    tmdbId: result.id,
+    title: result.title ?? result.name ?? '(untitled)',
+    year: Number(String(result.release_date ?? result.first_air_date ?? '').slice(0, 4)) || null,
+    overview: result.overview ?? '',
+    poster: result.poster_path ?? null,
+    rating: result.vote_average ?? null,
+  }));
+}
+
 export async function getMovie(id) {
   return tmdbGet('/movie/' + id + '?append_to_response=release_dates,images&include_image_language=en,null');
 }

@@ -36,6 +36,17 @@ export function Overlay() {
   });
   const [visible, setVisible] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
+  /*
+   * The same fact as the state above, kept where the handlers can read it
+   * immediately.
+   *
+   * A press and release inside one frame - which is what clicking a point on
+   * the time bar is - ran the release handler from the render that still said
+   * false, so it returned early and the jump never happened. Dragging worked,
+   * because a drag lasts long enough to re-render in between; only the plain
+   * click was lost.
+   */
+  const scrubbingRef = useRef(false);
   const [scrubValue, setScrubValue] = useState(0);
   const [menu, setMenu] = useState(null);
   const [countdown, setCountdown] = useState(null);
@@ -327,21 +338,26 @@ export function Overlay() {
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.currentTarget.setPointerCapture?.(event.pointerId);
+            scrubbingRef.current = true;
             setScrubbing(true);
             setScrubValue(onTrackPointer(event));
           }}
-          onPointerMove={(event) => { if (scrubbing) setScrubValue(onTrackPointer(event)); }}
+          onPointerMove={(event) => {
+            if (scrubbingRef.current) setScrubValue(onTrackPointer(event));
+          }}
           onPointerUp={(event) => {
-            if (!scrubbing) return;
+            if (!scrubbingRef.current) return;
             event.currentTarget.releasePointerCapture?.(event.pointerId);
             const target = onTrackPointer(event);
+            scrubbingRef.current = false;
             setScrubbing(false);
             seekTo(target);
           }}
           onPointerCancel={() => {
             // The gesture was taken away mid-scrub; honour where it had reached
             // rather than leaving the bar stuck to the pointer.
-            if (!scrubbing) return;
+            if (!scrubbingRef.current) return;
+            scrubbingRef.current = false;
             setScrubbing(false);
             seekTo(scrubValue);
           }}

@@ -92,6 +92,12 @@ npm run package   # build the portable Windows app
 Machine-specific settings belong in `config.local.json` (gitignored); the TMDB
 API key goes in `.env` or the Library screen.
 
+`npm run package` copies that key into the built folder as `metadata.key`,
+scrambled rather than plain, so a copy handed to someone shows artwork and
+descriptions without them signing up for a key first. It is never committed —
+this repository is public. Settings replaces the included key with a personal
+one, and clearing the box puts the included one back.
+
 A `#play/<itemId>` hash starts that title on launch, which makes a shortcut that
 resumes a specific show possible.
 

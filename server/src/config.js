@@ -8,6 +8,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { bundledKey } from './bundled-key.js';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,16 @@ function loadDotEnv() {
   }
 }
 loadDotEnv();
+
+/** The first value that was actually supplied; blank strings do not count. */
+function firstSet(...values) {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return null;
+}
 
 function readJson(file) {
   try {
@@ -52,6 +63,22 @@ export const CONFIG_DIR = process.env.MEDIA_CONFIG_DIR || PROJECT_ROOT;
 const defaults = readJson(path.join(PROJECT_ROOT, 'config.json'));
 const local = readJson(path.join(CONFIG_DIR, 'config.local.json'));
 
+/**
+ * The key shipped inside the build, read once.
+ *
+ * Kept separately from the resolved key so that clearing a user's own key in
+ * Settings falls back to this one rather than leaving the library with no
+ * artwork at all.
+ */
+const BUNDLED_TMDB_KEY = bundledKey(process.env.MEDIA_INSTALL_DIR);
+
+/*
+ * Blank is treated as absent rather than as an answer: an empty environment
+ * variable is easy to end up with, and ?? would take it as a deliberate choice
+ * and leave the library with no artwork and no explanation.
+ */
+const userTmdbKey = firstSet(process.env.TMDB_API_KEY, local.tmdbApiKey);
+
 const dataDir = process.env.MEDIA_DATA_DIR
   ?? local.dataDir
   ?? defaults.dataDir
@@ -68,7 +95,19 @@ export const config = {
   databasePath: path.join(dataDir, 'library.db'),
   artworkDir: path.join(dataDir, 'artwork'),
 
-  tmdbApiKey: process.env.TMDB_API_KEY ?? local.tmdbApiKey ?? null,
+  /*
+   * A key the user typed always wins, so replacing an expired one in Settings
+   * takes effect. Below it sits the key shipped inside the build, so a fresh
+   * copy has artwork and descriptions without anything being pasted in first.
+   */
+  tmdbApiKey: userTmdbKey ?? BUNDLED_TMDB_KEY,
+
+  /**
+   * Whether the key in use came with the build rather than from the user.
+   * Only used to word the Settings screen honestly: a key someone pasted and a
+   * key that was already there are not the same thing to look at.
+   */
+  tmdbKeyIsBundled: !userTmdbKey && Boolean(BUNDLED_TMDB_KEY),
   tmdbLanguage: process.env.TMDB_LANGUAGE ?? local.tmdbLanguage ?? 'en-US',
 
   /**
@@ -78,6 +117,17 @@ export const config = {
    */
   skipIntroEnabled: local.skipIntroEnabled ?? defaults.skipIntroEnabled ?? true,
   skipOutroEnabled: local.skipOutroEnabled ?? defaults.skipOutroEnabled ?? true,
+
+  /*
+   * Whether the Movies and TV Shows screens arrange titles under genre
+   * headings or simply list everything.
+   *
+   * Kept separately for the two, because a library is rarely the same shape on
+   * both sides: fifty films spread across a dozen genres are worth arranging,
+   * while twenty series that are nearly all Animation are not.
+   */
+  groupMoviesByGenre: local.groupMoviesByGenre ?? defaults.groupMoviesByGenre ?? true,
+  groupShowsByGenre: local.groupShowsByGenre ?? defaults.groupShowsByGenre ?? true,
 
   /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
   libraryName: local.libraryName ?? defaults.libraryName ?? '',
@@ -188,6 +238,8 @@ export function saveSettings(patch) {
         .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
     )];
   }
+  if (typeof patch.groupMoviesByGenre === 'boolean') allowed.groupMoviesByGenre = patch.groupMoviesByGenre;
+  if (typeof patch.groupShowsByGenre === 'boolean') allowed.groupShowsByGenre = patch.groupShowsByGenre;
   if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
   if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
@@ -230,7 +282,10 @@ export function saveSettings(patch) {
   if (typeof patch.dataDir === 'string' && patch.dataDir.trim()) {
     allowed.dataDir = patch.dataDir.trim().replace(/\\/g, '/').replace(/\/+$/, '');
   }
-  if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim();
+  // A key the user pastes replaces the one that shipped with the build, and
+  // clearing the box goes back to the shipped one rather than to nothing — the
+  // way to undo a mistyped key without hunting for the original.
+  if (typeof patch.tmdbApiKey === 'string') allowed.tmdbApiKey = patch.tmdbApiKey.trim() || null;
 
   const current = readJson(LOCAL_CONFIG_PATH);
   const next = { ...current, ...allowed };
@@ -238,6 +293,10 @@ export function saveSettings(patch) {
   fs.writeFileSync(LOCAL_CONFIG_PATH, JSON.stringify(next, null, 2) + '\n', 'utf8');
 
   Object.assign(config, allowed);
+  if ('tmdbApiKey' in allowed) {
+    config.tmdbApiKey = allowed.tmdbApiKey ?? BUNDLED_TMDB_KEY;
+    config.tmdbKeyIsBundled = !allowed.tmdbApiKey && Boolean(BUNDLED_TMDB_KEY);
+  }
   return settingsView();
 }
 
@@ -248,6 +307,8 @@ export function settingsView() {
     libraryColor: config.libraryColor,
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
+    groupMoviesByGenre: config.groupMoviesByGenre,
+    groupShowsByGenre: config.groupShowsByGenre,
     libraryRoots: config.libraryRoots,
     rootsStatus: config.libraryRoots.map((root) => ({
       path: root,
@@ -258,8 +319,12 @@ export function settingsView() {
     remoteAccess: config.remoteAccess,
     // Whether one is set, never what it is.
     passcodeSet: Boolean(config.passcodeHash),
-    // Never return the key itself, only whether one is present.
+    // Never return the key itself, only whether one is present and where it
+    // came from, so Settings can say whether it is the included key or one the
+    // user supplied — and offer to go back to the included one.
     tmdbConfigured: hasTmdb(),
+    tmdbKeyIsBundled: Boolean(config.tmdbKeyIsBundled),
+    tmdbKeyBundledAvailable: Boolean(BUNDLED_TMDB_KEY),
     port: config.port,
   };
 }

@@ -6,6 +6,7 @@
  */
 
 import express from 'express';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
@@ -13,21 +14,59 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config, ensureDataDirs, hasTmdb, saveSettings, settingsView, listDirectories } from './config.js';
 import { getDb } from './db.js';
-import { runScan, setOverride } from './scan/index.js';
+import {
+  runScan, setOverride, listMerges, clearMerge, rememberSeparate,
+} from './scan/index.js';
 import * as library from './library.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
+import { searchTitles } from './meta/tmdb.js';
+import { startAutoScan } from './scan/autoscan.js';
+import { segmentPlan, buildPlaylist, ensureSegment, clearAllSegments } from './stream/vod.js';
 import {
   requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
 } from './auth.js';
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
-import { ffmpegAvailable, probeFile } from './stream/ffmpeg.js';
+import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
 import { webAppDir, loginPage } from './webapp.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+/*
+ * Let the development renderer talk to this server.
+ *
+ * In development the interface is served by Vite on another port, which makes
+ * every API call cross-origin; without this the browser refuses them all and
+ * `npm run dev` shows an empty library with CORS errors in the console. A
+ * packaged build serves the interface from this same server and never takes
+ * this path.
+ *
+ * Deliberately narrow: only localhost origins, only when a development server
+ * announced itself through the environment. Nothing here widens what a machine
+ * on the network can reach — that is still decided by the passcode and by
+ * requireAuth below.
+ */
+const DEV_ORIGIN = process.env.VITE_DEV_SERVER_URL
+  ? process.env.VITE_DEV_SERVER_URL.replace(/\/$/, '')
+  : null;
+
+if (DEV_ORIGIN) {
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+      if (req.method === 'OPTIONS') return res.sendStatus(204);
+    }
+    next();
+  });
+  console.log('Development renderer allowed from ' + DEV_ORIGIN);
+}
 
 /**
  * Begin a server-sent event response and return a send(event, data) function.
@@ -142,6 +181,10 @@ app.get('/api/continue', (req, res) => {
   res.json(library.continueWatching(Number(req.query.limit) || 20));
 });
 
+app.get('/api/favourites', (req, res) => {
+  res.json(library.listFavourites());
+});
+
 app.get('/api/genres', (req, res) => {
   res.json(library.listGenres());
 });
@@ -154,6 +197,39 @@ app.get('/api/search', (req, res) => {
   const query = String(req.query.q ?? '').trim();
   if (!query) return res.json([]);
   res.json(library.search(query));
+});
+
+/** Shows currently folded together, so a wrong answer can be found again. */
+app.get('/api/merges', (req, res) => {
+  res.json(listMerges());
+});
+
+/**
+ * Separate two shows that were joined.
+ *
+ * The override is what makes the join survive scans, so removing it and
+ * scanning again is all it takes; the episodes were never altered, only
+ * filed together.
+ */
+app.delete('/api/merges/:alias', async (req, res) => {
+  const joined = listMerges().find((entry) => entry.alias === req.params.alias);
+  if (!clearMerge(req.params.alias)) {
+    return res.status(404).json({ error: 'those shows are not joined' });
+  }
+  // Pressing Separate is an answer, not just an undo: without recording it the
+  // very next scan would offer to join them again.
+  if (joined) rememberSeparate([joined.alias, joined.into]);
+  if (scanning) return res.json({ ok: true, rescanned: false });
+
+  scanning = true;
+  try {
+    const stats = await runScan();
+    res.json({ ok: true, rescanned: true, shows: stats.shows });
+  } catch (error) {
+    res.status(500).json({ error: 'separated, but the rescan failed: ' + error.message });
+  } finally {
+    scanning = false;
+  }
 });
 
 app.get('/api/suggestions', (req, res) => {
@@ -174,6 +250,18 @@ app.post('/api/progress', (req, res) => {
   res.json(saved);
 });
 
+app.put('/api/items/:id/favourite', (req, res) => {
+  const result = library.setFavourite(req.params.id, req.body?.favourite !== false);
+  if (!result) return res.status(404).json({ error: 'item not found' });
+  res.json(result);
+});
+
+app.delete('/api/continue/:itemId', (req, res) => {
+  const result = library.removeFromContinueWatching(req.params.itemId);
+  if (!result) return res.status(404).json({ error: 'item not found' });
+  res.json(result);
+});
+
 app.post('/api/videos/:id/watched', (req, res) => {
   const result = library.setWatched(req.params.id, req.body?.watched !== false);
   if (!result) return res.status(404).json({ error: 'video not found' });
@@ -184,6 +272,24 @@ app.post('/api/videos/:id/watched', (req, res) => {
 // Corrections
 // ---------------------------------------------------------------------------
 
+/**
+ * Search TMDB by hand.
+ *
+ * Needed because the automatic match is occasionally confident and wrong, and
+ * until now there was no way to say so from inside the app.
+ */
+app.get('/api/tmdb/search', async (req, res) => {
+  const query = String(req.query.q ?? '').trim();
+  const kind = req.query.kind === 'show' ? 'show' : 'movie';
+  if (!query) return res.json([]);
+  if (!hasTmdb()) return res.status(400).json({ error: 'No TMDB API key is configured' });
+  try {
+    res.json(await searchTitles(kind, query));
+  } catch (error) {
+    res.status(502).json({ error: 'TMDB search failed: ' + error.message });
+  }
+});
+
 /** Force an item to a specific TMDB id; survives rescans. */
 app.post('/api/items/:id/match', (req, res) => {
   const { tmdbId } = req.body ?? {};
@@ -193,9 +299,39 @@ app.post('/api/items/:id/match', (req, res) => {
   res.json({ ok: true, scanKey: row.scan_key, tmdbId, note: 'applied on next scan' });
 });
 
+/**
+ * Answer a grouping question.
+ *
+ * "merge" is remembered as an override so the two folders are read as one
+ * series by every future scan; "separate" only silences the question, since
+ * keeping them apart is already what the scanner does. Either way the
+ * suggestion stops being raised.
+ */
 app.post('/api/suggestions/:id/resolve', (req, res) => {
-  getDb().prepare('UPDATE suggestions SET resolved = 1 WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
+  const db = getDb();
+  const row = db.prepare('SELECT payload FROM suggestions WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'not found' });
+
+  if (req.body?.action === 'merge') {
+    let payload = {};
+    try { payload = JSON.parse(row.payload); } catch { /* recorded below as no-op */ }
+    const [from, into] = payload.shows ?? [];
+    // Folded into the longer key, which is the more specific title of the two
+    // and therefore the one a viewer is likelier to recognise.
+    if (from && into) {
+      const [alias, target] = from.length >= into.length ? [from, into] : [into, from];
+      setOverride('merge', alias, target);
+    }
+  }
+
+  if (req.body?.action !== 'merge') {
+    let payload = {};
+    try { payload = JSON.parse(row.payload); } catch { /* nothing to remember */ }
+    if (payload.shows?.length === 2) rememberSeparate(payload.shows);
+  }
+
+  db.prepare('UPDATE suggestions SET resolved = 1 WHERE id = ?').run(req.params.id);
+  res.json({ ok: true, applied: req.body?.action === 'merge' ? 'merged' : 'kept separate' });
 });
 
 // ---------------------------------------------------------------------------
@@ -310,8 +446,46 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
   }
 
   try {
-    const plan = planDelivery(await probeFile(video.path));
-    res.json({ ...plan, duration: video.duration ?? null, position: video.position ?? 0 });
+    const probed = await probeFile(video.path);
+    const plan = planDelivery(probed);
+    const streams = probed?.streams ?? [];
+
+    /** A stream's own name for itself, falling back to something readable. */
+    const describe = (stream, ordinal, kind) => {
+      const tags = stream.tags ?? {};
+      const parts = [];
+      if (tags.language && tags.language !== 'und') parts.push(String(tags.language).toUpperCase());
+      if (tags.title) parts.push(tags.title);
+      if (!parts.length) parts.push(kind + ' ' + (ordinal + 1));
+      return parts.join(' · ');
+    };
+
+    const ofType = (type) => streams.filter((s) => s.codec_type === type);
+
+    // The duration on the item is only filled in once something has played it,
+    // so the container is the reliable source for a first play.
+    const duration = Number(probed?.format?.duration) || video.duration || null;
+
+    res.json({
+      ...plan,
+      duration,
+      position: video.position ?? 0,
+      audioTracks: ofType('audio').map((stream, i) => ({
+        index: i,
+        label: describe(stream, i, 'Audio'),
+        codec: stream.codec_name,
+      })),
+      subtitleTracks: ofType('subtitle')
+        // Only text subtitles convert to something a browser can display;
+        // picture-based ones (PGS, VobSub) would need rendering, not converting.
+        .map((stream, i) => ({ stream, i }))
+        .filter(({ stream }) => /subrip|ass|ssa|mov_text|webvtt|text/.test(stream.codec_name ?? ''))
+        .map(({ stream, i }) => ({
+          index: i,
+          label: describe(stream, i, 'Subtitles'),
+          language: stream.tags?.language ?? null,
+        })),
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -323,6 +497,101 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
  * The offset is part of the session: seeking past what has been produced starts
  * a new one rather than waiting for ffmpeg to catch up.
  */
+/**
+ * The playlist describing an entire video.
+ *
+ * Written before anything is produced, so the player knows the real length and
+ * can seek anywhere in it.
+ */
+app.get('/api/stream/:videoId/index.m3u8', async (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) return res.status(404).json({ error: 'No such video' });
+  if (!ffmpegAvailable()) {
+    return res.status(503).json({ error: 'ffmpeg is not installed, so browsers cannot be served' });
+  }
+
+  const audioTrack = Math.max(0, Number(req.query.audio ?? 0) || 0);
+  try {
+    const probed = await probeFile(video.path);
+    const duration = Number(probed?.format?.duration) || video.duration || 0;
+    if (!duration) throw new Error('the length of this file could not be read');
+
+    const plan = await segmentPlan(video.id, video.path, duration);
+    const base = '/api/stream/' + video.id + '/seg/' + audioTrack;
+    res.type('application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.send(buildPlaylist(plan, base));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/** One segment, produced on demand the first time it is asked for. */
+app.get('/api/stream/:videoId/seg/:audio/:index.ts', async (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) return res.status(404).json({ error: 'No such video' });
+
+  const index = Number(req.params.index);
+  const audioTrack = Math.max(0, Number(req.params.audio) || 0);
+  if (!Number.isInteger(index) || index < 0) {
+    return res.status(400).json({ error: 'bad segment' });
+  }
+
+  try {
+    const probed = await probeFile(video.path);
+    const duration = Number(probed?.format?.duration) || video.duration || 0;
+    const plan = await segmentPlan(video.id, video.path, duration);
+    const file = await ensureSegment({
+      videoId: video.id,
+      filePath: video.path,
+      plan,
+      index,
+      delivery: planDelivery(probed),
+      audioTrack,
+    });
+    res.type('video/mp2t');
+    // A segment's contents never change, so it can be kept for good.
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(file);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * One subtitle track, converted to the only format a browser reads.
+ *
+ * Streamed straight out of ffmpeg rather than kept: a subtitle track is small,
+ * and converting it takes less time than deciding where to file it.
+ */
+app.get('/api/stream/:videoId/subtitles/:index.vtt', async (req, res) => {
+  const video = library.getVideo(req.params.videoId);
+  if (!video) return res.status(404).json({ error: 'No such video' });
+
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0) {
+    return res.status(400).json({ error: 'bad subtitle track' });
+  }
+
+  const { ffmpeg } = ffmpegPaths();
+  if (!ffmpeg) return res.status(503).json({ error: 'ffmpeg is not installed' });
+
+  res.type('text/vtt');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+
+  const child = spawn(ffmpeg, [
+    '-hide_banner', '-loglevel', 'error', '-nostdin',
+    '-i', video.path,
+    '-map', '0:s:' + index,
+    '-f', 'webvtt',
+    'pipe:1',
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+
+  child.stdout.pipe(res);
+  child.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+  res.on('close', () => { try { child.kill(); } catch { /* already gone */ } });
+});
+
 app.get('/api/stream/:videoId/start', async (req, res) => {
   const video = library.getVideo(req.params.videoId);
   if (!video) {
@@ -336,6 +605,7 @@ app.get('/api/stream/:videoId/start', async (req, res) => {
       videoId: video.id,
       filePath: video.path,
       startSeconds,
+      audioTrack: Math.max(0, Number(req.query.audio ?? 0) || 0),
     });
     res.json({
       id: session.id,
@@ -434,6 +704,29 @@ app.get('/artwork/:size/:file', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 let scanning = false;
+/** Stops the library watcher; set once the server is listening. */
+let stopAutoScan = null;
+
+/**
+ * Scan because the library changed on disk, not because anyone asked.
+ *
+ * Silent by design apart from a log line: it happens while the app is being
+ * used, so it must not interrupt anything. If a scan is already running there
+ * is nothing to do — that scan will see the new files anyway.
+ */
+async function rescanAfterChange() {
+  if (scanning) return;
+  scanning = true;
+  try {
+    const stats = await runScan();
+    console.log('automatic scan: ' + stats.movies + ' movies, ' + stats.shows + ' shows, '
+      + stats.videos + ' files');
+  } catch (error) {
+    console.warn('automatic scan failed: ' + error.message);
+  } finally {
+    scanning = false;
+  }
+}
 
 app.get('/api/scan/stream', async (req, res) => {
   if (scanning) return res.status(409).json({ error: 'a scan is already running' });
@@ -555,10 +848,21 @@ export function startServer(port = config.port) {
         const address = lanAddress();
         console.log('Shared on the network at http://' + (address ?? '<this machine>') + ':' + port);
       }
+      // Only once the server is up, so a library that changes during startup
+      // cannot trigger a scan before anything can report it.
+      stopAutoScan = startAutoScan({
+        roots: config.libraryRoots,
+        onQuiet: rescanAfterChange,
+        onLog: (message) => console.log('[library] ' + message),
+      });
       resolve(server);
     });
 
-    server.on('close', () => { closeAllSessions(); });
+    server.on('close', () => {
+      stopAutoScan?.();
+      stopAutoScan = null;
+      closeAllSessions();
+    });
   });
 }
 

@@ -168,13 +168,88 @@ function migrate(db) {
   }
 }
 
-export function getDb() {
-  if (database) return database;
+/**
+ * Whether an error means the connection itself has gone, rather than the query
+ * being wrong.
+ *
+ * SQLite reports a handle whose file has become unreachable as a disk I/O
+ * error. It keeps reporting it for every statement afterwards, because the
+ * connection stays open and stays broken.
+ */
+function connectionLost(error) {
+  const text = String(error?.message ?? '').toLowerCase();
+  return text.includes('disk i/o error')
+    || text.includes('sqlite_ioerr')
+    || text.includes('database disk image');
+}
+
+/** Open the file and bring the schema up to date. */
+function open() {
   ensureDataDirs();
-  database = new DatabaseSync(config.databasePath);
-  database.exec(SCHEMA);
-  migrate(database);
-  return database;
+  const db = new DatabaseSync(config.databasePath);
+  db.exec(SCHEMA);
+  migrate(db);
+  return db;
+}
+
+/**
+ * The connection, reopened if it has died under us.
+ *
+ * The library lives on a large drive that can briefly go away — asleep, or
+ * unplugged and back. When that happens every statement on the open handle
+ * fails with a disk I/O error from then on, even though the file is perfectly
+ * readable again: nothing ever reopened it, so the library stayed empty until
+ * the app was restarted by hand. Reopening once and retrying turns that from
+ * an evening's outage into a pause.
+ *
+ * Only I/O errors retry. A constraint violation or a mistake in a query is
+ * reported as it always was, because running it a second time would not help.
+ */
+function withRetry(run) {
+  try {
+    return run(database);
+  } catch (error) {
+    if (!connectionLost(error)) throw error;
+    console.warn('database connection lost (' + error.message + '); reopening');
+    try { database.close(); } catch { /* it is already gone */ }
+    database = open();
+    return run(database);
+  }
+}
+
+/**
+ * A statement that can survive its connection being replaced.
+ *
+ * The error surfaces when the statement runs, not when it is prepared, so the
+ * text is kept and prepared again against the new connection.
+ */
+function resilientStatement(sql) {
+  let statement = database.prepare(sql);
+  const call = (method) => (...args) => withRetry((db) => {
+    // A reopened connection invalidates the old statement, so it is rebuilt
+    // whenever the one we hold belongs to a connection that has been replaced.
+    if (statement.__db !== db) {
+      statement = db.prepare(sql);
+      statement.__db = db;
+    }
+    return statement[method](...args);
+  });
+
+  statement.__db = database;
+  return {
+    all: call('all'),
+    get: call('get'),
+    run: call('run'),
+    iterate: call('iterate'),
+  };
+}
+
+export function getDb() {
+  if (!database) database = open();
+  return {
+    prepare: (sql) => resilientStatement(sql),
+    exec: (sql) => withRetry((db) => db.exec(sql)),
+  };
 }
 
 export function closeDb() {

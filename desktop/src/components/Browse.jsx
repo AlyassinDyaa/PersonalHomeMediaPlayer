@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Card from './Card.jsx';
 import Row from './Row.jsx';
 
@@ -9,9 +9,22 @@ import Row from './Row.jsx';
  * itself to whichever tab is open, so this screen deliberately has no search
  * field of its own.
  */
-export function Browse({ title, items, onSelect, renderLabel, query = '' }) {
+export function Browse({
+  title, items, onSelect, renderLabel, query = '', groupByGenre = true,
+}) {
   const [genre, setGenre] = useState(null);
-  const [flat, setFlat] = useState(false);
+  /*
+   * Starts from the preference in Settings, and can still be flipped here for
+   * a moment without changing it — the chip is a glance, the setting is how
+   * the screen normally looks.
+   */
+  const [flat, setFlat] = useState(!groupByGenre);
+  const [sort, setSort] = useState('title');
+  const [unwatchedOnly, setUnwatchedOnly] = useState(false);
+
+  // Follow the preference when it is changed in Settings, and when moving
+  // between the two screens, which have their own answers.
+  useEffect(() => { setFlat(!groupByGenre); }, [groupByGenre]);
 
   const trimmed = query.trim().toLowerCase();
 
@@ -19,28 +32,67 @@ export function Browse({ title, items, onSelect, renderLabel, query = '' }) {
     let result = items;
     if (genre) result = result.filter((item) => item.genres?.includes(genre));
     if (trimmed) result = result.filter((item) => item.title.toLowerCase().includes(trimmed));
+    // A library of whole seasons is mostly things already seen, so "what is
+    // left" is a more useful question here than any ordering of everything.
+    if (unwatchedOnly) result = result.filter((item) => (item.unwatchedCount ?? 0) > 0);
     return result;
-  }, [items, genre, trimmed]);
+  }, [items, genre, trimmed, unwatchedOnly]);
+
+  /** Comparators for the sort control; the server can order too, but not without a round trip. */
+  const sorted = useMemo(() => {
+    const compare = {
+      title: (a, b) => a.title.localeCompare(b.title),
+      year: (a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title),
+      rating: (a, b) => (b.rating ?? 0) - (a.rating ?? 0) || a.title.localeCompare(b.title),
+      added: (a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0) || a.title.localeCompare(b.title),
+    }[sort] ?? ((a, b) => a.title.localeCompare(b.title));
+    return [...filtered].sort(compare);
+  }, [filtered, sort]);
+
+  /** How many titles in this tab carry each genre, for deciding which is rare. */
+  const genreFrequency = useMemo(() => {
+    const counts = new Map();
+    for (const item of items) {
+      for (const name of item.genres ?? []) counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
 
   /**
-   * Genre rows use only each title's *primary* genre.
+   * One row per title, filed under the genre that says most about it.
    *
-   * Listing a title under every genre it carries makes a modest library look
-   * duplicated — the same eight posters repeat down the page, because most
-   * things are tagged Animation and Sci-Fi and Action all at once. The chips
-   * below still filter across every genre a title has.
+   * Two arrangements were tried and both were wrong. Filing by TMDB's *first*
+   * genre put X-Men alone under Kids and left nothing under Sci-Fi & Fantasy,
+   * because that order means nothing. Listing a title under every genre it
+   * carries made the counts honest but produced three consecutive identical
+   * rows — Action, Adventure and Animation, the same nineteen cartoons each
+   * time — because in a library like this those three travel together.
+   *
+   * So each title is filed under its *rarest* genre here: the one that
+   * distinguishes it from everything else on the shelf. Where everything is
+   * Action, being Action says nothing and being a Comedy or a Mystery says a
+   * great deal. The arrangement tunes itself to whatever the library holds.
+   *
+   * The chips above still count every genre a title has, and clicking one
+   * shows all of them, so nothing is hidden by the arrangement.
    */
   const rows = useMemo(() => {
     const buckets = new Map();
-    for (const item of filtered) {
-      const primary = item.genres?.[0] ?? 'Other';
-      if (!buckets.has(primary)) buckets.set(primary, []);
-      buckets.get(primary).push(item);
+    for (const item of sorted) {
+      const names = item.genres?.length ? item.genres : ['Other'];
+      const shelf = [...names].sort((a, b) => (
+        (genreFrequency.get(a) ?? 0) - (genreFrequency.get(b) ?? 0)
+        // Alphabetical only to break ties, so the arrangement never depends on
+        // the order TMDB happened to return.
+        || a.localeCompare(b)
+      ))[0];
+      if (!buckets.has(shelf)) buckets.set(shelf, []);
+      buckets.get(shelf).push(item);
     }
     return [...buckets.entries()]
       .map(([name, entries]) => ({ name, entries }))
       .sort((a, b) => b.entries.length - a.entries.length || a.name.localeCompare(b.name));
-  }, [filtered]);
+  }, [sorted, genreFrequency]);
 
   /** Every genre present, for the filter chips. */
   const genres = useMemo(() => {
@@ -85,6 +137,21 @@ export function Browse({ title, items, onSelect, renderLabel, query = '' }) {
         ))}
         <span style={{ flex: 1 }} />
         <button
+          className={unwatchedOnly ? 'chip active' : 'chip'}
+          onClick={() => setUnwatchedOnly(!unwatchedOnly)}
+        >
+          Unwatched
+        </button>
+        <label className="chip chip-select">
+          Sort
+          <select value={sort} onChange={(event) => setSort(event.target.value)}>
+            <option value="title">A–Z</option>
+            <option value="year">Newest first</option>
+            <option value="rating">Highest rated</option>
+            <option value="added">Recently added</option>
+          </select>
+        </label>
+        <button
           className={flat ? 'chip active' : 'chip'}
           onClick={() => { setFlat(!flat); setGenre(null); }}
         >
@@ -98,10 +165,9 @@ export function Browse({ title, items, onSelect, renderLabel, query = '' }) {
         </div>
       )}
 
-      {showGrid && filtered.length > 0 && (
+      {showGrid && sorted.length > 0 && (
         <div className="grid">
-          {[...filtered]
-            .sort((a, b) => a.title.localeCompare(b.title))
+          {sorted
             .map((item) => (
               <Card key={item.id} item={item} onClick={() => onSelect(item)} label={renderLabel(item)} />
             ))}

@@ -112,6 +112,7 @@ export function planDelivery(probed) {
 export function hlsArguments(plan, options) {
   const {
     input, startSeconds, playlist, segmentPattern, initFile, segmentSeconds = 6,
+    audioTrack = 0,
   } = options;
 
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
@@ -123,7 +124,7 @@ export function hlsArguments(plan, options) {
 
   // First video and audio stream only. Subtitle and attachment streams have no
   // place in an HLS fragment and make ffmpeg fail rather than skip them.
-  args.push('-map', '0:v:0', '-map', '0:a:0?');
+  args.push('-map', '0:v:0', '-map', '0:a:' + audioTrack + '?');
 
   if (plan.video === 'copy') {
     args.push('-c:v', 'copy');
@@ -150,6 +151,21 @@ export function hlsArguments(plan, options) {
     args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2');
   }
 
+  /*
+   * The output timeline deliberately starts at zero.
+   *
+   * Stamping the fragments with their real position in the film (via
+   * -output_ts_offset) makes the elapsed time read correctly, and was tried:
+   * it cost every control on the iPad. Safari could no longer work out a
+   * duration or a seekable range from a playlist whose media clock starts
+   * three quarters of an hour in, so it treated the stream as live — no
+   * scrubber, no timestamp, no skip buttons — and the shifted audio drifted
+   * out of step with the picture.
+   *
+   * Working controls over a fragment beat a correct clock over none. Making
+   * the clock right as well needs the playlist to describe the whole file
+   * rather than the part being served, which is a different design.
+   */
   args.push(
     '-f', 'hls',
     '-hls_time', String(segmentSeconds),

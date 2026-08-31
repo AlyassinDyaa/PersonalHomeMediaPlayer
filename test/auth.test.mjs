@@ -17,7 +17,7 @@ process.env.MEDIA_DATA_DIR = path.join(sandbox, 'data');
 const { config, saveSettings, passcodeMatches } = await import('../server/src/config.js');
 const {
   issueToken, tokenValid, readCookie, isLocalRequest, requestAuthorised,
-  loginBlockedFor, recordFailure, recordSuccess,
+  loginBlockedFor, recordFailure, recordSuccess, requireAuth,
 } = await import('../server/src/auth.js');
 
 let passed = 0;
@@ -153,6 +153,44 @@ check('a valid token is worthless once the passcode is cleared', () => {
 });
 
 // --- guessing -------------------------------------------------------------
+
+// --- what a refused browser is shown --------------------------------------
+
+const navigation = (address) => ({
+  socket: { remoteAddress: address },
+  headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+});
+
+/** Captures whichever of redirect/json the guard reaches for. */
+function spyResponse() {
+  const seen = { status: 200, redirected: null, json: null };
+  return {
+    seen,
+    status(code) { seen.status = code; return this; },
+    json(body) { seen.json = body; return this; },
+    redirect(to) { seen.redirected = to; return this; },
+  };
+}
+
+check('a tablet is sent to the login screen even while sharing is off', () => {
+  saveSettings({ passcode: '' });
+  const res = spyResponse();
+  requireAuth(navigation('192.168.1.50'), res, () => {
+    throw new Error('should not have been let through');
+  });
+  // Not a JSON refusal: a Home Screen app has nowhere to show one.
+  assert.strictEqual(res.seen.redirected, '/login');
+  assert.strictEqual(res.seen.json, null);
+});
+
+check('something that is not a page still gets a status it can act on', () => {
+  const res = spyResponse();
+  requireAuth({ socket: { remoteAddress: '192.168.1.50' }, headers: {} }, res, () => {
+    throw new Error('should not have been let through');
+  });
+  assert.strictEqual(res.seen.redirected, null);
+  assert.strictEqual(res.seen.status, 403);
+});
 
 check('repeated wrong guesses are locked out', () => {
   const address = '192.168.1.77';

@@ -9,7 +9,7 @@
 import { config, hasTmdb } from '../config.js';
 import { getDb, stableId, sortTitle, now, transaction } from '../db.js';
 import { walkLibrary } from './walk.js';
-import { groupLibrary } from './group.js';
+import { groupLibrary, pairKey } from './group.js';
 import { seriesKey, cleanEpisodeTitle } from './parse.js';
 import {
   findBestMatch, getMovie, getShow, getSeason, pickLogo, pickCertification,
@@ -35,6 +35,45 @@ function getOverride(scope, key) {
   } catch {
     return row.value;
   }
+}
+
+/**
+ * Shows that have been folded into one another, and what they were folded into.
+ *
+ * Answering "one show" was a one-way door: the suggestion disappeared once it
+ * was answered, so a wrong answer could not be taken back from anywhere in the
+ * app. Justice League and Justice League Unlimited are the case that proved it
+ * — genuinely separate series, joined by one press and then unreachable.
+ */
+export function listMerges() {
+  return getDb()
+    .prepare("SELECT key, value FROM overrides WHERE scope = 'merge' ORDER BY key")
+    .all()
+    .map((row) => {
+      let into = row.value;
+      try { into = JSON.parse(row.value); } catch { /* stored plainly */ }
+      return { alias: row.key, into };
+    });
+}
+
+/**
+ * Remember that two shows are not the same.
+ *
+ * Answering "keep separate" was forgotten at the next scan, because the
+ * suggestion is rebuilt from the folders and nothing recorded the answer. The
+ * question came back every time, and one stray press joined two series with no
+ * way back. Both answers are now remembered.
+ */
+export function rememberSeparate(shows) {
+  setOverride('separate', pairKey(shows), true);
+}
+
+/** Undo one of those, so the next scan separates them again. */
+export function clearMerge(alias) {
+  const result = getDb()
+    .prepare("DELETE FROM overrides WHERE scope = 'merge' AND key = ?")
+    .run(alias);
+  return Number(result.changes ?? 0) > 0;
 }
 
 export function setOverride(scope, key, value) {
@@ -246,7 +285,22 @@ export async function runScan({ onProgress = () => {} } = {}) {
     phase: 'group',
     message: 'Identifying ' + walked.videos.length + ' files',
   });
-  const grouped = groupLibrary(walked);
+  // Merges the user has already accepted, so the same pair is never queried
+  // twice and the shows stay joined across rescans. Values are stored encoded,
+  // as every override is, so they are read back the same way.
+  const mergeInto = Object.fromEntries(
+    getDb().prepare("SELECT key FROM overrides WHERE scope = 'merge'").all()
+      .map((row) => [row.key, getOverride('merge', row.key)])
+      .filter(([, target]) => typeof target === 'string' && target),
+  );
+  // Pairs already answered "these are two shows", so the question is not
+  // asked again at every scan.
+  const keepApart = new Set(
+    getDb().prepare("SELECT key FROM overrides WHERE scope = 'separate'").all()
+      .map((row) => row.key),
+  );
+
+  const grouped = groupLibrary(walked, { mergeInto, keepApart });
   const items = [...grouped.movies, ...grouped.shows];
 
   // Metadata lookups run concurrently; the TMDB client caps real parallelism.

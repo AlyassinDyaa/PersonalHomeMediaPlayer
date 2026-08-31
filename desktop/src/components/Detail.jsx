@@ -20,6 +20,9 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
   const [season, setSeason] = useState(null);
   const [episodeView, setEpisodeView] = useState(readEpisodeView);
   const [error, setError] = useState(null);
+  const [favourite, setFavourite] = useState(false);
+  /** Open only while the automatic match is being corrected. */
+  const [fixing, setFixing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +33,8 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
       .then((loaded) => {
         if (cancelled) return;
         setItem(loaded);
+        setFavourite(Boolean(loaded.favourite));
+        setFixing(false);
         // Open on the season containing the next unwatched episode.
         setSeason(loaded.nextUp?.season ?? loaded.seasons?.[0]?.number ?? null);
       })
@@ -119,9 +124,40 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                 ▶ Play S{item.nextUp.season} E{item.nextUp.episode}
               </button>
             )}
+
+            <button
+              className={favourite ? 'btn btn-secondary is-favourite' : 'btn btn-secondary'}
+              aria-pressed={favourite}
+              onClick={async () => {
+                const wanted = !favourite;
+                // Shown before it is saved: this is a toggle, and a toggle that
+                // waits for a round trip feels broken.
+                setFavourite(wanted);
+                try {
+                  await api.setFavourite(item.id, wanted);
+                } catch (err) {
+                  setFavourite(!wanted);
+                  setError(err.message);
+                }
+              }}
+            >
+              {favourite ? '♥ In your list' : '♡ Add to your list'}
+            </button>
+
+            <button className="btn btn-ghost" onClick={() => setFixing(true)}>
+              Wrong title?
+            </button>
           </div>
         </div>
       </div>
+
+      {fixing && (
+        <MatchFixer
+          item={item}
+          onClose={() => setFixing(false)}
+          onError={setError}
+        />
+      )}
 
       <div className="detail-body">
         {item.kind === 'show' && item.seasons?.length > 0 && (
@@ -352,5 +388,101 @@ const GridGlyph = () => (
     <path d="M3 4h8v7H3zM13 4h8v7h-8zM3 13h8v7H3zM13 13h8v7h-8z" />
   </svg>
 );
+
+/**
+ * Point a title at the right TMDB entry.
+ *
+ * The scanner searches by whatever the folder is called, and occasionally comes
+ * back confident and wrong — a single downloaded episode of "Lanterns" was
+ * matched to a film called "Street of Broken Lanterns" and there was no way to
+ * say otherwise from inside the app. The choice is stored as an override, so it
+ * survives every future scan rather than being re-decided each time.
+ */
+function MatchFixer({ item, onClose, onError }) {
+  const [query, setQuery] = useState(item.title);
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(null);
+
+  const search = async () => {
+    const wanted = query.trim();
+    if (!wanted) return;
+    setBusy(true);
+    try {
+      setResults(await api.searchTmdb(item.kind, wanted));
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The list the user came to correct is the obvious first search.
+  useEffect(() => { search(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  const choose = async (candidate) => {
+    try {
+      await api.matchItem(item.id, candidate.tmdbId);
+      setSaved(candidate);
+    } catch (err) {
+      onError(err.message);
+    }
+  };
+
+  return (
+    <div className="match-fixer">
+      <div className="match-head">
+        <h2>Which one is this?</h2>
+        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+      </div>
+
+      {saved ? (
+        <p className="settings-hint">
+          Set to <strong>{saved.title}</strong>{saved.year ? ' (' + saved.year + ')' : ''}.
+          Run a scan from the Library screen to fetch its artwork and description.
+        </p>
+      ) : (
+        <>
+          <div className="key-row">
+            <input
+              className="key-input"
+              type="text"
+              value={query}
+              placeholder={'Search ' + (item.kind === 'show' ? 'TV shows' : 'films')}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') search(); }}
+            />
+            <button className="btn btn-secondary" onClick={search} disabled={busy}>
+              {busy ? 'Searching…' : 'Search'}
+            </button>
+          </div>
+
+          {results?.length === 0 && (
+            <p className="settings-hint">Nothing found for that.</p>
+          )}
+
+          <div className="match-results">
+            {(results ?? []).map((candidate) => (
+              <button
+                key={candidate.tmdbId}
+                className={candidate.tmdbId === item.tmdbId ? 'match-card current' : 'match-card'}
+                onClick={() => choose(candidate)}
+              >
+                {candidate.poster
+                  ? <img src={artwork(candidate.poster, 'w200')} alt="" loading="lazy" />
+                  : <span className="match-noart" />}
+                <span className="match-text">
+                  <strong>{candidate.title}</strong>
+                  <span>{candidate.year ?? 'year unknown'}
+                    {candidate.tmdbId === item.tmdbId ? ' · current' : ''}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default Detail;

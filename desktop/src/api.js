@@ -62,6 +62,39 @@ export const api = {
   item: (id) => request('/api/items/' + id),
   video: (id) => request('/api/videos/' + id),
   continueWatching: () => request('/api/continue'),
+  removeFromContinue: (itemId) =>
+    request('/api/continue/' + encodeURIComponent(itemId), { method: 'DELETE' }),
+  suggestions: () => request('/api/suggestions'),
+  /** Shows that have been joined into one. */
+  merges: () => request('/api/merges'),
+  /** Undo one of those; the server rescans so they separate again. */
+  unmerge: (alias) =>
+    request('/api/merges/' + encodeURIComponent(alias), { method: 'DELETE' }),
+  resolveSuggestion: (id, action) =>
+    request('/api/suggestions/' + encodeURIComponent(id) + '/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    }),
+
+  favourites: () => request('/api/favourites'),
+  setFavourite: (itemId, favourite) =>
+    request('/api/items/' + encodeURIComponent(itemId) + '/favourite', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favourite }),
+    }),
+
+  /** Candidates for a title the automatic match got wrong. */
+  searchTmdb: (kind, query) =>
+    request('/api/tmdb/search?kind=' + kind + '&q=' + encodeURIComponent(query)),
+  /** Pin a title to a TMDB id. Takes effect on the next scan. */
+  matchItem: (itemId, tmdbId) =>
+    request('/api/items/' + encodeURIComponent(itemId) + '/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdbId }),
+    }),
 
   /** Where playback got to, shared by every device watching this library. */
   saveProgress: (body) => request('/api/progress', {
@@ -74,8 +107,9 @@ export const api = {
   streamInfo: (videoId) => request('/api/stream/' + videoId + '/info'),
 
   /** Begin a stream at a point in the file, and get back its playlist. */
-  streamStart: (videoId, startSeconds) => request(
-    '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0)),
+  streamStart: (videoId, startSeconds, audioTrack = 0) => request(
+    '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0))
+    + '&audio=' + audioTrack,
   ),
   genres: () => request('/api/genres'),
   search: (query) => request('/api/search?q=' + encodeURIComponent(query)),

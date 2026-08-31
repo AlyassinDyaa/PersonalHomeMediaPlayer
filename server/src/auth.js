@@ -127,16 +127,25 @@ export function requireAuth(req, res, next) {
     return;
   }
 
-  if (!config.remoteAccess) {
-    res.status(403).json({ error: 'This library is not shared on the network' });
-    return;
-  }
-
-  // A browser asking for a page is sent to the login screen; anything else gets
-  // a status it can act on.
+  /*
+   * A browser asking for a page is always sent to the login screen, including
+   * when sharing is switched off — that screen explains it is switched off and
+   * where to turn it on. Refusing the navigation with JSON instead, as this
+   * did, is invisible to the reader: a tablet opening the library from its Home
+   * Screen has no address bar and no browser error page to show it in, so an
+   * unexplained black screen was the whole of the message.
+   *
+   * Anything that is not a page still gets a status it can act on, and the
+   * distinction between "not shared" and "not signed in" is kept.
+   */
   const wantsPage = (req.headers.accept ?? '').includes('text/html');
   if (wantsPage) {
     res.redirect('/login');
+    return;
+  }
+
+  if (!config.remoteAccess) {
+    res.status(403).json({ error: 'This library is not shared on the network' });
     return;
   }
   res.status(401).json({ error: 'Not signed in' });

@@ -10,7 +10,7 @@ import Card from './Card.jsx';
  * ignore every `::-webkit-scrollbar` rule, which produced a bright white bar
  * under each row.
  */
-export function Row({ title, items, onSelect, wide = false, renderLabel = null }) {
+export function Row({ title, items, onSelect, wide = false, renderLabel = null, onRemove = null }) {
   const scroller = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
@@ -65,6 +65,8 @@ export function Row({ title, items, onSelect, wide = false, renderLabel = null }
                 progress={entry.progressPercent ?? null}
                 label={renderLabel ? renderLabel(entry) : null}
                 onClick={() => onSelect(entry)}
+                onRemove={onRemove ? () => onRemove(entry) : null}
+                removeLabel="Remove from Continue Watching"
               />
             );
           })}

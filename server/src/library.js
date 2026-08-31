@@ -12,6 +12,40 @@ const WATCHED_THRESHOLD = 0.92;
 /** Ignore trivial positions so accidentally opening something does not pin it to the home row. */
 const RESUME_MIN_SECONDS = 30;
 
+/**
+ * One genre vocabulary for the whole library.
+ *
+ * TMDB describes films and television with different words: a film is
+ * "Science Fiction", "Action", "Adventure", "Family"; a series covering the
+ * same ground is "Sci-Fi & Fantasy", "Action & Adventure", "Kids". Left alone,
+ * a library of both ends up with two sets of categories for one set of ideas —
+ * an "Action" shelf and an "Action & Adventure" shelf, neither of them whole.
+ *
+ * The television names are the compound ones, so each maps to the film genres
+ * it combines and a series lands on both shelves.
+ */
+const GENRE_ALIASES = {
+  'Action & Adventure': ['Action', 'Adventure'],
+  'Sci-Fi & Fantasy': ['Science Fiction', 'Fantasy'],
+  'War & Politics': ['War'],
+  Kids: ['Family'],
+};
+
+/**
+ * A title's genres in that single vocabulary, in their original order and
+ * without repeats — a series tagged both "Action & Adventure" and "Action"
+ * must not end up listed under Action twice.
+ */
+export function canonicalGenres(genres) {
+  const out = [];
+  for (const genre of genres) {
+    for (const name of GENRE_ALIASES[genre] ?? [genre]) {
+      if (!out.includes(name)) out.push(name);
+    }
+  }
+  return out;
+}
+
 function parseJsonColumn(value, fallback) {
   try {
     return JSON.parse(value);
@@ -32,7 +66,7 @@ function shapeItem(row) {
     backdrop: row.backdrop_path,
     logo: row.logo_path,
     rating: row.rating,
-    genres: parseJsonColumn(row.genres, []),
+    genres: canonicalGenres(parseJsonColumn(row.genres, [])),
     runtime: row.runtime,
     certification: row.certification,
     status: row.status,
@@ -41,6 +75,11 @@ function shapeItem(row) {
     sourceFolders: parseJsonColumn(row.source_folders, []),
     episodeCount: row.episode_count ?? undefined,
     seasonCount: row.season_count ?? undefined,
+    addedAt: row.added_at,
+    favourite: Boolean(row.favourite),
+    // Undefined rather than 0 when the query did not ask, so "no unwatched
+    // episodes" and "not counted" stay distinguishable.
+    unwatchedCount: row.unwatched_count ?? undefined,
   };
 }
 
@@ -78,7 +117,11 @@ export function listItems({ kind = null, sort = 'title' } = {}) {
   const rows = db.prepare(`
     SELECT i.*,
            (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
-           (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count
+           (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count,
+           (SELECT 1 FROM favorites f WHERE f.item_id = i.id) AS favourite,
+           (SELECT COUNT(*) FROM videos v
+              LEFT JOIN progress p ON p.video_id = v.id
+             WHERE v.item_id = i.id AND COALESCE(p.watched, 0) = 0) AS unwatched_count
     FROM items i
     ${kind ? 'WHERE i.kind = ?' : ''}
     ORDER BY ${order}
@@ -193,6 +236,31 @@ export function continueWatching(limit = 20) {
 }
 
 /** Record a playback position. Marks watched automatically near the end. */
+/**
+ * Take a title off Continue Watching.
+ *
+ * Only the unfinished positions go: a half-watched episode is what puts a
+ * title on that row, so forgetting those removes it. Episodes already finished
+ * keep their watched mark, so a series does not offer to replay them and the
+ * next unwatched episode is still found correctly.
+ *
+ * The position is genuinely forgotten rather than hidden — playing the title
+ * again starts it from the beginning, which is what asking to remove it from
+ * "continue watching" means.
+ *
+ * @returns {{removed: number}|null} null when there is no such item.
+ */
+export function removeFromContinueWatching(itemId) {
+  const db = getDb();
+  const item = db.prepare('SELECT id FROM items WHERE id = ?').get(itemId);
+  if (!item) return null;
+
+  const result = db
+    .prepare('DELETE FROM progress WHERE item_id = ? AND watched = 0')
+    .run(itemId);
+  return { removed: Number(result.changes ?? 0) };
+}
+
 export function saveProgress({ videoId, position, duration }) {
   const db = getDb();
   const video = db.prepare('SELECT item_id, duration FROM videos WHERE id = ?').get(videoId);
@@ -256,11 +324,48 @@ export function search(query, limit = 60) {
   return items.map(shapeItem);
 }
 
+/**
+ * Titles kept to hand, most recently marked first.
+ *
+ * The table for this has existed since the schema was written; nothing ever
+ * read or wrote it.
+ */
+export function listFavourites() {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT i.*,
+           (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
+           (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count,
+           1 AS favourite
+    FROM favorites f
+    JOIN items i ON i.id = f.item_id
+    ORDER BY f.added_at DESC
+  `).all();
+  return rows.map(shapeItem);
+}
+
+/**
+ * Keep a title to hand, or stop.
+ * @returns {{itemId: string, favourite: boolean}|null} null when there is no such item.
+ */
+export function setFavourite(itemId, favourite) {
+  const db = getDb();
+  if (!db.prepare('SELECT id FROM items WHERE id = ?').get(itemId)) return null;
+
+  if (favourite) {
+    db.prepare('INSERT OR IGNORE INTO favorites (item_id, added_at) VALUES (?, ?)')
+      .run(itemId, Date.now());
+  } else {
+    db.prepare('DELETE FROM favorites WHERE item_id = ?').run(itemId);
+  }
+  return { itemId, favourite: Boolean(favourite) };
+}
+
 /** Genre rails for the home screen. */
 export function listGenres() {
   const counts = new Map();
   for (const row of getDb().prepare('SELECT genres FROM items').all()) {
-    for (const genre of parseJsonColumn(row.genres, [])) {
+    for (const genre of canonicalGenres(parseJsonColumn(row.genres, []))) {
       counts.set(genre, (counts.get(genre) ?? 0) + 1);
     }
   }

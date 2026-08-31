@@ -12,6 +12,9 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Shared with the server, so the build writes the key in exactly the form the
+// server reads.
+import { encodeKey, KEY_FILENAME } from '../server/src/bundled-key.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Overridable so a build can go elsewhere when the previous output is still
@@ -87,6 +90,10 @@ await fsp.writeFile(
   'utf8',
 );
 
+// Carry the metadata key, so a fresh copy shows artwork and descriptions
+// straight away instead of asking for a key before it can do anything.
+await writeMetadataKey(appPath);
+
 // Carry a Node runtime and mpv so the folder runs on a machine with neither
 // installed — the point of putting it on a removable drive.
 const bundledNode = await copyBundledNode(appPath);
@@ -117,8 +124,10 @@ const notes = [
   '  with the drive. Delete portable.txt to store them under %APPDATA% instead.',
   '',
   'First run',
-  '  Open the Library tab, add the folder holding your movies and shows, paste',
-  '  a TMDB API key for artwork and descriptions, then press Scan.',
+  '  Open the Library tab, add the folder holding your movies and shows, then',
+  '  press Scan. Artwork and descriptions need no setting up: a metadata key',
+  '  comes with this folder. Settings can replace it with your own if you have',
+  '  one, and can put the included one back again.',
   '',
   'If Windows blocks the app, that is SmartScreen or Smart App Control warning',
   'about an unsigned program. Choose "More info" then "Run anyway".',
@@ -208,4 +217,52 @@ async function copyBundledMpv(appDir) {
   }
   console.log('  + bundled mpv from ' + source);
   return true;
+}
+
+/**
+ * Write the metadata key into the built folder.
+ *
+ * Taken from this machine's own gitignored configuration, so the key lives in
+ * exactly two places — the developer's machine and the folder that gets built —
+ * and never in the repository, which is public.
+ *
+ * A build made without a key still works; the app asks for one in Settings, as
+ * it did before.
+ */
+async function writeMetadataKey(appPath) {
+  const key = await findLocalKey();
+  if (!key) {
+    console.log('  ! no metadata key found, so the build will ask for one');
+    return;
+  }
+  await fsp.writeFile(
+    path.join(appPath, KEY_FILENAME),
+    encodeKey(key) + '\r\n',
+    'utf8',
+  );
+  console.log('  + metadata key bundled (' + key.slice(0, 4) + '…' + key.slice(-4) + ')');
+}
+
+/** The key this machine uses, from the environment or either local config. */
+async function findLocalKey() {
+  if (process.env.TMDB_API_KEY) return process.env.TMDB_API_KEY.trim();
+
+  const local = path.join(ROOT, 'config.local.json');
+  if (fs.existsSync(local)) {
+    try {
+      const parsed = JSON.parse(await fsp.readFile(local, 'utf8'));
+      if (parsed.tmdbApiKey) return String(parsed.tmdbApiKey).trim();
+    } catch {
+      // A malformed local config is not this script's problem to report.
+    }
+  }
+
+  const dotenv = path.join(ROOT, '.env');
+  if (fs.existsSync(dotenv)) {
+    const match = (await fsp.readFile(dotenv, 'utf8'))
+      .match(/^\s*TMDB_API_KEY\s*=\s*(.+?)\s*$/m);
+    if (match) return match[1].replace(/^["']|["']$/g, '').trim();
+  }
+
+  return null;
 }

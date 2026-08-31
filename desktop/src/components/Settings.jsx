@@ -18,21 +18,29 @@ export function Settings({ onScanned, onSettingsChanged }) {
   const [passcode, setPasscode] = useState('');
   const [sharingBusy, setSharingBusy] = useState(false);
   const [apiKey, setApiKey] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
+  // 'saved' after pasting one, 'included' after going back to the shipped key.
+  const [keySaved, setKeySaved] = useState('');
   const [name, setName] = useState('');
   const [nameSaved, setNameSaved] = useState(false);
   const [color, setColor] = useState('');
   const [error, setError] = useState(null);
+
+  const [suggestions, setSuggestions] = useState([]);
+  /** Shows already joined together, so a wrong answer can be taken back. */
+  const [merges, setMerges] = useState([]);
+  const [separating, setSeparating] = useState(null);
 
   const [scan, setScan] = useState(null); // { percent, message, phase }
   const [result, setResult] = useState(null);
   const sourceRef = useRef(null);
 
   const load = useCallback(() => {
-    Promise.all([api.settings(), api.stats()])
-      .then(([loadedSettings, loadedStats]) => {
+    api.merges().then(setMerges).catch(() => setMerges([]));
+    Promise.all([api.settings(), api.stats(), api.suggestions().catch(() => [])])
+      .then(([loadedSettings, loadedStats, pending]) => {
         setSettings(loadedSettings);
         setStats(loadedStats);
+        setSuggestions(pending);
         setName(loadedSettings.libraryName ?? '');
         setColor(brandColor(loadedSettings.libraryColor));
       })
@@ -40,6 +48,22 @@ export function Settings({ onScanned, onSettingsChanged }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  /**
+   * Answer one grouping question.
+   *
+   * Removed from the list straight away: the question has been answered, and
+   * "One show" only takes visible effect on the next scan, so leaving the card
+   * sitting there would read as though the answer had not registered.
+   */
+  const answerSuggestion = useCallback(async (id, action) => {
+    setSuggestions((current) => current.filter((entry) => entry.id !== id));
+    try {
+      await api.resolveSuggestion(id, action);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
 
   // Close any open event stream when leaving the screen.
   useEffect(() => () => { sourceRef.current?.close(); }, []);
@@ -277,6 +301,53 @@ export function Settings({ onScanned, onSettingsChanged }) {
         </section>
 
         <section className="settings-card">
+          <h2>How the library is arranged</h2>
+          <p className="settings-hint">
+            Films and series are normally shelved under genre headings. Where a
+            library leans heavily one way — a shelf of cartoons that are all
+            Animation — the headings say little, and a plain list reads better.
+            Each screen is set on its own.
+          </p>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.groupMoviesByGenre !== false}
+              onChange={(event) => saveToggle('groupMoviesByGenre', event.target.checked)}
+            />
+            <span>
+              <strong>Group Movies by genre</strong>
+              <span className="toggle-note">
+                {settings.groupMoviesByGenre !== false
+                  ? 'Shelved under genre headings'
+                  : 'One plain list, A to Z'}
+              </span>
+            </span>
+          </label>
+
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={settings.groupShowsByGenre !== false}
+              onChange={(event) => saveToggle('groupShowsByGenre', event.target.checked)}
+            />
+            <span>
+              <strong>Group TV Shows by genre</strong>
+              <span className="toggle-note">
+                {settings.groupShowsByGenre !== false
+                  ? 'Shelved under genre headings'
+                  : 'One plain list, A to Z'}
+              </span>
+            </span>
+          </label>
+
+          <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+            The genre chips on those screens still filter whichever way this is
+            set, so nothing is put out of reach by turning the headings off.
+          </p>
+        </section>
+
+        <section className="settings-card">
           <h2>Playback</h2>
           <p className="settings-hint">
             Skip prompts use chapter markers when a file has them. Most releases do
@@ -492,12 +563,90 @@ export function Settings({ onScanned, onSettingsChanged }) {
           )}
         </section>
 
+        {merges.length > 0 && (
+          <section className="settings-card">
+            <h2>Shows you joined</h2>
+            <p className="settings-hint" style={{ marginTop: 0 }}>
+              These were answered "one show" and have been filed together ever
+              since. Separating one puts it back to two and rescans; no episode
+              is moved or lost either way, only the shelf it sits on.
+            </p>
+
+            {merges.map((entry) => (
+              <div key={entry.alias} className="suggestion">
+                <div className="suggestion-text">
+                  <strong>{entry.alias}&nbsp; joined into &nbsp;{entry.into}</strong>
+                  <span>Filed as one show</span>
+                </div>
+                <div className="suggestion-actions">
+                  <button
+                    className="btn btn-secondary"
+                    disabled={separating === entry.alias}
+                    onClick={async () => {
+                      setSeparating(entry.alias);
+                      try {
+                        await api.unmerge(entry.alias);
+                        setMerges(await api.merges());
+                        await load();
+                      } catch (err) {
+                        setError(err.message);
+                      } finally {
+                        setSeparating(null);
+                      }
+                    }}
+                  >
+                    {separating === entry.alias ? 'Separating…' : 'Separate again'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {suggestions.length > 0 && (
+          <section className="settings-card">
+            <h2>Is this one show or two?</h2>
+            <p className="settings-hint" style={{ marginTop: 0 }}>
+              These titles look related. The scanner will not join them without
+              being told to, because some series genuinely share a name with
+              their own sequel.
+            </p>
+
+            {suggestions.map((entry) => (
+              <div key={entry.id} className="suggestion">
+                <div className="suggestion-text">
+                  <strong>{entry.titles?.join('  ·  ')}</strong>
+                  <span>{entry.reason}</span>
+                </div>
+                <div className="suggestion-actions">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => answerSuggestion(entry.id, 'merge')}
+                  >
+                    One show
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => answerSuggestion(entry.id, 'separate')}
+                  >
+                    Keep separate
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
         <section className="settings-card">
           <h2>Status</h2>
           <div className="status-row">
             <span>Artwork &amp; metadata</span>
             <span className={settings.tmdbConfigured ? 'ok-text' : 'warn-text'}>
-              {settings.tmdbConfigured ? 'TMDB connected' : 'no API key configured'}
+              {!settings.tmdbConfigured
+                ? 'no API key configured'
+                : settings.tmdbKeyIsBundled
+                  ? 'TMDB connected · included key'
+                  : 'TMDB connected · your own key'}
             </span>
           </div>
 
@@ -507,7 +656,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
               className="key-input"
               value={apiKey}
               placeholder={settings.tmdbConfigured ? 'Replace TMDB API key' : 'Paste your TMDB API key'}
-              onChange={(event) => { setApiKey(event.target.value); setKeySaved(false); }}
+              onChange={(event) => { setApiKey(event.target.value); setKeySaved(''); }}
               spellCheck={false}
             />
             <button
@@ -517,7 +666,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 try {
                   setSettings(await api.saveSettings({ tmdbApiKey: apiKey.trim() }));
                   setApiKey('');
-                  setKeySaved(true);
+                  setKeySaved('saved');
                 } catch (err) {
                   setError(err.message);
                 }
@@ -526,10 +675,37 @@ export function Settings({ onScanned, onSettingsChanged }) {
               Save key
             </button>
           </div>
+          {/*
+            * Only offered once the user has replaced the included key, and only
+            * when there is an included key to go back to. It is how a mistyped
+            * or expired personal key gets undone without having to find the
+            * original one again.
+            */}
+          {settings.tmdbKeyBundledAvailable && !settings.tmdbKeyIsBundled && (
+            <button
+              className="btn btn-ghost"
+              style={{ marginTop: 10 }}
+              onClick={async () => {
+                try {
+                  setSettings(await api.saveSettings({ tmdbApiKey: '' }));
+                  setApiKey('');
+                  setKeySaved('included');
+                } catch (err) {
+                  setError(err.message);
+                }
+              }}
+            >
+              Use the included key
+            </button>
+          )}
           <p className="settings-hint" style={{ margin: '8px 0 0' }}>
-            {keySaved
+            {keySaved === 'saved'
               ? 'Saved. Run a scan to fetch artwork and descriptions.'
-              : 'A free key from themoviedb.org supplies posters, descriptions and episode titles.'}
+              : keySaved === 'included'
+                ? 'Back to the key that came with the app.'
+                : settings.tmdbKeyIsBundled
+                  ? 'A key comes with the app, so artwork and descriptions already work. Paste your own free key from themoviedb.org to use that instead.'
+                  : 'A free key from themoviedb.org supplies posters, descriptions and episode titles.'}
           </p>
           <div className="status-row">
             <span>Player</span>

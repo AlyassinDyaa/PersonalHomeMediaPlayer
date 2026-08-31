@@ -232,7 +232,11 @@ export function findYear(normalized) {
     }
   }
 
-  const bare = [...normalized.matchAll(/(?<![\d])(\d{4})(?![\d])/g)];
+  // A year has to stand as its own word. Without that, the release group in
+  // "All Star Superman 2011 REPACK ... x265-edge2020" supplied the year: 2020
+  // was read as the release date, everything before it became the title, and
+  // the film went unmatched and unillustrated.
+  const bare = [...normalized.matchAll(/(?<![A-Za-z0-9])(\d{4})(?![0-9])/g)];
   for (const m of bare.reverse()) {
     const year = Number(m[1]);
     // A year at index 0 is almost always part of the title ("1917", "2012").
