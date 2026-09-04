@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
+import ProfileGate from './components/ProfileGate.jsx';
 import { initApi } from './api.js';
 import './styles.css';
 
@@ -23,7 +24,11 @@ function Boot() {
   if (!info) {
     return <div className="center-note"><div className="spinner" /></div>;
   }
-  return <App info={info} />;
+  return (
+    <ProfileGate>
+      <App info={info} />
+    </ProfileGate>
+  );
 }
 
 createRoot(document.getElementById('root')).render(

@@ -176,8 +176,14 @@ app.use(requireAuth);
  * the profile it named.
  */
 app.use((req, res, next) => {
+  /*
+   * The query parameter is for addresses a tag loads rather than fetch does:
+   * an <img> or a <video> cannot be given a header, and the desktop window has
+   * no cookie to fall back on. Honoured only from this machine, for the same
+   * reason the header is.
+   */
   const named = isLocalRequest(req)
-    ? (req.get('X-Profile-Id') || sessionProfileId(req))
+    ? (req.get('X-Profile-Id') || req.query.profile || sessionProfileId(req))
     : sessionProfileId(req);
 
   req.profile = getProfile(named) ?? getProfile(defaultProfileId());

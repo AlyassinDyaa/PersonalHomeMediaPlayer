@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { initApi } from '../api.js';
 import WebApp from './WebApp.jsx';
+import ProfileGate from '../components/ProfileGate.jsx';
 // The desktop stylesheet first, then what a touch screen needs on top of it.
 import '../styles.css';
 import './touch.css';
@@ -12,5 +13,9 @@ import './touch.css';
  * served from rather than from Electron.
  */
 initApi().then((info) => {
-  createRoot(document.getElementById('root')).render(<WebApp info={info} />);
+  createRoot(document.getElementById('root')).render(
+    <ProfileGate>
+      <WebApp info={info} />
+    </ProfileGate>,
+  );
 });

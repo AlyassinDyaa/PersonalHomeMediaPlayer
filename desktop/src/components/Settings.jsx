@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
+import ProfilesPanel from './ProfilesPanel.jsx';
 import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
 
 /**
@@ -9,14 +10,24 @@ import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
  * progress. Scan progress arrives over server-sent events so the bar reflects
  * real work rather than an animation.
  */
-/** The groups the settings are divided into, in the order they are offered. */
+/**
+ * The groups the settings are divided into, in the order they are offered.
+ *
+ * `ownerOnly` marks the ones that name the machine the library runs on — its
+ * folders, its drives, its passcode, where its own files are kept. They are
+ * not merely disabled for everybody else but absent, because the point of the
+ * owner profile is that a guest cannot learn any of it. What is left is the
+ * two things that belong to whoever is watching: their own shelves, and which
+ * of the household they are.
+ */
 const SETTINGS_TABS = [
-  { id: 'library', label: 'Folders', hint: 'Where your movies and shows live, and how they are arranged' },
+  { id: 'library', label: 'Folders', ownerOnly: true, hint: 'Where your movies and shows live, and how they are arranged' },
   { id: 'collections', label: 'Collections', hint: 'Your own shelves on the home screen' },
-  { id: 'comics', label: 'Comics', hint: 'Where your comics live, and whether the tab is shown' },
-  { id: 'playback', label: 'Playback', hint: 'How episodes and films play' },
-  { id: 'sharing', label: 'Sharing', hint: 'Watching on a phone, a tablet, or another computer' },
-  { id: 'maintenance', label: 'Upkeep', hint: 'Scanning, storage, and the state of things' },
+  { id: 'comics', label: 'Comics', ownerOnly: true, hint: 'Where your comics live, and whether the tab is shown' },
+  { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
+  { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
+  { id: 'profiles', label: 'Profiles', hint: 'Who is watching, and what each of them can see' },
+  { id: 'maintenance', label: 'Upkeep', ownerOnly: true, hint: 'Scanning, storage, and the state of things' },
 ];
 
 export function Settings({ onScanned, onSettingsChanged }) {
@@ -284,22 +295,30 @@ export function Settings({ onScanned, onSettingsChanged }) {
     return <div className="center-note"><div className="spinner" /></div>;
   }
 
-  const hasRoots = settings.libraryRoots.length > 0;
+  const isOwner = settings.isOwner === true;
+  const tabs = SETTINGS_TABS.filter((entry) => isOwner || !entry.ownerOnly);
+  // The remembered tab can be one this profile is not offered — the owner
+  // left Settings on Folders, then somebody else picked their own profile.
+  const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0].id;
+
+  // A profile that is not the owner is never told the roots, so the array is
+  // simply absent rather than empty.
+  const hasRoots = (settings.libraryRoots ?? []).length > 0;
 
   return (
     <>
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
         <span className="page-sub">
-          {SETTINGS_TABS.find((entry) => entry.id === tab)?.hint}
+          {tabs.find((entry) => entry.id === active)?.hint}
         </span>
       </div>
 
       <nav className="settings-tabs">
-        {SETTINGS_TABS.map((entry) => (
+        {tabs.map((entry) => (
           <button
             key={entry.id}
-            className={'settings-tab' + (tab === entry.id ? ' is-active' : '')}
+            className={'settings-tab' + (active === entry.id ? ' is-active' : '')}
             onClick={() => setTab(entry.id)}
           >
             {entry.label}
@@ -320,7 +339,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
 
 
 
-        {tab === 'library' && (
+        {active === 'library' && (
           <>
           <section className="settings-card">
             <h2>Folders</h2>
@@ -446,9 +465,11 @@ export function Settings({ onScanned, onSettingsChanged }) {
           </>
         )}
 
-        {tab === 'collections' && <CollectionsPanel onChanged={onSettingsChanged} />}
+        {active === 'collections' && <CollectionsPanel onChanged={onSettingsChanged} />}
 
-        {tab === 'comics' && (
+        {active === 'profiles' && <ProfilesPanel isOwner={isOwner} />}
+
+        {active === 'comics' && (
           <>
           <section className="settings-card">
             <h2>Comics</h2>
@@ -517,7 +538,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
           </>
         )}
 
-        {tab === 'playback' && (
+        {active === 'playback' && (
           <>
           <section className="settings-card">
             <h2>Playback</h2>
@@ -555,7 +576,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
           </>
         )}
 
-        {tab === 'sharing' && (
+        {active === 'sharing' && (
           <>
           <section className="settings-card">
             <h2>Watch on other devices</h2>
@@ -641,7 +662,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
           </>
         )}
 
-        {tab === 'maintenance' && (
+        {active === 'maintenance' && (
           <>
           <section className="settings-card">
             <h2>Scan</h2>

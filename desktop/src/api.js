@@ -21,8 +21,57 @@ export async function initApi() {
   return { apiBase, mpvAvailable: false, platform: 'browser' };
 }
 
-async function request(pathname, options) {
-  const response = await fetch(apiBase + pathname, options);
+/**
+ * Which profile this client is speaking for.
+ *
+ * A browser needs none of this: the server put the profile in the session
+ * cookie when it was chosen, and the cookie rides along on its own. The
+ * desktop window is the one that cannot, because it is loaded from a file on
+ * disk and every call to the server is cross-origin, so no cookie is sent. It
+ * remembers the choice here and repeats it in a header instead.
+ */
+const PROFILE_STORAGE_KEY = 'media.profileId';
+
+let profileId = null;
+try {
+  profileId = window?.localStorage?.getItem(PROFILE_STORAGE_KEY) ?? null;
+} catch {
+  // Private windows and locked-down browsers throw rather than return null.
+  profileId = null;
+}
+
+export function currentProfileId() {
+  return profileId;
+}
+
+export function rememberProfile(id) {
+  profileId = id ?? null;
+  try {
+    if (id) window.localStorage.setItem(PROFILE_STORAGE_KEY, id);
+    else window.localStorage.removeItem(PROFILE_STORAGE_KEY);
+  } catch {
+    // Remembering is a convenience; the session still works without it.
+  }
+}
+
+/**
+ * The profile as a query parameter, for addresses a tag loads rather than
+ * fetch does.
+ *
+ * An `<img>` or a `<video>` cannot be given a header, so the desktop window
+ * has no other way to say who is watching when the browser plays the file
+ * itself. The server only honours this from the machine it runs on, where the
+ * files could have been opened directly anyway.
+ */
+export function profileParam(prefix = '?') {
+  return profileId ? prefix + 'profile=' + encodeURIComponent(profileId) : '';
+}
+
+async function request(pathname, options = {}) {
+  const headers = { ...(options.headers ?? {}) };
+  if (profileId) headers['X-Profile-Id'] = profileId;
+
+  const response = await fetch(apiBase + pathname, { ...options, headers });
 
   // A lapsed session in a browser means the passcode is wanted again. Every
   // call would otherwise fail with an error the page can do nothing about.
@@ -117,6 +166,28 @@ export const api = {
     '/api/collections/' + encodeURIComponent(id) + '/items/' + encodeURIComponent(itemId),
     { method: 'DELETE' },
   ),
+
+  // --- who is watching ----------------------------------------------------
+  /** Everyone in the household, and who this client is currently being. */
+  profiles: () => request('/api/profiles'),
+  /** Become one of them. A profile with no PIN takes an empty one. */
+  switchProfile: (id, pin = '') => request('/api/profiles/switch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId: id, pin }),
+  }),
+  createProfile: (body) => request('/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  updateProfile: (id, body) => request('/api/profiles/' + encodeURIComponent(id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  deleteProfile: (id) =>
+    request('/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' }),
 
   favourites: () => request('/api/favourites'),
   setFavourite: (itemId, favourite) =>

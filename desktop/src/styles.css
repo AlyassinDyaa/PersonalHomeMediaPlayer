@@ -1725,3 +1725,189 @@ button {
   .hero-dot { width: 10px; height: 10px; }
   .hero-dot.on { width: 24px; }
 }
+
+/* --- who is watching ---------------------------------------------------- */
+
+/*
+ * The profile gate covers everything. It is not a dialog over the library:
+ * until somebody has said who they are there is no library to show behind it,
+ * only a shelf that would have to be redrawn the moment they answered.
+ */
+.profile-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 36px;
+  padding: 32px;
+  background: var(--bg);
+}
+
+.profile-title {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 46px);
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.profile-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 28px;
+}
+
+.profile-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  cursor: pointer;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  transition: color 120ms ease;
+}
+
+.profile-choice:hover:not(:disabled),
+.profile-choice:focus-visible { color: var(--text); }
+.profile-choice:disabled { cursor: default; opacity: 0.5; }
+
+.profile-face {
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 108px;
+  border-radius: var(--radius);
+  font-size: 44px;
+  font-weight: 600;
+  color: #fff;
+  /* The initial sits on whatever colour was chosen, some of which are light. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  border: 3px solid transparent;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.profile-choice:hover .profile-face,
+.profile-choice:focus-visible .profile-face {
+  border-color: var(--text);
+  transform: scale(1.04);
+}
+
+.profile-face-large { width: 88px; height: 88px; font-size: 36px; }
+
+.profile-name { font-size: 15px; }
+
+.profile-lock {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font-size: 13px;
+}
+
+.profile-pin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.profile-pin h2 { margin: 0; font-size: 22px; font-weight: 500; }
+.profile-note { margin: 0; color: var(--text-dim); font-size: 14px; }
+
+.profile-pin input {
+  width: 220px;
+  padding: 12px 14px;
+  font-size: 20px;
+  letter-spacing: 0.35em;
+  text-align: center;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.profile-pin input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.profile-pin-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 14px;
+}
+
+.profile-error { margin: 0; color: var(--accent); font-size: 14px; }
+.profile-cancel { margin-top: 4px; }
+
+/* A profile that does not own the library is told so where the drives were. */
+.settings-owner-only {
+  padding: 16px 18px;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.profile-list {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.profile-list-item:last-child { border-bottom: none; }
+
+.profile-face-small {
+  width: 34px;
+  height: 34px;
+  font-size: 16px;
+  border-radius: 4px;
+  flex: none;
+}
+
+.profile-list-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-tag {
+  padding: 2px 7px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface);
+  border-radius: 3px;
+}
+
+.profile-list-actions { display: flex; gap: 4px; flex: none; }
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 420px;
+}
