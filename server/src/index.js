@@ -147,13 +147,29 @@ app.post('/api/logout', (req, res) => {
  * application name — and because they are needed before signing in: the login
  * page shows the icon, and adding the library to a Home Screen fetches it.
  */
-app.get(['/icon-180.png', '/icon-512.png', '/manifest.webmanifest'], (req, res, next) => {
+app.get([
+  '/icon-180.png', '/icon-512.png', '/manifest.webmanifest',
+  // The worker that speaks when this server cannot, and the page it shows.
+  // Both have to be fetchable before anybody has signed in: the worker is
+  // installed on first visit and must already hold that page by the time it
+  // is needed, which is precisely when nothing here can be reached.
+  '/sw.js', '/offline.html',
+], (req, res, next) => {
   const file = path.join(webAppDir(), path.basename(req.path));
   if (!fs.existsSync(file)) {
     next();
     return;
   }
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+
+  /*
+   * The worker itself is never cached for long. It is the piece that decides
+   * what everything else does, so a stale copy is the one kind of stale copy
+   * that cannot be corrected by a later update.
+   */
+  res.setHeader(
+    'Cache-Control',
+    req.path === '/sw.js' ? 'no-cache' : 'public, max-age=86400',
+  );
   res.sendFile(file);
 });
 

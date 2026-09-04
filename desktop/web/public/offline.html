@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0b0b0f" />
+<link rel="apple-touch-icon" href="/icon-180.png" />
+<title>Library</title>
+<!--
+  Shown when the computer at home is not answering.
+
+  Everything here is inline and self-contained on purpose: this page is served
+  from the phone's own cache at a moment when nothing else can be fetched, so a
+  stylesheet or a font it had to go and get would leave it half-drawn.
+-->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+    padding: 32px 28px calc(32px + env(safe-area-inset-bottom));
+    text-align: center;
+    background: #0b0b0f;
+    color: #f4f4f6;
+    font-family: -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .mark {
+    width: 68px;
+    height: 68px;
+    border-radius: 14px;
+    background: #16161d;
+    border: 1px solid #2a2a35;
+    display: grid;
+    place-items: center;
+    font-size: 30px;
+  }
+
+  h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -0.01em; }
+
+  p {
+    margin: 0;
+    max-width: 30ch;
+    color: #a8a8b3;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+
+  button {
+    font: inherit;
+    color: #fff;
+    background: #e50914;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 26px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:disabled { opacity: 0.55; cursor: default; }
+
+  .status { min-height: 1.2em; font-size: 13px; color: #6e6e7a; }
+</style>
+</head>
+<body>
+  <div class="mark" aria-hidden="true">◎</div>
+  <h1>Your library is asleep</h1>
+  <p>
+    The computer it lives on isn&rsquo;t switched on right now. Everything is still
+    there &mdash; it just needs the machine at home to be awake.
+  </p>
+  <button id="retry" type="button">Try again</button>
+  <p class="status" id="status" role="status">Checking every few seconds&hellip;</p>
+
+<script>
+  /*
+   * Watch for the library coming back, and go straight in when it does.
+   *
+   * Somebody who has just walked over and turned the computer on should not
+   * also have to know to reload the page. The wait between attempts grows, so
+   * a tablet left on this screen overnight is not asking every two seconds
+   * until its battery is flat.
+   */
+  var status = document.getElementById('status');
+  var retry = document.getElementById('retry');
+  var wait = 3000;
+  var timer = null;
+
+  function check(manual) {
+    if (timer) { clearTimeout(timer); timer = null; }
+    retry.disabled = true;
+    status.textContent = 'Looking for your library…';
+
+    // A cache-busting address and no-store, so a hopeful answer is a real one.
+    fetch('/manifest.webmanifest?awake=' + Date.now(), { cache: 'no-store' })
+      .then(function (response) {
+        if (!response.ok) throw new Error('not yet');
+        status.textContent = 'Found it — opening…';
+        location.replace('/');
+      })
+      .catch(function () {
+        retry.disabled = false;
+        if (manual) wait = 3000;
+        else wait = Math.min(wait * 1.6, 60000);
+        status.textContent = 'Still asleep. Checking again shortly…';
+        timer = setTimeout(check, wait);
+      });
+  }
+
+  retry.addEventListener('click', function () { check(true); });
+
+  // A phone that was put down and picked up again should look straight away
+  // rather than wait out whatever was left of the last delay.
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) check(true);
+  });
+
+  check(true);
+</script>
+</body>
+</html>
