@@ -41,8 +41,20 @@ function certificationFilter(profile, alias = 'i') {
   };
 }
 
-/** Fraction of runtime past which an item counts as finished rather than in-progress. */
-const WATCHED_THRESHOLD = 0.92;
+/**
+ * Fraction of runtime past which an item counts as finished rather than in-progress.
+ *
+ * Very nearly all of it, deliberately. This used to be 92%, on the reasoning
+ * that the credits had started and the episode was effectively over — but that
+ * decided on somebody's behalf that they had finished watching, and took the
+ * episode off Continue Watching while they were still in it. Leaving at 93%
+ * should return you to 93%.
+ *
+ * Reaching the actual end is reported separately by the player, so nothing
+ * depends on this to notice a finished episode; it only catches a viewer who
+ * closed the tab in the last few seconds.
+ */
+const WATCHED_THRESHOLD = 0.995;
 /** Ignore trivial positions so accidentally opening something does not pin it to the home row. */
 const RESUME_MIN_SECONDS = 30;
 
@@ -282,9 +294,53 @@ export function continueWatching(limit = 20, profile) {
     ORDER BY p.updated_at DESC
   `).all(profileId, RESUME_MIN_SECONDS, ...rated.values);
 
+  /*
+   * A show whose last episode is finished offers the next one.
+   *
+   * An episode is counted as watched once the credits start, so finishing one
+   * takes it off this row — correctly, nobody wants to be offered a film they
+   * have just seen. For a series that left nothing behind at all, which is
+   * wrong in the other direction: the thing wanted next is obvious, and it is
+   * the next episode.
+   */
+  const finished = getDb().prepare(`
+    SELECT p.item_id, v.season, v.episode, p.updated_at
+    FROM progress p
+    JOIN videos v ON v.id = p.video_id
+    JOIN items i ON i.id = p.item_id
+    WHERE p.profile_id = ? AND p.watched = 1 AND i.kind = 'show' ${rated.sql}
+    ORDER BY p.updated_at DESC
+  `).all(profileId, ...rated.values);
+
+  const nextUp = [];
+  const offered = new Set();
+  const findNext = getDb().prepare(`
+    SELECT v.*, i.title AS item_title, i.kind AS item_kind,
+           i.backdrop_path, i.poster_path, i.logo_path
+    FROM videos v
+    JOIN items i ON i.id = v.item_id
+    LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
+    WHERE v.item_id = ?
+      AND COALESCE(p.watched, 0) = 0
+      AND (v.season > ? OR (v.season = ? AND v.episode > ?))
+    ORDER BY v.season ASC, v.episode ASC
+    LIMIT 1
+  `);
+
+  for (const row of finished) {
+    if (offered.has(row.item_id)) continue;
+    offered.add(row.item_id);
+    const next = findNext.get(profileId, row.item_id, row.season, row.season, row.episode);
+    // Carries the finished episode's time so it sorts among the rest by when
+    // it was actually watched, not by where it sits in the series.
+    if (next) nextUp.push({ ...next, position: 0, watched: 0, updated_at: row.updated_at });
+  }
+
+  const merged = [...rows, ...nextUp].sort((a, b) => b.updated_at - a.updated_at);
+
   const seen = new Set();
   const result = [];
-  for (const row of rows) {
+  for (const row of merged) {
     if (seen.has(row.item_id)) continue;
     seen.add(row.item_id);
     result.push({

@@ -46,16 +46,20 @@ export function loginPage({ configured }) {
    * works normally. This is the way in when it does not.
    */
   const body = configured
-    ? `<form id="form">
+    ? `<div id="faces" class="faces" hidden></div>
+       <form id="form" hidden>
          <input id="passcode" type="text" inputmode="text" autocomplete="off"
                 autocapitalize="none" autocorrect="off" spellcheck="false"
                 placeholder="Passcode" />
-         <div id="pad" class="pad"></div>
-         <div class="pad-row">
-           <button type="button" id="mode" class="alt">ABC</button>
-           <button type="button" id="back" class="alt">Delete</button>
+         <div id="keypad" hidden>
+           <div id="pad" class="pad"></div>
+           <div class="pad-row">
+             <button type="button" id="mode" class="alt">ABC</button>
+             <button type="button" id="back" class="alt">Delete</button>
+           </div>
          </div>
          <button type="submit">Enter</button>
+         <button type="button" id="show-pad" class="link-button">Use the on-screen keypad</button>
          <p id="error" class="error" hidden></p>
        </form>`
     : `<p class="note">This library is not being shared on the network.
@@ -82,6 +86,54 @@ export function loginPage({ configured }) {
     padding: 24px;
   }
   .card { width: 100%; max-width: 340px; text-align: center; }
+
+  /* The faces on the door. Chosen first; the PIN follows. */
+  .faces { display: flex; flex-wrap: wrap; justify-content: center; gap: 22px; }
+  /* An element with a display rule ignores the hidden attribute unless told. */
+  [hidden] { display: none !important; }
+  .who {
+    background: none; border: none; padding: 0; width: auto; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+  }
+  .who { position: relative; }
+  .who-face {
+    width: 112px; height: 112px; border-radius: 50%;
+    display: grid; place-items: center;
+    font-size: 38px; font-weight: 600; color: #fff;
+    object-fit: cover; overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    border: 3px solid transparent;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .who:active .who-face { transform: scale(0.96); }
+  .who-name { font-size: 15px; color: #d8d8e0; }
+  /* A small badge, as on the picker inside the library. */
+  .who-lock {
+    position: absolute; top: -2px; right: -2px;
+    font-size: 15px; line-height: 1;
+  }
+  /* The one being asked about stays on screen, alone. */
+  .faces.asking .who { display: none; }
+  .faces.asking .who.picked { display: flex; }
+  .faces.asking { margin-bottom: 18px; }
+  .back-to-faces {
+    width: auto; background: none; border: none; color: #a8a8b3;
+    font-size: 14px; padding: 10px; margin-top: 4px; cursor: pointer;
+  }
+  /*
+   * The keypad is offered, not imposed.
+   *
+   * It exists because iOS sometimes refuses to raise its keyboard for this
+   * field, which left people staring at a box they could not answer. That is
+   * the exception though — on every device where the keyboard works, showing
+   * a second one underneath it is clutter. So the field is the default and
+   * this is the way out when it fails.
+   */
+  .link-button {
+    width: auto; background: none; border: none; color: #8a8a96;
+    font-size: 13px; padding: 12px 8px 4px; margin: 0 auto; cursor: pointer;
+    text-decoration: underline; display: block;
+  }
   h1 { color: ${colour}; font-size: 26px; font-weight: 800; letter-spacing: -0.4px; margin: 0 0 6px; }
   .sub { color: #a8a8b3; font-size: 14px; margin: 0 0 28px; }
   input {
@@ -142,14 +194,119 @@ export function loginPage({ configured }) {
     ${body}
   </div>
 <script>
+  const faces = document.getElementById('faces');
+  const heading = document.querySelector('h1');
+  const subheading = document.querySelector('.sub');
+  let chosen = null;
+
+  /*
+   * Show who is here, and let one of them in.
+   *
+   * The library opens on faces rather than on a passcode box, so the first
+   * question is which of you is watching. Answering it decides what is then
+   * asked for: a profile with a PIN is asked for that PIN, and one without
+   * falls back to the library passcode, because some door has to be locked.
+   */
+  async function showFaces() {
+    if (!faces) return false;
+    try {
+      const response = await fetch('/api/profiles/public', { cache: 'no-store' });
+      if (!response.ok) return false;
+      const body = await response.json();
+      const people = body.profiles || [];
+      if (!people.length) return false;
+
+      faces.textContent = '';
+      for (const person of people) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'who';
+
+        if (person.avatarAt) {
+          const image = document.createElement('img');
+          image.className = 'who-face';
+          image.src = '/api/profiles/' + encodeURIComponent(person.id) + '/face?v=' + person.avatarAt;
+          image.alt = '';
+          button.appendChild(image);
+        } else {
+          const initial = document.createElement('span');
+          initial.className = 'who-face';
+          initial.style.background = person.colour || '#e50914';
+          initial.textContent = (person.name || '?').trim().charAt(0).toUpperCase();
+          button.appendChild(initial);
+        }
+
+        if (person.hasPin) {
+          const lock = document.createElement('span');
+          lock.className = 'who-lock';
+          lock.textContent = '🔒';
+          button.appendChild(lock);
+        }
+
+        const label = document.createElement('span');
+        label.className = 'who-name';
+        label.textContent = person.name;
+        button.appendChild(label);
+
+        button.dataset.profile = person.id;
+
+        button.addEventListener('click', () => askFor(person));
+        faces.appendChild(button);
+      }
+
+      faces.hidden = false;
+      if (subheading) subheading.textContent = 'Who is watching?';
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function askFor(person) {
+    chosen = person;
+    // The face stays, so it is obvious whose PIN is being asked for.
+    faces.classList.add('asking');
+    for (const button of faces.querySelectorAll('.who')) {
+      button.classList.toggle('picked', button.dataset.profile === person.id);
+    }
+    form.hidden = false;
+    if (heading) heading.textContent = person.name;
+    if (subheading) {
+      subheading.textContent = person.hasPin
+        ? 'Enter your PIN'
+        : 'Enter the library passcode';
+    }
+    field.value = '';
+    field.placeholder = person.hasPin ? 'PIN' : 'Passcode';
+
+    if (!document.getElementById('back-to-faces')) {
+      const back = document.createElement('button');
+      back.type = 'button';
+      back.id = 'back-to-faces';
+      back.className = 'back-to-faces';
+      back.textContent = 'Someone else';
+      back.addEventListener('click', () => {
+        chosen = null;
+        form.hidden = true;
+        faces.classList.remove('asking');
+        error.hidden = true;
+        if (heading) heading.textContent = ${JSON.stringify(name)};
+        if (subheading) subheading.textContent = 'Who is watching?';
+      });
+      form.appendChild(back);
+    }
+  }
+
   const form = document.getElementById('form');
+  const field = document.getElementById('passcode');
+  const error = document.getElementById('error');
+
   if (form) {
     /*
      * iOS will not raise the keyboard for a field focused as the page loads,
      * so there is no autofocus here. Tapping anywhere on the card focuses the
      * field, which counts as the user gesture iOS insists on.
      */
-    const field = document.getElementById('passcode');
     document.querySelector('.card').addEventListener('click', (event) => {
       if (event.target === field || event.target.closest('.pad, .pad-row')) return;
       field.focus();
@@ -191,7 +348,28 @@ export function loginPage({ configured }) {
     });
     drawPad();
 
-    const error = document.getElementById('error');
+    /*
+     * Shown only when asked for, and remembered once it has been.
+     *
+     * Somebody reaching for this is on a device whose keyboard will not
+     * appear, and that does not change between visits — asking them to find
+     * the link again every time would be its own small cruelty.
+     */
+    const keypad = document.getElementById('keypad');
+    const showPad = document.getElementById('show-pad');
+
+    function revealPad() {
+      keypad.hidden = false;
+      showPad.hidden = true;
+      try { localStorage.setItem('library.keypad', '1'); } catch { /* private mode */ }
+    }
+
+    showPad.addEventListener('click', revealPad);
+
+    let wanted = false;
+    try { wanted = localStorage.getItem('library.keypad') === '1'; } catch { /* private mode */ }
+    if (wanted) revealPad();
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       // The Enter button, not the first key on the pad.
@@ -199,11 +377,17 @@ export function loginPage({ configured }) {
       button.disabled = true;
       error.hidden = true;
       try {
-        const response = await fetch('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ passcode: document.getElementById('passcode').value }),
-        });
+        const response = chosen
+          ? await fetch('/api/login/profile', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ profileId: chosen.id, secret: field.value }),
+            })
+          : await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ passcode: field.value }),
+            });
         if (response.ok) { window.location.replace('/'); return; }
         const body = await response.json().catch(() => ({}));
         error.textContent = body.error || 'That did not work';
@@ -216,6 +400,13 @@ export function loginPage({ configured }) {
       // Clear rather than select: a wrong code entered on the pad has no
       // keyboard behind it to type over the top of.
       field.value = '';
+    });
+
+    showFaces().then((shown) => {
+      if (!shown) {
+        form.hidden = false;
+        if (subheading) subheading.textContent = 'Enter the passcode to watch';
+      }
     });
   }
 </script>

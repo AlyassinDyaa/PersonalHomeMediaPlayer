@@ -19,8 +19,21 @@ export function ProfileGate({ children }) {
 
   const load = useCallback(async () => {
     try {
-      const { profiles, current } = await api.profiles();
+      const { profiles, current, chosen } = await api.profiles();
       const remembered = currentProfileId();
+
+      /*
+       * The question may already have been answered at the door.
+       *
+       * Signing in is done by picking a face, so the session itself names who
+       * is watching. Asking again the moment the library opens is asking the
+       * same question twice — which is exactly what it looked like.
+       */
+      if (chosen && current) {
+        rememberProfile(current.id);
+        setState({ status: 'ready' });
+        return;
+      }
 
       // One profile means one answer. Remember it so later requests name it
       // rather than leaning on the server's fallback.

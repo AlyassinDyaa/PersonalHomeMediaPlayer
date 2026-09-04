@@ -108,6 +108,20 @@ export const config = {
   databasePath: path.join(dataDir, 'library.db'),
   artworkDir: path.join(dataDir, 'artwork'),
 
+  /**
+   * Where the video caches go — repacked films and streaming segments.
+   *
+   * Separate from dataDir because these are the only things here measured in
+   * hundreds of gigabytes, while everything else beside them is a database and
+   * some posters. A portable build keeps its data next to the executable, so
+   * left together the caches grow inside whatever folder the app was unzipped
+   * into, which is rarely where somebody wants a third of a terabyte.
+   *
+   * Defaults to sitting with the rest of the data, so an untouched install
+   * behaves as it always did.
+   */
+  cacheDir: process.env.MEDIA_CACHE_DIR ?? local.cacheDir ?? defaults.cacheDir ?? dataDir,
+
   /*
    * A key the user typed always wins, so replacing an expired one in Settings
    * takes effect. Below it sits the key shipped inside the build, so a fresh

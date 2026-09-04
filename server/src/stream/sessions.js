@@ -44,7 +44,14 @@ const IDLE_TIMEOUT_MS = 600_000;
  */
 const PLAYLIST_TIMEOUT_MS = 120_000;
 /** More than this many at once would thrash the disk rather than serve anyone. */
-const MAX_SESSIONS = 4;
+/**
+ * How many videos may be converted on the fly at once.
+ *
+ * Only counts streams that need work — a film already repacked is served as a
+ * plain file, so any number of people can watch those at the same time without
+ * touching this at all.
+ */
+const MAX_SESSIONS = 6;
 /*
  * How much video is in one segment.
  *
@@ -62,7 +69,7 @@ const sessions = new Map();
 let sweeper = null;
 
 function streamRoot() {
-  return path.join(config.dataDir, 'stream');
+  return path.join(config.cacheDir, 'stream');
 }
 
 /**
@@ -94,8 +101,9 @@ function sweepOrphans() {
     });
 }
 
-function keyFor(videoId, startSeconds, audioTrack) {
-  return videoId + '@' + Math.max(0, Math.floor(startSeconds)) + '#a' + audioTrack;
+function keyFor(videoId, startSeconds, audioTrack, maxHeight) {
+  return videoId + '@' + Math.max(0, Math.floor(startSeconds)) + '#a' + audioTrack
+    + (maxHeight ? '#h' + maxHeight : '');
 }
 
 /** Remove a session's process and its segments. */
@@ -187,7 +195,10 @@ export async function openSession(request) {
   const { videoId, filePath } = request;
   const startSeconds = Math.max(0, Math.floor(request.startSeconds ?? 0));
   const audioTrack = Math.max(0, Number(request.audioTrack ?? 0) || 0);
-  const key = keyFor(videoId, startSeconds, audioTrack);
+  // Only the sizes offered; anything else is treated as no limit at all.
+  const asked = Number(request.maxHeight ?? 0) || 0;
+  const maxHeight = [480, 720, 1080].includes(asked) ? asked : null;
+  const key = keyFor(videoId, startSeconds, audioTrack, maxHeight);
 
   const existing = sessions.get(key);
   if (existing && !existing.stopped) {
@@ -219,11 +230,31 @@ export async function openSession(request) {
   const { ffmpeg } = ffmpegPaths();
   if (!ffmpeg) throw new Error('ffmpeg was not found, so browsers cannot be served');
 
-  // Make room rather than pile up: the oldest is the least likely to be watched.
+  /*
+   * Make room, but never by ending a stream somebody is watching.
+   *
+   * This used to take the least recently touched session whatever it was
+   * doing. With one viewer that is always a stream nobody wants; with several
+   * it is somebody's film, and starting a fifth would stop the first — the
+   * picture simply dying partway through, for no reason its viewer could see.
+   *
+   * A session that has asked for nothing in a while is genuinely finished
+   * with; anything more recent is in use. If every slot is in use, saying so
+   * is the honest answer.
+   */
+  const ABANDONED_MS = 45_000;
   while (sessions.size >= MAX_SESSIONS) {
-    const oldest = [...sessions.values()].sort((a, b) => a.touchedAt - b.touchedAt)[0];
-    if (!oldest) break;
-    await destroySession(oldest, 'making room');
+    const idle = [...sessions.values()]
+      .filter((session) => Date.now() - session.touchedAt > ABANDONED_MS)
+      .sort((a, b) => a.touchedAt - b.touchedAt)[0];
+
+    if (!idle) {
+      throw new Error(
+        'This library is already streaming to ' + MAX_SESSIONS + ' devices. '
+        + 'Stop one of them, or wait a moment, and try again.',
+      );
+    }
+    await destroySession(idle, 'making room');
   }
 
   const probed = await probeFile(filePath);
@@ -238,10 +269,13 @@ export async function openSession(request) {
     input: filePath,
     startSeconds,
     audioTrack,
+    maxHeight,
     playlist: playlistPath,
     segmentPattern: path.join(dir, 'seg%05d.m4s'),
     initFile: 'init.mp4',
     segmentSeconds: SEGMENT_SECONDS,
+    maxHeight,
+    sourceHeight: probed?.streams?.find((stream) => stream.codec_type === 'video')?.height ?? null,
   });
 
   // Run inside the session's own folder. The name of the init segment is

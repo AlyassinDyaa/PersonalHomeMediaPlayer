@@ -55,6 +55,11 @@ export function Player({ video, item, onClose }) {
   const [full, setFull] = useState(false);
   /** Every episode of this show in order, for stepping between them. */
   const [episodes, setEpisodes] = useState([]);
+  const [canFloat, setCanFloat] = useState(false);
+  const [quality, setQuality] = useState(() => {
+    try { return Number(localStorage.getItem('library.quality')) || 0; } catch { return 0; }
+  });
+  const [floatError, setFloatError] = useState(false);
 
   const lastSentRef = useRef(0);
   /**
@@ -71,6 +76,8 @@ export function Player({ video, item, onClose }) {
   const currentRef = useRef(current);
   /** The playlist of the stream now running, so a jump can re-read it. */
   const playlistRef = useRef(null);
+  /** Read inside load(), which must not be rebuilt every time this changes. */
+  const qualityRef = useRef(0);
   /** Set below; held in a ref so declaration order cannot bite again. */
   const producedSecondsRef = useRef(async () => 0);
   currentRef.current = current;
@@ -82,14 +89,26 @@ export function Player({ video, item, onClose }) {
     hideTimer.current = setTimeout(() => setChrome(false), CHROME_HIDE_MS);
   }, []);
 
+  /**
+   * Send where the film has got to.
+   *
+   * Returns the write so that closing can wait for it. Closing used to fire
+   * this and move on in the same breath, which meant the library reloaded
+   * Continue Watching before the position had been stored — so the thing just
+   * watched was missing from the row, and only turned up on the next reload.
+   *
+   * @returns {Promise<void>} settled once the position is stored, or at once
+   *   when there is nothing worth storing.
+   */
   const report = useCallback((force) => {
     const now = Date.now();
-    if (!force && now - lastSentRef.current < PROGRESS_INTERVAL_MS) return;
+    if (!force && now - lastSentRef.current < PROGRESS_INTERVAL_MS) return Promise.resolve();
     lastSentRef.current = now;
 
     const position = offsetRef.current + (videoRef.current?.currentTime ?? 0);
-    if (!Number.isFinite(position) || position <= 0) return;
-    api.saveProgress({
+    if (!Number.isFinite(position) || position <= 0) return Promise.resolve();
+
+    return api.saveProgress({
       videoId: currentRef.current.id,
       position,
       duration: durationRef.current ?? undefined,
@@ -153,7 +172,7 @@ export function Player({ video, item, onClose }) {
         setDetail(info.mode === 'encode'
           ? 'Converting for this device'
           : 'Repackaging for this device');
-        const session = await api.streamStart(target.id, startAt ?? 0, wantedAudio);
+        const session = await api.streamStart(target.id, startAt ?? 0, wantedAudio, qualityRef.current);
         offsetRef.current = session.startSeconds ?? startAt ?? 0;
         // The stream starts there, so there is nothing left to seek to.
         resumeToRef.current = 0;
@@ -210,6 +229,29 @@ export function Player({ video, item, onClose }) {
   );
   const previous = position > 0 ? episodes[position - 1] : null;
   const next = position >= 0 && position < episodes.length - 1 ? episodes[position + 1] : null;
+
+  /*
+   * Get the next episode ready while this one plays.
+   *
+   * Asking the server about a video is what sets it repacking, so a single
+   * question here means the episode after this one is usually sitting in a
+   * container the browser can open by the time it is wanted — no wait, and
+   * seeking works from the first second. Watching an episode is the strongest
+   * hint anybody gives about what they will watch next, and it costs one
+   * request to act on it.
+   *
+   * Deliberately not the whole series: preparing thousands of episodes nobody
+   * has asked for would fill a disk to save a wait that may never happen.
+   */
+  useEffect(() => {
+    if (!next) return;
+    const timer = setTimeout(() => {
+      api.streamInfo(next.id).catch(() => {
+        // Only a head start; the episode plays either way.
+      });
+    }, 20_000);
+    return () => clearTimeout(timer);
+  }, [next]);
 
   /** Move to another episode of the same show. */
   const goTo = useCallback((target) => {
@@ -293,6 +335,7 @@ export function Player({ video, item, onClose }) {
    * place, so this is worth trying first whenever the segments already exist.
    */
   useEffect(() => { producedSecondsRef.current = producedSeconds; }, [producedSeconds]);
+  useEffect(() => { qualityRef.current = quality; }, [quality]);
 
   const rereadAndSeek = useCallback((withinSeconds) => {
     const element = videoRef.current;
@@ -335,6 +378,71 @@ export function Player({ video, item, onClose }) {
   }, [load, status, audioTrack, waitForPoint, rereadAndSeek]);
 
   /** Where the film is now, as opposed to where the stream is. */
+  /*
+   * Whether this browser can float the video over everything else.
+   *
+   * Safari calls it a presentation mode and Chrome calls it Picture in
+   * Picture; both amount to handing the video to the system so it keeps
+   * playing in a small window while the app is elsewhere. On an iPad this is
+   * the only way to carry on watching while doing something else — closing the
+   * tab stops playback, because a web page is not allowed to keep video going
+   * in the background any other way.
+   */
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element) return;
+    const webkit = typeof element.webkitSupportsPresentationMode === 'function'
+      && element.webkitSupportsPresentationMode('picture-in-picture');
+    const standard = typeof element.requestPictureInPicture === 'function'
+      && document.pictureInPictureEnabled;
+    setCanFloat(Boolean(webkit || standard));
+  }, [status]);
+
+  /**
+   * Hand the video to the system so it keeps playing over other apps.
+   *
+   * Not an async function, and the call is the first thing it does: Safari only
+   * allows this while it can still see the tap that caused it, and awaiting
+   * anything beforehand is enough for it to lose that thread and refuse.
+   *
+   * A library opened from the Home Screen is a special case. iOS half-honours
+   * the request there — the video detaches from the page but no floating window
+   * ever appears, leaving a shrunken picture and a stray placeholder. Since
+   * there is no way to complete it, the attempt is put back rather than left
+   * in that state, and the native player is offered instead: Apple's own
+   * controls carry a Picture in Picture button that does work.
+   */
+  const floatOut = useCallback(() => {
+    const element = videoRef.current;
+    if (!element) return;
+
+    if (typeof element.webkitSetPresentationMode === 'function') {
+      const wanted = element.webkitPresentationMode === 'picture-in-picture'
+        ? 'inline'
+        : 'picture-in-picture';
+      try {
+        element.webkitSetPresentationMode(wanted);
+      } catch {
+        setFloatError(true);
+        return;
+      }
+
+      window.setTimeout(() => {
+        if (element.webkitPresentationMode === wanted) return;
+        // Never took. Undo it so the picture is not left mid-move.
+        try { element.webkitSetPresentationMode('inline'); } catch { /* nothing to undo */ }
+        setFloatError(true);
+      }, 800);
+      return;
+    }
+
+    if (document.pictureInPictureElement) {
+      document.exitPictureInPicture().catch(() => setFloatError(true));
+    } else {
+      element.requestPictureInPicture().catch(() => setFloatError(true));
+    }
+  }, []);
+
   const filmTime = useCallback(
     () => offsetRef.current + (videoRef.current?.currentTime ?? 0),
     [],
@@ -447,16 +555,34 @@ export function Player({ video, item, onClose }) {
     }
     if (!box) return;
 
-    const prefixed = () => {
-      if (typeof box.webkitRequestFullscreen === "function") box.webkitRequestFullscreen();
+    const prefixedWorks = () => {
+      if (typeof box.webkitRequestFullscreen !== "function") return false;
+      try { box.webkitRequestFullscreen(); return true; } catch { return false; }
+    };
+
+    /*
+     * An iPad will not put an arbitrary element full screen.
+     *
+     * Only the video itself can go full screen there, through its own method,
+     * and asking the container instead fails without raising anything — which
+     * is why this button did nothing at all on a tablet. The native player
+     * replaces our controls while it is up, which is a fair trade for a button
+     * that works, and it carries Apple's own Picture in Picture control.
+     */
+    const nativeVideo = () => {
+      const element = videoRef.current;
+      if (element && typeof element.webkitEnterFullscreen === 'function') {
+        try { element.webkitEnterFullscreen(); return true; } catch { /* refused */ }
+      }
+      return false;
     };
 
     if (typeof box.requestFullscreen === "function") {
       // The promise rejects on a device that only accepts the prefixed form,
       // which is the case worth catching rather than giving up on.
-      box.requestFullscreen().catch(prefixed);
-    } else {
-      prefixed();
+      box.requestFullscreen().catch(() => { if (!prefixedWorks()) nativeVideo(); });
+    } else if (!prefixedWorks()) {
+      nativeVideo();
     }
   }, [wakeChrome]);
 
@@ -538,12 +664,33 @@ export function Player({ video, item, onClose }) {
         * once something was playing there was no way back out of it.
         */}
       <div className={chrome ? 'player-chrome' : 'player-chrome hidden'}>
-        <button className="player-close" onClick={() => { report(true); onClose(); }}>
+        <button
+          className="player-close"
+          onClick={async () => { await report(true); onClose(); }}
+        >
           ‹ Back
         </button>
         <span className="player-title">{title}</span>
 
         <div className="player-actions">
+          {canFloat && !floatError && (
+            <button
+              className="player-step"
+              onClick={floatOut}
+              title="Keep playing in a small window while you do something else"
+            >
+              Minimise
+            </button>
+          )}
+          {floatError && (
+            <button
+              className="player-step"
+              onClick={toggleFullscreen}
+              title="This browser will not float the video. Apple's own player can — open it and use the Picture in Picture button there."
+            >
+              Use Apple&rsquo;s player
+            </button>
+          )}
           <button className="player-step" onClick={toggleFullscreen}>
             {full ? "Exit full screen" : "Full screen"}
           </button>
@@ -586,7 +733,17 @@ export function Player({ video, item, onClose }) {
         onPlay={() => setPaused(false)}
         onPause={() => { report(true); setPaused(true); wakeChrome(); }}
         onPlaying={() => wakeChrome()}
-        onEnded={() => { report(true); if (next) goTo(next); }}
+        onEnded={() => {
+          /*
+           * Reaching the end is the one certain sign of having finished.
+           * Said explicitly, because the position threshold is now set high
+           * enough that it will not catch this on its own — which is the
+           * point: nothing else should decide the viewer is done.
+           */
+          report(true);
+          api.setWatched(currentRef.current.id, true).catch(() => {});
+          if (next) goTo(next);
+        }}
         onError={() => {
           if (status !== 'preparing') setError('The video stopped unexpectedly');
         }}
@@ -685,6 +842,33 @@ export function Player({ video, item, onClose }) {
           aria-label="Position"
         />
         <span className="player-time">{formatTime(length)}</span>
+
+        {/*
+          * How much picture to send.
+          *
+          * Only matters away from home: on your own network the full picture
+          * arrives comfortably, but a house's upload is a fraction of that and
+          * a 4K film simply will not fit down it. Changing this restarts the
+          * stream from where it is, which is why it says so.
+          */}
+        <label className="player-pick">
+          Quality
+          <select
+            value={quality}
+            onChange={(event) => {
+              const wanted = Number(event.target.value);
+              setQuality(wanted);
+              try { localStorage.setItem('library.quality', String(wanted)); } catch { /* private mode */ }
+              qualityRef.current = wanted;
+              load(currentRef.current, audioTrack, Math.floor(filmTime()));
+            }}
+          >
+            <option value={0}>Original</option>
+            <option value={1080}>1080p</option>
+            <option value={720}>720p</option>
+            <option value={480}>480p</option>
+          </select>
+        </label>
 
         {tracks.subtitles.length > 0 && (
           <label className="player-pick">

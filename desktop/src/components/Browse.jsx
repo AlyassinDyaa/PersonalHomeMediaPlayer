@@ -96,6 +96,38 @@ export function Browse({
         {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
       </div>
 
+      {/*
+        * The same choice twice, for two widths.
+        *
+        * A dozen genres as chips is a glance on a monitor and a wall of
+        * wrapped buttons on a phone, where they pushed the titles themselves
+        * below the fold. The stylesheet shows whichever suits the width; both
+        * read and write the same state, so switching between them mid-session
+        * keeps whatever was chosen.
+        */}
+      <div className="genre-picker">
+        <label className="chip-select">
+          Genre
+          <select
+            value={genre ?? ''}
+            onChange={(event) => setGenre(event.target.value || null)}
+          >
+            <option value="">All genres</option>
+            {genres.map((entry) => (
+              <option key={entry.name} value={entry.name}>
+                {entry.name} ({entry.count})
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className={unwatchedOnly ? 'chip active' : 'chip'}
+          onClick={() => setUnwatchedOnly(!unwatchedOnly)}
+        >
+          Unwatched
+        </button>
+      </div>
+
       <div className="genre-chips">
         <button className={genre === null ? 'chip active' : 'chip'} onClick={() => setGenre(null)}>
           All

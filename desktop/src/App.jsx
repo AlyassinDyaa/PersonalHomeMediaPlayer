@@ -106,6 +106,38 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     if (refreshSignal) reload();
   }, [refreshSignal, reload]);
 
+  /*
+   * Catch up whenever this window is looked at again.
+   *
+   * The library is one thing seen from several places: a film watched on the
+   * tablet moves in Continue Watching, and the computer should not still be
+   * showing yesterday's row when it is next glanced at. Refreshing on focus
+   * covers that without holding a connection open or polling a library that is
+   * usually sitting idle.
+   *
+   * Throttled, because switching windows is something people do constantly and
+   * the row does not change that fast.
+   */
+  useEffect(() => {
+    let lastAt = Date.now();
+    const QUIET_MS = 15_000;
+
+    const catchUp = () => {
+      if (document.visibilityState === 'hidden') return;
+      const now = Date.now();
+      if (now - lastAt < QUIET_MS) return;
+      lastAt = now;
+      reload();
+    };
+
+    window.addEventListener('focus', catchUp);
+    document.addEventListener('visibilitychange', catchUp);
+    return () => {
+      window.removeEventListener('focus', catchUp);
+      document.removeEventListener('visibilitychange', catchUp);
+    };
+  }, [reload]);
+
   /**
    * Drop a title from Continue Watching.
    *
@@ -604,9 +636,34 @@ const SEARCH_PLACEHOLDER = {
 };
 
 function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs }) {
+  /*
+   * On a phone the sections live behind a button.
+   *
+   * Four labels and a search box do not fit across 375 pixels — laid out in a
+   * row they were clipped mid-word, and scrolling them sideways hides the very
+   * choices the bar exists to offer. A menu shows all of them at a size worth
+   * tapping, and gives the search box the width it needs.
+   */
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Going somewhere closes the menu; leaving it open over the new page would
+  // mean two taps to read anything.
+  const visit = (id) => { setMenuOpen(false); goto(id); };
+
   return (
     <nav className={scrolled ? 'nav scrolled' : 'nav'}>
+      <button
+        className="nav-burger"
+        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? '✕' : '☰'}
+      </button>
+
       <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>
+      {/* On a phone the bar names the section, since the links are hidden. */}
+      <div className="nav-section">{tabs.find((entry) => entry.id === view)?.label}</div>
       <div className="nav-links">
         {tabs.map((entry) => (
           <button
@@ -618,6 +675,24 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs })
           </button>
         ))}
       </div>
+
+      {menuOpen && (
+        <>
+          {/* Tapping the page behind it is the ordinary way out of a menu. */}
+          <div className="nav-menu-backdrop" onClick={() => setMenuOpen(false)} />
+          <div className="nav-menu">
+            {tabs.map((entry) => (
+              <button
+                key={entry.id}
+                className={view === entry.id ? 'nav-menu-link active' : 'nav-menu-link'}
+                onClick={() => visit(entry.id)}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <div className="nav-spacer" />
       {view !== 'library' && (
       <div className="search-box">

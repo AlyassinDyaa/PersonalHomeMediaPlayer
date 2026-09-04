@@ -49,12 +49,12 @@ export function FolderPicker({ onChoose, onCancel }) {
       <div className="modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>Choose a library folder</h2>
-          <button className="btn-ghost" onClick={onCancel}>Close</button>
+          <button className="btn btn-ghost" onClick={onCancel}>Close</button>
         </div>
 
         <div className="picker-path">
           <button
-            className="btn-ghost"
+            className="btn btn-ghost"
             disabled={!current}
             onClick={() => setCurrent(listing.parent)}
           >

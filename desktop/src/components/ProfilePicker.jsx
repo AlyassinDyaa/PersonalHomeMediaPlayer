@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import ProfileFace from './ProfileFace.jsx';
 import { api, rememberProfile } from '../api.js';
 
 /**
@@ -82,10 +83,10 @@ export function ProfilePicker({ profiles, onChosen, onCancel }) {
               placeholder="PIN"
             />
             <div className="profile-pin-actions">
-              <button type="button" className="btn-ghost" onClick={back} disabled={busy}>
+              <button type="button" className="btn btn-ghost" onClick={back} disabled={busy}>
                 Back
               </button>
-              <button type="submit" className="btn-primary" disabled={busy || pin.length < 4}>
+              <button type="submit" className="btn btn-primary" disabled={busy || pin.length < 4}>
                 {busy ? 'Checking…' : 'Enter'}
               </button>
             </div>
@@ -116,7 +117,7 @@ export function ProfilePicker({ profiles, onChosen, onCancel }) {
       </div>
       {error && <p className="profile-error">{error}</p>}
       {onCancel && (
-        <button type="button" className="btn-ghost profile-cancel" onClick={onCancel}>
+        <button type="button" className="btn btn-ghost profile-cancel" onClick={onCancel}>
           Cancel
         </button>
       )}
@@ -131,17 +132,9 @@ export function ProfilePicker({ profiles, onChosen, onCancel }) {
  * put an uploaded avatar in a library that scans folders, and a letter in the
  * colour somebody picked is recognised across a room just as fast.
  */
+/** Kept as a thin name over the shared face, so callers here read the same. */
 function Face({ profile, large = false }) {
-  const initial = [...(profile.name ?? '?')][0]?.toUpperCase() ?? '?';
-  return (
-    <span
-      className={'profile-face' + (large ? ' profile-face-large' : '')}
-      style={{ background: profile.colour }}
-      aria-hidden="true"
-    >
-      {initial}
-    </span>
-  );
+  return <ProfileFace profile={profile} size={large ? 'large' : 'small'} />;
 }
 
 export default ProfilePicker;

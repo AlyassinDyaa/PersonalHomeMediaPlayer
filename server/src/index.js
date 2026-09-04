@@ -35,6 +35,9 @@ import {
   listProfiles, getProfile, createProfile, updateProfile, deleteProfile,
   defaultProfileId, pinMatches,
 } from './profiles.js';
+import { noteWhereabouts, networkKind } from './whereabouts.js';
+import { saveAvatar, clearAvatar, avatarFile } from './avatars.js';
+import { libraryHealth } from './health.js';
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
 import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
@@ -173,6 +176,81 @@ app.get([
   res.sendFile(file);
 });
 
+/**
+ * The faces on the door.
+ *
+ * Deliberately readable before signing in, because the library was asked to
+ * open with "who's watching" rather than with a passcode box — you cannot
+ * choose a face you cannot see. Only what a picker needs is sent: a name, a
+ * colour, whether there is a picture, and whether a PIN is wanted. Never an
+ * address, never who owns the library, never anything about what was watched.
+ *
+ * This is the one place the library says anything to somebody who has not
+ * proved they belong here, so it says as little as it can.
+ */
+app.get('/api/profiles/public', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    profiles: listProfiles().map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      colour: profile.colour,
+      avatarAt: profile.avatarAt ?? null,
+      hasPin: profile.hasPin,
+    })),
+    // Without one, a profile that has no PIN has nothing to check at all.
+    passcodeSet: Boolean(config.passcodeHash),
+  });
+});
+
+/** A profile's picture, for the picker shown before signing in. */
+app.get('/api/profiles/:id/face', (req, res) => {
+  const file = avatarFile(req.params.id);
+  if (!file) {
+    res.status(404).end();
+    return;
+  }
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(file, (error) => { if (error && !res.headersSent) res.status(404).end(); });
+});
+
+/**
+ * Sign in as a profile, using that profile's own PIN.
+ *
+ * A profile with no PIN of its own falls back to the library passcode: some
+ * door has to be locked, and an unlocked profile would otherwise let anybody
+ * who can reach the address straight in.
+ */
+app.post('/api/login/profile', (req, res) => {
+  const address = req.socket?.remoteAddress ?? 'unknown';
+
+  const blockedFor = loginBlockedFor(address);
+  if (blockedFor > 0) {
+    res.status(429).json({
+      error: 'Too many tries. Wait ' + Math.ceil(blockedFor / 1000) + ' seconds.',
+    });
+    return;
+  }
+
+  const wanted = getProfile(req.body?.profileId);
+  if (!wanted) {
+    res.status(404).json({ error: 'No such profile' });
+    return;
+  }
+
+  const secret = String(req.body?.secret ?? '');
+  const ok = wanted.hasPin ? pinMatches(wanted.id, secret) : passcodeMatches(secret);
+  if (!ok) {
+    recordFailure(address);
+    res.status(401).json({ error: wanted.hasPin ? 'That PIN is not right' : 'That passcode is not right' });
+    return;
+  }
+
+  recordSuccess(address);
+  setSessionCookie(res, issueToken(wanted.id));
+  res.json({ ok: true, profile: { id: wanted.id, name: wanted.name } });
+});
+
 // Everything past this point needs to be either local or signed in.
 app.use(requireAuth);
 
@@ -203,6 +281,8 @@ app.use((req, res, next) => {
     : sessionProfileId(req);
 
   req.profile = getProfile(named) ?? getProfile(defaultProfileId());
+  // Throttled inside; see whereabouts.js for why it is not written every time.
+  noteWhereabouts(req.profile?.id, req.socket?.remoteAddress);
   next();
 });
 
@@ -238,8 +318,88 @@ app.get('/api/health', (req, res) => {
  * nothing to pick from. Nothing secret is in the list — a name, a colour, and
  * whether a PIN will be asked for.
  */
+/**
+ * A profile's own picture.
+ *
+ * Served to anybody who can see the library, because the picker shows every
+ * profile to whoever is choosing one. Set and cleared by the owner, or by the
+ * person whose profile it is — nobody else gets to change somebody's face.
+ */
+app.get('/api/profiles/:id/avatar', (req, res) => {
+  const file = avatarFile(req.params.id);
+  if (!file) {
+    res.status(404).json({ error: 'That profile has no picture' });
+    return;
+  }
+  // The name never changes, so the browser is told to check back rather than
+  // keep the old one for ever; the query the interface adds does the rest.
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(file, (error) => { if (error && !res.headersSent) res.status(404).end(); });
+});
+
+/** The picture a face was cut from, so the crop can be adjusted later. */
+app.get('/api/profiles/:id/avatar/source', (req, res) => {
+  const mine = req.profile?.id === req.params.id;
+  if (!mine && !req.profile?.isOwner) {
+    res.status(403).json({ error: 'That is not your profile' });
+    return;
+  }
+  const file = avatarFile(req.params.id, 'source');
+  if (!file) {
+    res.status(404).json({ error: 'There is no picture to edit' });
+    return;
+  }
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(file, (error) => { if (error && !res.headersSent) res.status(404).end(); });
+});
+
+app.put('/api/profiles/:id/avatar', async (req, res) => {
+  const mine = req.profile?.id === req.params.id;
+  if (!mine && !req.profile?.isOwner) {
+    res.status(403).json({ error: 'That is not your profile' });
+    return;
+  }
+  try {
+    const at = await saveAvatar(req.params.id, req.body?.image, req.body?.source ?? null);
+    res.json({ id: req.params.id, avatarAt: at });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/profiles/:id/avatar', async (req, res) => {
+  const mine = req.profile?.id === req.params.id;
+  if (!mine && !req.profile?.isOwner) {
+    res.status(403).json({ error: 'That is not your profile' });
+    return;
+  }
+  await clearAvatar(req.params.id);
+  res.json({ id: req.params.id, avatarAt: null });
+});
+
 app.get('/api/profiles', (req, res) => {
-  res.json({ profiles: listProfiles(), current: req.profile });
+  const owner = Boolean(req.profile?.isOwner);
+
+  /*
+   * Where each profile was last seen is the owner's business alone.
+   *
+   * It is told to whoever runs the library so they can tell the tablet in the
+   * house from somebody signed in over the mesh — and withheld from everyone
+   * else, because a shared passcode is not consent to be tracked by the other
+   * people using it. The address is paired with a plain description of the
+   * network it belongs to, which is the part anybody actually reads.
+   */
+  const profiles = listProfiles().map((profile) => (owner
+    ? { ...profile, lastNetwork: profile.lastAddress ? networkKind(profile.lastAddress) : null }
+    : { ...profile, lastAddress: undefined, lastSeenAt: undefined }));
+
+  /*
+   * chosen says the session itself names this profile, rather than the server
+   * falling back to a default. Signing in now happens by picking a face, so
+   * without this the app asks who is watching a second time, immediately
+   * after being told.
+   */
+  res.json({ profiles, current: req.profile, chosen: Boolean(sessionProfileId(req)) });
 });
 
 /**
@@ -281,9 +441,30 @@ app.post('/api/profiles', requireOwner, (req, res) => {
   }
 });
 
-app.put('/api/profiles/:id', requireOwner, (req, res) => {
+/**
+ * Change a profile.
+ *
+ * The owner may change anybody's. Anyone else may change their own name,
+ * colour and PIN — but not what they are allowed to watch, and not whether
+ * they count as a child. Those are the parental controls; a profile that could
+ * lift its own limit would not be a limit.
+ */
+app.put('/api/profiles/:id', (req, res) => {
+  const owner = Boolean(req.profile?.isOwner);
+  const mine = req.profile?.id === req.params.id;
+  if (!owner && !mine) {
+    res.status(403).json({ error: 'That is not your profile' });
+    return;
+  }
+
+  const patch = { ...(req.body ?? {}) };
+  if (!owner) {
+    delete patch.kind;
+    delete patch.maxCertification;
+  }
+
   try {
-    const updated = updateProfile(req.params.id, req.body ?? {});
+    const updated = updateProfile(req.params.id, patch);
     if (!updated) return res.status(404).json({ error: 'No such profile' });
     res.json(updated);
   } catch (error) {
@@ -622,6 +803,11 @@ function viewerSettings(full) {
   };
 }
 
+/** What is wrong with the library, for the owner to act on. */
+app.get('/api/health/library', requireOwner, (req, res) => {
+  res.json(libraryHealth());
+});
+
 app.get('/api/settings', (req, res) => {
   const full = settingsWithNetwork();
   const owner = Boolean(req.profile?.isOwner);
@@ -631,7 +817,19 @@ app.get('/api/settings', (req, res) => {
 app.put('/api/settings', requireOwner, (req, res) => {
   try {
     saveSettings(req.body ?? {});
-    res.json(settingsWithNetwork());
+    /*
+     * Shaped exactly like the GET above, isOwner included.
+     *
+     * The browser replaces its settings with whatever comes back from a save.
+     * Answering without isOwner therefore told it the viewer was not the owner
+     * — every owner-only tab vanished the moment anything was saved, and the
+     * screen jumped to the first tab left, which looked like being signed out
+     * and dropped into somebody else's profile.
+     *
+     * Only an owner reaches this route at all, so the flag is not in question;
+     * it just has to be said.
+     */
+    res.json({ ...settingsWithNetwork(), isOwner: true });
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
@@ -886,6 +1084,7 @@ app.get('/api/stream/:videoId/start', async (req, res) => {
       filePath: video.path,
       startSeconds,
       audioTrack: Math.max(0, Number(req.query.audio ?? 0) || 0),
+      maxHeight: Number(req.query.height ?? 0) || 0,
     });
     res.json({
       id: session.id,

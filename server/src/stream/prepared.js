@@ -51,7 +51,7 @@ let queue = Promise.resolve();
 const failures = new Map();
 
 function cacheDir() {
-  return path.join(config.dataDir, 'prepared');
+  return path.join(config.cacheDir, 'prepared');
 }
 
 export function preparedPath(videoId) {

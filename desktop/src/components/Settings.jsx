@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
+import HealthPanel from './HealthPanel.jsx';
 import ProfilesPanel from './ProfilesPanel.jsx';
 import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
 
@@ -27,7 +28,7 @@ const SETTINGS_TABS = [
   { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
   { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
   { id: 'profiles', label: 'Profiles', hint: 'Who is watching, and what each of them can see' },
-  { id: 'maintenance', label: 'Upkeep', ownerOnly: true, hint: 'Scanning, storage, and the state of things' },
+  { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Scanning, storage, and the state of the library' },
 ];
 
 export function Settings({ onScanned, onSettingsChanged }) {
@@ -357,7 +358,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
                 <code className="root-path">{root.path}</code>
                 {!root.available && <span className="root-warn">not connected</span>}
-                <button className="btn-ghost" onClick={() => removeRoot(root.path)}>Remove</button>
+                <button className="btn btn-ghost" onClick={() => removeRoot(root.path)}>Remove</button>
               </div>
             ))}
 
@@ -659,6 +660,33 @@ export function Settings({ onScanned, onSettingsChanged }) {
             )}
           </section>
 
+          {/*
+            * Signing out matters on the devices that had to sign in.
+            *
+            * This computer is let in because it is this computer, so the button
+            * would do nothing here — but the same settings screen is what a
+            * tablet sees, and that is where somebody wants to hand the iPad to
+            * a guest, or stop being signed in on a borrowed one.
+            */}
+          <section className="settings-card">
+            <h2>This device</h2>
+            <p className="settings-hint">
+              Forget the passcode on this device. The library is still shared;
+              this browser simply has to sign in again next time.
+            </p>
+            <div className="settings-actions">
+              <button
+                className="btn btn-ghost"
+                onClick={async () => {
+                  try { await api.logout(); } catch { /* signing out locally regardless */ }
+                  window.location.replace('/login');
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          </section>
+
           </>
         )}
 
@@ -706,6 +734,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
               </div>
             )}
           </section>
+
+          <HealthPanel />
 
           {merges.length > 0 && (
             <section className="settings-card">

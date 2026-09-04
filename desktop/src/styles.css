@@ -716,9 +716,20 @@ button {
   z-index: 300;
 }
 
+/*
+ * While a modal is up, the page underneath does not move.
+ *
+ * Without this the background scrolls behind the sheet — and on a phone, where
+ * the sheet is nearly the whole screen, that reads as the modal itself jumping
+ * to the top the moment it opens.
+ */
+body.modal-open { overflow: hidden; }
+
 .modal {
   width: min(680px, 90vw);
   max-height: 78vh;
+  /* Long contents scroll within the sheet rather than off the screen. */
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   background: var(--bg-raised);
@@ -1733,6 +1744,14 @@ button {
  * until somebody has said who they are there is no library to show behind it,
  * only a shelf that would have to be redrawn the moment they answered.
  */
+/*
+ * The who's-watching screen.
+ *
+ * It is a whole screen holding two or three faces, so a flat black field left
+ * it looking like something had failed to load. A dark wash with the library's
+ * own colour behind it gives the tiles something to sit on without competing
+ * with them.
+ */
 .profile-gate {
   position: fixed;
   inset: 0;
@@ -1743,7 +1762,12 @@ button {
   justify-content: center;
   gap: 36px;
   padding: 32px;
-  background: var(--bg);
+  /* Two soft washes over the base colour, so the faces have something to sit
+     on. Kept low in contrast: the tiles are the subject, not this. */
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(229, 9, 20, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 80% 110%, rgba(70, 90, 200, 0.14), transparent 60%),
+    var(--bg);
 }
 
 .profile-title {
@@ -1757,7 +1781,7 @@ button {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 28px;
+  gap: 34px;
 }
 
 .profile-choice {
@@ -1778,12 +1802,14 @@ button {
 .profile-choice:disabled { cursor: default; opacity: 0.5; }
 
 .profile-face {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   display: grid;
   place-items: center;
-  width: 108px;
-  height: 108px;
-  border-radius: var(--radius);
-  font-size: 44px;
+  /* The whole screen is this one choice, so the tiles can afford the room. */
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  font-size: 54px;
   font-weight: 600;
   color: #fff;
   /* The initial sits on whatever colour was chosen, some of which are light. */
@@ -1800,7 +1826,7 @@ button {
 
 .profile-face-large { width: 88px; height: 88px; font-size: 36px; }
 
-.profile-name { font-size: 15px; }
+.profile-name { font-size: 16px; font-weight: 500; }
 
 .profile-lock {
   position: absolute;
@@ -1817,32 +1843,52 @@ button {
   text-align: center;
 }
 
-.profile-pin h2 { margin: 0; font-size: 22px; font-weight: 500; }
+.profile-pin h2 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.3px; }
 .profile-note { margin: 0; color: var(--text-dim); font-size: 14px; }
 
+/*
+ * The PIN box, sized for the thing it holds.
+ *
+ * Four to six characters typed one at a time, usually on a touch screen, and
+ * usually the only thing on the page — so it can afford to be large and widely
+ * spaced rather than looking like a search field that happens to be centred.
+ */
 .profile-pin input {
-  width: 220px;
-  padding: 12px 14px;
-  font-size: 20px;
-  letter-spacing: 0.35em;
+  width: 260px;
+  padding: 16px 18px;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.5em;
+  /* The tracking pushes the text right; this pulls it back to centre. */
+  text-indent: 0.5em;
   text-align: center;
   color: var(--text);
-  background: var(--surface);
+  background: var(--bg-raised);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.profile-pin input::placeholder {
+  letter-spacing: 0.2em;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-faint);
 }
 
 .profile-pin input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.18);
 }
 
 .profile-pin-actions {
   display: flex;
   gap: 10px;
   justify-content: center;
-  margin-top: 14px;
+  margin-top: 18px;
 }
+/* Both buttons the same width, so the pair reads as one control. */
+.profile-pin-actions .btn { min-width: 120px; justify-content: center; }
 
 .profile-error { margin: 0; color: var(--accent); font-size: 14px; }
 .profile-cancel { margin-top: 4px; }
@@ -1881,7 +1927,7 @@ button {
   width: 34px;
   height: 34px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 50%;
   flex: none;
 }
 
@@ -1908,6 +1954,560 @@ button {
 .profile-form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   max-width: 420px;
+}
+
+/*
+ * One labelled control per row.
+ *
+ * The markup already wrapped each control in a label, but nothing styled it,
+ * so every field rendered as its caption jammed against a browser-default box
+ * — "Name" touching the input, a white select on a dark card. Stacking the
+ * caption above the control and giving them the same field styling as the rest
+ * of settings is the whole fix.
+ */
+.profile-form .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-form .field > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.profile-form .field > input,
+.profile-form .field > select {
+  width: 100%;
+  padding: 10px 13px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.profile-form .field > input::placeholder { color: var(--text-faint); }
+
+.profile-form .field > input:focus,
+.profile-form .field > select:focus { border-color: var(--text-faint); }
+
+/* The native arrow is invisible on a dark field, so one is drawn. */
+.profile-form .field > select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 52%, calc(100% - 13px) 52%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+/* Removing somebody is the one destructive action here, and says so. */
+.btn.danger-text { color: var(--accent); }
+.btn.danger-text:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* The row of buttons that closes a settings form. */
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+/* The row of colour choices in the profile form. */
+.colour-choices {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Where a profile was last used from, under its name. Owner sees this only. */
+.profile-seen {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+.profile-seen code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+}
+
+/* A chosen photograph fills the same circle the initial would have. */
+.profile-face.has-photo {
+  object-fit: cover;
+  padding: 0;
+  background: var(--bg-raised);
+}
+
+/* The picture row in the profile form. */
+.avatar-choose { display: flex; align-items: center; gap: 16px; }
+.avatar-choose-actions { display: flex; flex-direction: column; gap: 8px; }
+/* A label styled as a button still has to behave like one. */
+.avatar-choose-actions label.btn { cursor: pointer; text-align: center; }
+
+/* Choosing which part of a photograph becomes a face. */
+.cropper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 0 4px;
+}
+
+.cropper-ring {
+  position: relative;
+  overflow: hidden;
+  /* The same shape a face is shown in. */
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  cursor: grab;
+  /* The drag is the control; the page must not scroll under the finger. */
+  touch-action: none;
+  user-select: none;
+}
+.cropper-ring:active { cursor: grabbing; }
+
+.cropper-ring img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  max-width: none;
+  pointer-events: none;
+}
+
+.cropper-zoom { display: flex; align-items: center; gap: 12px; width: 240px; }
+.cropper-zoom span { font-size: 13px; color: var(--text-dim); }
+.cropper-zoom input { flex: 1; accent-color: var(--accent); touch-action: none; }
+
+@media (max-width: 520px) {
+  .profile-face { width: 104px; height: 104px; font-size: 42px; }
+  .profile-row { gap: 22px; }
+}
+
+/* The dots of a PIN about to be set, shown so the length is visible. */
+.pin-confirm {
+  margin: 4px 0 0;
+  font-size: 30px;
+  letter-spacing: 0.45em;
+  text-indent: 0.45em;
+  text-align: center;
+  color: var(--text);
+}
+
+/* The cropper needs room for the ring; the confirm sheet does not. */
+.modal.cropper-modal { max-width: 360px; }
+
+/* The needs-attention report. */
+.health-group { margin: 18px 0 0; }
+.health-group h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.health-list { margin: 0; padding-left: 18px; font-size: 13.5px; color: var(--text-dim); }
+.health-list > li { margin-bottom: 8px; }
+.health-list ul { margin: 4px 0 0; padding-left: 18px; }
+.health-list strong { color: var(--text); font-weight: 600; }
+.health-year { color: var(--text-faint); }
+
+.health-path {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+
+/* ------------------------------------------------------- small screens --- */
+
+/*
+ * Phones, and a tablet held in one hand.
+ *
+ * The layout is built around a 42px gutter, which is right on a monitor and
+ * absurd on a 390px screen — it spends a fifth of the width on nothing. These
+ * rules narrow the gutter and shrink the few things sized for a desk: the
+ * banner, the page titles, and the poster rails.
+ *
+ * Written as overrides in one place rather than by threading a variable
+ * through forty rules, so what changes on a small screen can be read in one
+ * sitting and nothing else is disturbed.
+ */
+@media (max-width: 760px) {
+  /*
+   * The bar has to hold four links and a search box in 375 pixels.
+   *
+   * The search box asked for 260 of them, which left the links to be clipped
+   * mid-word — "Home" became "Hor". The brand goes (the page it is on is the
+   * library; it does not need saying), the links keep their space and scroll
+   * if a fifth is ever added, and search takes what is left.
+   */
+  .nav { padding: 0 16px; gap: 12px; height: 60px; }
+  .nav-brand { display: none; }
+
+  .nav-links {
+    gap: 14px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-link { white-space: nowrap; font-size: 13.5px; }
+
+  .search-box {
+    min-width: 0;
+    flex: 0 1 132px;
+    padding: 6px 10px;
+  }
+  .search-box input { font-size: 13px; min-width: 0; }
+
+  .hero {
+    height: auto;
+    min-height: 0;
+    /* Tall enough to read the title and press play, not half the scroll. */
+    padding: calc(var(--nav-height) + 90px) 16px 26px;
+  }
+  .hero-overview {
+    font-size: 13.5px;
+    /* Three lines is a taste of it; the detail page has the rest. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .hero-logo { max-width: 62vw; }
+  .hero-title { font-size: 30px; }
+  .hero-dots { right: 16px; bottom: 14px; }
+  .hero-actions .btn { padding: 10px 18px; font-size: 14px; }
+
+  .row-header { padding: 0 16px; }
+  .row-scroller { padding: 6px 16px 12px; scroll-padding-left: 16px; }
+  .row-title { font-size: 17px; }
+  .row { margin-bottom: 24px; }
+
+  /*
+   * Room to breathe under the bar.
+   *
+   * The bar, the page title, its description and the row of tabs were stacked
+   * with almost nothing between them, so they read as one dense block rather
+   * than as a heading with things beneath it.
+   */
+  .page-header {
+    padding: calc(var(--nav-height) + 28px) 16px 4px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .page-title { font-size: 24px; letter-spacing: -0.5px; }
+  .page-sub { font-size: 13px; }
+
+  .grid { padding: 0 16px 60px; }
+  .browse-controls { padding: 0 16px 12px; }
+  .genre-chips { padding: 0 16px 14px; }
+
+  .settings { padding: 0 16px 80px; }
+  .settings-tabs { padding: 0 16px; }
+  .settings-card { padding: 16px; }
+  .home-section { padding: 0 16px; }
+
+  .detail-hero { padding: 0 16px 32px; }
+  .detail-body { padding: 0 16px 80px; }
+  .detail-rail { margin: 32px -16px 0; }
+  .back-btn { padding: 0 16px; }
+
+  .banner { padding: 12px 16px; }
+
+  /* The card grid stops trying to be six across. */
+  .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+
+  /* Brand badges and category tiles, sized for a thumb rather than a mouse. */
+  .brand { width: 108px; height: 108px; }
+  .tiles.large { grid-template-columns: 1fr; }
+  .tiles.small { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+  /* A modal is the screen at this width, not a sheet floating on it. */
+  .modal { width: 100%; max-width: none; border-radius: 14px; max-height: calc(100dvh - 32px); }
+  .modal-backdrop {
+    padding: 16px 12px;
+    align-items: flex-start;
+    /* Taller than the screen? Scroll the backdrop, not the page behind it. */
+    overflow-y: auto;
+  }
+}
+
+/* Narrow phones: the last few things that still assume room. */
+@media (max-width: 420px) {
+  .nav-brand { font-size: 15px; }
+  .hero-title { font-size: 25px; }
+  .page-title { font-size: 21px; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  .settings-actions { flex-direction: column; align-items: stretch; }
+  .settings-actions .btn { width: 100%; }
+}
+
+/* ------------------------------------------------------ phone menu --- */
+
+/*
+ * The sections, behind one button on a small screen.
+ *
+ * Hidden entirely on anything wider: a bar with room for its links does not
+ * need a menu, and offering both would be two ways to do one thing.
+ */
+.nav-burger { display: none; }
+
+.nav-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.nav-menu {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 2px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+
+.nav-menu-link {
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-menu-link:active { background: rgba(255, 255, 255, 0.06); }
+.nav-menu-link.active { color: var(--text); background: rgba(255, 255, 255, 0.09); }
+
+@media (max-width: 760px) {
+  .nav-burger {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  /* The row of links gives way to the menu. */
+  .nav-links { display: none; }
+
+  /* With the links gone there is room for the brand and a real search box. */
+  .nav-brand { display: block; font-size: 15px; }
+  .search-box { flex: 1 1 auto; max-width: 210px; }
+}
+
+/*
+ * A profile row that can hold more than one line.
+ *
+ * The name, its tags, where it was last seen and its buttons were laid out as
+ * a single centred row. That worked while a row was a name and an Edit button;
+ * adding the address gave it something long to carry with nowhere to put it,
+ * so it overlapped the buttons instead. Letting the name block wrap drops the
+ * address onto its own line, which is where it belongs at any width.
+ */
+.profile-list-name { flex-wrap: wrap; }
+.profile-seen { flex-basis: 100%; }
+
+@media (max-width: 760px) {
+  /* Narrow enough that the buttons want the full width beneath the name. */
+  .profile-list-item { flex-wrap: wrap; align-items: flex-start; padding: 14px 4px; }
+  .profile-list-name { flex: 1 1 auto; }
+  .profile-list-actions { flex: 1 0 100%; justify-content: flex-end; gap: 8px; }
+  .profile-list-actions .btn { flex: 1; justify-content: center; }
+}
+
+/* A settings card that opens and closes. */
+.settings-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 8px;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.settings-disclosure h2 { margin: 0; }
+.settings-disclosure-mark { color: var(--text-faint); font-size: 13px; }
+
+/* --------------------------------------------- settings on a phone --- */
+
+/*
+ * Closer to how a phone expects settings to look.
+ *
+ * The screen was laid out for a monitor and then squeezed: full-width buttons
+ * became slabs the size of list rows, paragraphs ran at desktop size, and every
+ * form put a field beside a button that then wrapped onto two lines. These are
+ * the same controls arranged the way a phone arranges them — a grouped card,
+ * quiet body text, and buttons that sit together rather than filling the width.
+ */
+@media (max-width: 760px) {
+  .settings-card {
+    border-radius: 14px;
+    padding: 16px 14px;
+    margin-bottom: 14px;
+  }
+  .settings-card h2 { font-size: 17px; letter-spacing: -0.2px; }
+  .settings-card h3 { font-size: 15px; }
+  .settings-hint { font-size: 13px; line-height: 1.45; }
+
+  /* Buttons keep their own size and gather to the right, as on iOS. */
+  .profile-list-actions {
+    flex: 1 0 100%;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .profile-list-actions .btn { flex: 0 0 auto; padding: 8px 18px; font-size: 13.5px; }
+
+  /* A field and its button stack rather than fighting over one line. */
+  .key-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .key-row .btn { width: 100%; justify-content: center; }
+  .key-input { width: 100%; }
+
+  .collection-actions { flex-wrap: wrap; gap: 8px; }
+  .collection-actions .btn { flex: 0 0 auto; }
+
+  /* The row of tabs reads as a strip to swipe, not a wrapped grid. */
+  .settings-tabs { gap: 8px; padding-bottom: 2px; }
+  .settings-tab { padding: 8px 16px; font-size: 13.5px; }
+}
+
+/*
+ * The bar carries the section it is showing.
+ *
+ * With the links behind a menu the bar was left holding one button and a great
+ * deal of nothing, and the page title sat underneath it looking orphaned.
+ */
+.nav-section { display: none; }
+
+@media (max-width: 760px) {
+  .nav-section {
+    display: block;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  /* The page says its own name in the bar now. */
+  .settings-tabs { margin: 16px 0 18px; }
+}
+
+/* ------------------------------------------------ detail on a phone --- */
+
+/*
+ * The episode list, made to fit the width it actually has.
+ *
+ * The still was a fixed 190px. On a 375px screen, after the gutters, the
+ * number and the gaps, that left about 65 pixels for the text — so titles
+ * wrapped a word per line, the runtime was pushed off the edge, and a row of
+ * three episodes filled the screen. Everything here is the same row with its
+ * proportions chosen for the smaller width.
+ */
+@media (max-width: 760px) {
+  .detail-hero {
+    /* The bar is fixed; without this the description ran underneath it. */
+    padding: calc(var(--nav-height) + 24px) 16px 28px;
+    min-height: 0;
+  }
+
+  /* Three buttons on one line means three two-line labels. Let the row wrap. */
+  .hero-actions { flex-wrap: wrap; gap: 8px; }
+  .hero-actions .btn { white-space: nowrap; padding: 10px 16px; font-size: 13.5px; }
+
+  /* The seasons become a strip to swipe, with the view toggle beneath them. */
+  .section-head { flex-direction: column; align-items: stretch; gap: 10px; }
+  .season-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin: 4px 0 0;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .season-tabs::-webkit-scrollbar { display: none; }
+  .season-tabs > * { flex: 0 0 auto; }
+  .view-toggle { align-self: flex-start; }
+
+  .episode { gap: 12px; padding: 12px 4px; }
+  .episode-number { flex: 0 0 18px; font-size: 14px; padding-top: 2px; text-align: left; }
+  .episode-still { flex: 0 0 128px; border-radius: 6px; }
+
+  .episode-title { font-size: 14.5px; gap: 10px; margin-bottom: 4px; }
+  /* The runtime keeps its place instead of being squeezed off the end. */
+  .episode-title > :last-child { flex: 0 0 auto; }
+
+  .episode-overview {
+    font-size: 12.5px;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
+  }
+
+  .detail-body { padding-top: 8px; }
+  .about-facts { gap: 10px; }
+}
+
+/* The genre dropdown replaces the chip row on a narrow screen. */
+.genre-picker { display: none; }
+
+@media (max-width: 760px) {
+  .genre-chips { display: none; }
+  .genre-picker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px 14px;
+  }
+  .genre-picker .chip-select { flex: 1; min-width: 0; }
+  .genre-picker select {
+    width: 100%;
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .genre-picker .chip { flex: 0 0 auto; }
 }

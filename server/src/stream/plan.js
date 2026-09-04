@@ -115,6 +115,17 @@ export function hlsArguments(plan, options) {
   const {
     input, startSeconds, playlist, segmentPattern, initFile, segmentSeconds = 6,
     audioTrack = 0,
+    /**
+     * Tallest picture to send, or null to send it as it is.
+     *
+     * Watching from outside the house is limited by the upload the house has,
+     * not by the disk — a 4K film at source bitrate simply will not fit down
+     * it. Sending fewer lines is the only thing that helps, and a tablet
+     * cannot show 2160 of them anyway.
+     */
+    maxHeight = null,
+    /** Height of the source, so shrinking can be decided here rather than by ffmpeg. */
+    sourceHeight = null,
   } = options;
 
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
@@ -168,7 +179,19 @@ export function hlsArguments(plan, options) {
   // place in an HLS fragment and make ffmpeg fail rather than skip them.
   args.push('-map', '0:v:0', '-map', '0:a:' + audioTrack + '?');
 
-  if (plan.video === 'copy') {
+  /*
+   * Decided here, not in a filter expression.
+   *
+   * The obvious form is scale=-2:min(720,ih), which leaves ffmpeg to avoid
+   * enlarging a smaller source — but the comma inside it separates filters
+   * unless escaped, and the escaping survives neither JavaScript nor a shell
+   * intact. Comparing two numbers in JavaScript has no such problem: if the
+   * source is already short enough, no filter is added at all.
+   */
+  const shrinking = Number.isFinite(maxHeight) && maxHeight > 0
+    && (!Number.isFinite(sourceHeight) || sourceHeight > maxHeight);
+
+  if (plan.video === 'copy' && !shrinking) {
     args.push('-c:v', 'copy');
   } else {
     /*
@@ -195,11 +218,22 @@ export function hlsArguments(plan, options) {
       args.push('-preset', 'veryfast', '-crf', '21', '-sc_threshold', '0');
     }
 
+    // -2 keeps the aspect ratio and rounds the width to something the encoder
+    // will accept; whether to shrink at all was settled above.
+    if (shrinking) args.push('-vf', 'scale=-2:' + maxHeight);
+
+    // Roughly what each height needs; a cap rather than a target, so a simple
+    // cartoon still uses less than this.
+    const ceiling = shrinking && maxHeight <= 480 ? '1.5M'
+      : shrinking && maxHeight <= 720 ? '3M'
+      : shrinking && maxHeight <= 1080 ? '5M'
+      : '6M';
+
     args.push(
       // A cap keeps an old cartoon from being encoded at a bitrate no home
       // network benefits from.
-      '-maxrate', '6M',
-      '-bufsize', '12M',
+      '-maxrate', ceiling,
+      '-bufsize', String(parseFloat(ceiling) * 2) + 'M',
       '-pix_fmt', 'yuv420p',
       // Keyframes on segment boundaries, so every segment stands alone.
       '-g', String(segmentSeconds * 24),

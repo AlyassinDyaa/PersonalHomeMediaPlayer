@@ -316,6 +316,13 @@ let database = null;
  */
 const MIGRATIONS = [
   { table: 'videos', column: 'runtime', definition: 'INTEGER' },
+  // Where each profile was last seen, so the owner can tell a tablet in the
+  // house from somebody signed in over the mesh network.
+  { table: 'profiles', column: 'last_address', definition: 'TEXT' },
+  { table: 'profiles', column: 'last_seen_at', definition: 'INTEGER' },
+  // When a profile has a picture of its own, this is when it was set — used to
+  // bust the browser's cache, since the file name never changes.
+  { table: 'profiles', column: 'avatar_at', definition: 'INTEGER' },
   // A collection's own badge: an image path at the metadata provider, and a
   // colour to ring it with. Added after collections shipped, so existing
   // libraries need the columns put on rather than the table rebuilt.

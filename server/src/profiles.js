@@ -75,6 +75,9 @@ function shape(row) {
     isOwner: Boolean(row.is_owner),
     hasPin: Boolean(row.pin_hash),
     maxCertification: row.max_certification ?? null,
+    lastAddress: row.last_address ?? null,
+    lastSeenAt: row.last_seen_at ?? null,
+    avatarAt: row.avatar_at ?? null,
   };
 }
 

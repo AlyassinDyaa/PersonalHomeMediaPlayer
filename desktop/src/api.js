@@ -103,6 +103,24 @@ export function apiBaseUrl() {
 }
 
 export const api = {
+  /** End this browser's session; the next request is sent back to the login page. */
+  logout: () => request('/api/logout', { method: 'POST' }),
+
+  /** What is wrong with the library: gaps, missing files, unmatched titles. */
+  libraryHealth: () => request('/api/health/library'),
+
+  /** A profile's own picture, sent already shrunk as a data URL. */
+  setAvatar: (id, image, source = null) => request('/api/profiles/' + encodeURIComponent(id) + '/avatar', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image, source }),
+  }),
+  /** Where the picture a face was cut from can be fetched, for re-cropping. */
+  avatarSourceUrl: (id, at) => apiBase + '/api/profiles/' + encodeURIComponent(id)
+    + '/avatar/source?v=' + (at ?? 0),
+  clearAvatar: (id) => request('/api/profiles/' + encodeURIComponent(id) + '/avatar', {
+    method: 'DELETE',
+  }),
   stats: () => request('/api/stats'),
   settings: () => request('/api/settings'),
   saveSettings: (patch) => request('/api/settings', {
@@ -219,9 +237,10 @@ export const api = {
   streamInfo: (videoId) => request('/api/stream/' + videoId + '/info'),
 
   /** Begin a stream at a point in the file, and get back its playlist. */
-  streamStart: (videoId, startSeconds, audioTrack = 0) => request(
+  streamStart: (videoId, startSeconds, audioTrack = 0, maxHeight = 0) => request(
     '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0))
-    + '&audio=' + audioTrack,
+    + '&audio=' + audioTrack
+    + (maxHeight ? '&height=' + maxHeight : ''),
   ),
   // --- comics -------------------------------------------------------------
   comics: () => request('/api/comics'),
