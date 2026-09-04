@@ -121,7 +121,7 @@ function shapeIssue(row) {
  * `COMICS/DC/Action Comics 1019 - 1049`. Series kept loose in the root have no
  * shelf and are gathered under one of their own at the end.
  */
-export function listShelves() {
+export function listShelves(profileId) {
   const db = getDb();
   const rows = db.prepare(`
     SELECT s.*,
@@ -129,11 +129,11 @@ export function listShelves() {
            (SELECT i.id FROM comic_issues i WHERE i.series_id = s.id
              ORDER BY i.number IS NULL, i.number, i.title LIMIT 1) AS cover_issue,
            (SELECT COUNT(*) FROM comic_issues i
-              JOIN comic_progress p ON p.issue_id = i.id
+              JOIN comic_progress p ON p.issue_id = i.id AND p.profile_id = ?
              WHERE i.series_id = s.id AND p.finished = 1) AS read_issues
     FROM comic_series s
     ORDER BY s.shelf, s.sort_title
-  `).all();
+  `).all(profileId);
 
   const shelves = new Map();
   for (const row of rows) {
@@ -160,7 +160,7 @@ export function listShelves() {
 }
 
 /** One series, with its issues in reading order. */
-export function getSeries(id) {
+export function getSeries(id, profileId) {
   const db = getDb();
   const series = db.prepare('SELECT * FROM comic_series WHERE id = ?').get(id);
   if (!series) return null;
@@ -168,10 +168,10 @@ export function getSeries(id) {
   const issues = db.prepare(`
     SELECT i.*, p.page, p.finished
     FROM comic_issues i
-    LEFT JOIN comic_progress p ON p.issue_id = i.id
+    LEFT JOIN comic_progress p ON p.issue_id = i.id AND p.profile_id = ?
     WHERE i.series_id = ?
     ORDER BY i.number IS NULL, i.number, i.title
-  `).all(id).map(shapeIssue);
+  `).all(profileId, id).map(shapeIssue);
 
   return {
     id: series.id,
@@ -183,14 +183,14 @@ export function getSeries(id) {
 }
 
 /** One issue, with where it sits among its neighbours. */
-export function getIssue(id) {
+export function getIssue(id, profileId) {
   const db = getDb();
   const row = db.prepare(`
     SELECT i.*, p.page, p.finished
     FROM comic_issues i
-    LEFT JOIN comic_progress p ON p.issue_id = i.id
+    LEFT JOIN comic_progress p ON p.issue_id = i.id AND p.profile_id = ?
     WHERE i.id = ?
-  `).get(id);
+  `).get(profileId, id);
   if (!row) return null;
 
   const issue = shapeIssue(row);
@@ -455,45 +455,50 @@ async function makeCover(id) {
 }
 
 /** Remember where a reader got to. */
-export function saveProgress({ issueId, page, pages, finished }) {
+export function saveProgress({ issueId, page, pages, finished, profileId }) {
   const db = getDb();
   const issue = db.prepare('SELECT id, series_id FROM comic_issues WHERE id = ?').get(issueId);
   if (!issue) return null;
 
   db.prepare(`
-    INSERT INTO comic_progress (issue_id, series_id, page, pages, finished, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(issue_id) DO UPDATE SET
+    INSERT INTO comic_progress
+      (profile_id, issue_id, series_id, page, pages, finished, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(profile_id, issue_id) DO UPDATE SET
       page = excluded.page, pages = excluded.pages,
       finished = excluded.finished, updated_at = excluded.updated_at
   `).run(
-    issueId, issue.series_id, Math.max(0, Math.floor(page ?? 0)),
+    profileId, issueId, issue.series_id, Math.max(0, Math.floor(page ?? 0)),
     pages ?? null, finished ? 1 : 0, Date.now(),
   );
   return { issueId, page, finished: Boolean(finished) };
 }
 
 /** Comics part-way through, newest first — the equivalent of Continue Watching. */
-export function continueReading(limit = 20) {
+export function continueReading(limit = 20, profileId) {
   return getDb().prepare(`
     SELECT i.*, p.page, p.finished, s.title AS series_title
     FROM comic_progress p
     JOIN comic_issues i ON i.id = p.issue_id
     JOIN comic_series s ON s.id = i.series_id
-    WHERE p.finished = 0 AND p.page > 0
+    WHERE p.profile_id = ? AND p.finished = 0 AND p.page > 0
     ORDER BY p.updated_at DESC
     LIMIT ?
-  `).all(limit).map((row) => ({ ...shapeIssue(row), seriesTitle: row.series_title }));
+  `).all(profileId, limit).map((row) => ({ ...shapeIssue(row), seriesTitle: row.series_title }));
 }
 
 /** How much there is, for the settings screen. */
-export function comicStats() {
+export function comicStats(profileId) {
   const db = getDb();
-  const one = (sql) => db.prepare(sql).get();
+  const one = (sql, ...args) => db.prepare(sql).get(...args);
   return {
     series: one('SELECT COUNT(*) c FROM comic_series').c,
     issues: one('SELECT COUNT(*) c FROM comic_issues').c,
     totalSize: one('SELECT COALESCE(SUM(size), 0) s FROM comic_issues').s,
-    reading: one('SELECT COUNT(*) c FROM comic_progress WHERE finished = 0 AND page > 0').c,
+    // How many this reader has open, not how many the household has.
+    reading: one(
+      'SELECT COUNT(*) c FROM comic_progress WHERE profile_id = ? AND finished = 0 AND page > 0',
+      profileId,
+    ).c,
   };
 }

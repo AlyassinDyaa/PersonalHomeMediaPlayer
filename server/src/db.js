@@ -10,7 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import { config, ensureDataDirs } from './config.js';
 
-const SCHEMA = `
+const BASE_SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -95,17 +95,35 @@ CREATE TABLE IF NOT EXISTS subtitles (
   UNIQUE (video_id, path)
 );
 
--- Playback position, the backbone of "Continue Watching".
-CREATE TABLE IF NOT EXISTS progress (
-  video_id   TEXT PRIMARY KEY REFERENCES videos(id) ON DELETE CASCADE,
-  item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
-  position   REAL NOT NULL DEFAULT 0,
-  duration   REAL,
-  watched    INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL
+-- Who is watching.
+--
+-- One row per person who uses the library. The passcode decides whether a
+-- device may reach the library at all; a profile decides whose half-watched
+-- episodes and favourites it sees once it is in. The two are separate
+-- questions, and answering only the first is what made one household share a
+-- single Continue Watching row.
+--
+-- A PIN is optional and is not a second passcode: it stops a younger reader
+-- wandering into someone else's profile, and it is stored the way the
+-- passcode is, as a salted scrypt hash.
+CREATE TABLE IF NOT EXISTS profiles (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  colour       TEXT NOT NULL DEFAULT '',
+  kind         TEXT NOT NULL DEFAULT 'adult' CHECK (kind IN ('adult', 'kid')),
+  -- The one profile allowed to see where the library's files live, and to
+  -- point it at new ones. Exactly one row carries it: the profile the library
+  -- was set up with. Sharing the passcode shares the films, not the drives.
+  is_owner     INTEGER NOT NULL DEFAULT 0,
+  pin_hash     TEXT,
+  pin_salt     TEXT,
+  -- Highest certification this profile may see, e.g. 'PG'. Null means no limit.
+  max_certification TEXT,
+  position     INTEGER NOT NULL DEFAULT 0,
+  created_at   INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_progress_recent ON progress(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_profiles_order ON profiles(position, created_at);
 
 -- User corrections that must survive a rescan: forced TMDB matches, forced
 -- merges/splits, hidden items.
@@ -125,11 +143,6 @@ CREATE TABLE IF NOT EXISTS suggestions (
   confidence REAL NOT NULL,
   resolved   INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS favorites (
-  item_id  TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
-  added_at INTEGER NOT NULL
 );
 
 -- Shelves arranged by hand.
@@ -207,16 +220,6 @@ CREATE TABLE IF NOT EXISTS comic_issues (
 
 CREATE INDEX IF NOT EXISTS idx_comic_issues_series ON comic_issues(series_id);
 
--- Where a reader got to, mirroring what progress does for video.
-CREATE TABLE IF NOT EXISTS comic_progress (
-  issue_id   TEXT PRIMARY KEY REFERENCES comic_issues(id) ON DELETE CASCADE,
-  series_id  TEXT NOT NULL REFERENCES comic_series(id) ON DELETE CASCADE,
-  page       INTEGER NOT NULL DEFAULT 0,
-  pages      INTEGER,
-  finished   INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL
-);
-
 -- Cached TMDB responses, so rescans do not re-hit the API.
 CREATE TABLE IF NOT EXISTS tmdb_cache (
   url        TEXT PRIMARY KEY,
@@ -231,6 +234,76 @@ CREATE TABLE IF NOT EXISTS scans (
   stats       TEXT
 );
 `;
+
+/**
+ * Tables holding one person's answers rather than the library's facts.
+ *
+ * Kept out of the schema above and described here because they are the three
+ * that had to change shape when profiles arrived, and a library that already
+ * exists cannot simply be given the new shape: `CREATE TABLE IF NOT EXISTS`
+ * sees a table of that name and leaves the old one alone. Each therefore
+ * carries its own CREATE, the columns to copy across, and the indexes that
+ * follow the old table when it is renamed out of the way.
+ *
+ * `columns` deliberately lists every column except `profile_id`, because that
+ * is exactly the set an upgrade copies — the new column is supplied, the rest
+ * come over untouched.
+ */
+const PER_PROFILE_TABLES = [
+  {
+    table: 'progress',
+    columns: 'video_id, item_id, position, duration, watched, updated_at',
+    indexes: ['idx_progress_recent'],
+    create: `
+-- Playback position, the backbone of "Continue Watching".
+CREATE TABLE IF NOT EXISTS progress (
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  video_id   TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+  item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  position   REAL NOT NULL DEFAULT 0,
+  duration   REAL,
+  watched    INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, video_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_progress_recent ON progress(profile_id, updated_at DESC);
+`,
+  },
+  {
+    table: 'favorites',
+    columns: 'item_id, added_at',
+    indexes: [],
+    create: `
+CREATE TABLE IF NOT EXISTS favorites (
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  added_at   INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, item_id)
+);
+`,
+  },
+  {
+    table: 'comic_progress',
+    columns: 'issue_id, series_id, page, pages, finished, updated_at',
+    indexes: [],
+    create: `
+-- Where a reader got to, mirroring what progress does for video.
+CREATE TABLE IF NOT EXISTS comic_progress (
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  issue_id   TEXT NOT NULL REFERENCES comic_issues(id) ON DELETE CASCADE,
+  series_id  TEXT NOT NULL REFERENCES comic_series(id) ON DELETE CASCADE,
+  page       INTEGER NOT NULL DEFAULT 0,
+  pages      INTEGER,
+  finished   INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, issue_id)
+);
+`,
+  },
+];
+
+const SCHEMA = BASE_SCHEMA + PER_PROFILE_TABLES.map((entry) => entry.create).join('');
 
 let database = null;
 
@@ -259,6 +332,86 @@ function migrate(db) {
 }
 
 /**
+ * The profile that owns everything watched before there were profiles.
+ *
+ * Named after the library when it has a name, because that is what the person
+ * who set it up already called it, and a first profile labelled "Profile 1"
+ * would be a worse answer than one labelled with their own words.
+ *
+ * @returns {string} the id of the first profile, creating it if need be.
+ */
+function ensureDefaultProfile(db) {
+  const existing = db
+    .prepare('SELECT id FROM profiles ORDER BY position, created_at LIMIT 1')
+    .get();
+  if (existing) return existing.id;
+
+  const id = crypto.randomUUID();
+  db.prepare(`
+    INSERT INTO profiles (id, name, colour, kind, is_owner, position, created_at)
+    VALUES (?,?,?,?,1,?,?)
+  `).run(id, (config.libraryName ?? '').trim() || 'Me', config.libraryColor ?? '', 'adult', 0, Date.now());
+  return id;
+}
+
+/**
+ * Give an existing library the per-profile shape.
+ *
+ * The three tables holding personal answers were keyed on the video, the item
+ * and the issue alone, because there was only ever one viewer. Adding a column
+ * is not enough: the primary key has to widen too, or two people cannot both
+ * be halfway through the same episode. SQLite cannot alter a primary key, so
+ * each table is rebuilt beside itself and its rows handed to the first
+ * profile — which is the truthful answer, since that history really was one
+ * person's.
+ */
+function adoptProfiles(db) {
+  const pending = PER_PROFILE_TABLES.filter(({ table }) => {
+    const columns = db.prepare('PRAGMA table_info(' + table + ')').all();
+    return columns.length > 0 && !columns.some((info) => info.name === 'profile_id');
+  });
+  if (pending.length === 0) return;
+
+  const profileId = ensureDefaultProfile(db);
+
+  /*
+   * Rows are copied between two tables pointing at the same parents, so the
+   * constraints are stood down rather than tripped by a half-finished copy.
+   * The pragma has no effect inside a transaction, which is why it sits
+   * outside one.
+   */
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    try {
+      for (const { table, columns, indexes, create } of pending) {
+        /*
+         * An index follows its table through a rename and keeps its name, so
+         * the new table's `CREATE INDEX IF NOT EXISTS` would quietly find the
+         * name taken, do nothing, and leave the index to be dropped with the
+         * old table — an upgraded library slower than a fresh one, silently.
+         */
+        for (const index of indexes) db.exec('DROP INDEX IF EXISTS ' + index);
+
+        db.exec('ALTER TABLE ' + table + ' RENAME TO ' + table + '_pre_profiles');
+        db.exec(create);
+        db.prepare(
+          'INSERT INTO ' + table + ' (profile_id, ' + columns + ') '
+          + 'SELECT ?, ' + columns + ' FROM ' + table + '_pre_profiles',
+        ).run(profileId);
+        db.exec('DROP TABLE ' + table + '_pre_profiles');
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
+/**
  * Whether an error means the connection itself has gone, rather than the query
  * being wrong.
  *
@@ -279,6 +432,10 @@ function open() {
   const db = new DatabaseSync(config.databasePath);
   db.exec(SCHEMA);
   migrate(db);
+  adoptProfiles(db);
+  // A library always has somebody watching it, including on the very first
+  // run, so every query below can assume a profile exists rather than guard.
+  ensureDefaultProfile(db);
   return db;
 }
 

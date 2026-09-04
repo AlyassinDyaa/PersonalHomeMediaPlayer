@@ -6,6 +6,40 @@
  */
 
 import { getDb } from './db.js';
+import { allowedCertifications } from './profiles.js';
+
+/**
+ * The id every read and write below is scoped to.
+ *
+ * Taken from the resolved profile rather than trusted from the caller, and
+ * never defaulted here: a query that quietly fell back to "somebody" would
+ * write one person's position onto another's row, which is exactly the bug
+ * profiles exist to fix. The API layer always has a profile by the time it
+ * gets here, because a request without one never reaches a route.
+ */
+function idOf(profile) {
+  const id = typeof profile === 'string' ? profile : profile?.id;
+  if (!id) throw new Error('This query needs to know whose library it is reading');
+  return id;
+}
+
+/**
+ * The clause keeping a profile inside its rating limit.
+ *
+ * A title with no certification at all is hidden from a limited profile
+ * rather than shown. Most of a library is rated and the unrated remainder is
+ * usually the part nobody checked — showing it by default would make a kids
+ * profile a promise the library does not keep.
+ */
+function certificationFilter(profile, alias = 'i') {
+  const allowed = allowedCertifications(profile?.maxCertification);
+  if (!allowed) return { sql: '', values: [] };
+  const holes = allowed.map(() => '?').join(', ');
+  return {
+    sql: ` AND ${alias}.certification IS NOT NULL AND ${alias}.certification IN (${holes})`,
+    values: allowed,
+  };
+}
 
 /** Fraction of runtime past which an item counts as finished rather than in-progress. */
 const WATCHED_THRESHOLD = 0.92;
@@ -105,8 +139,9 @@ function shapeVideo(row) {
 }
 
 /** Every item, with counts, for the browse grid. */
-export function listItems({ kind = null, sort = 'title' } = {}) {
+export function listItems({ kind = null, sort = 'title', profile } = {}) {
   const db = getDb();
+  const profileId = idOf(profile);
   const order = {
     title: 'i.sort_title ASC',
     year: 'i.year DESC NULLS LAST, i.sort_title ASC',
@@ -114,31 +149,44 @@ export function listItems({ kind = null, sort = 'title' } = {}) {
     rating: 'i.rating DESC NULLS LAST',
   }[sort] ?? 'i.sort_title ASC';
 
+  const limit = certificationFilter(profile);
+
   const rows = db.prepare(`
     SELECT i.*,
            (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
            (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count,
-           (SELECT 1 FROM favorites f WHERE f.item_id = i.id) AS favourite,
+           (SELECT 1 FROM favorites f WHERE f.item_id = i.id AND f.profile_id = ?) AS favourite,
            (SELECT COUNT(*) FROM videos v
-              LEFT JOIN progress p ON p.video_id = v.id
+              LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
              WHERE v.item_id = i.id AND COALESCE(p.watched, 0) = 0) AS unwatched_count
     FROM items i
-    ${kind ? 'WHERE i.kind = ?' : ''}
+    WHERE 1 = 1
+      ${kind ? 'AND i.kind = ?' : ''}
+      ${limit.sql}
     ORDER BY ${order}
-  `).all(...(kind ? [kind] : []));
+  `).all(profileId, profileId, ...(kind ? [kind] : []), ...limit.values);
 
   return rows.map(shapeItem);
 }
 
-/** One item with its seasons, episodes and per-video progress. */
-export function getItem(id) {
+/**
+ * One item with its seasons, episodes and per-video progress.
+ *
+ * Returns null for a title this profile is not allowed to see, so that a
+ * guessed or bookmarked address is no way around the rating limit that hid it
+ * from the shelves.
+ */
+export function getItem(id, profile) {
   const db = getDb();
+  const profileId = idOf(profile);
+  const limit = certificationFilter(profile);
+
   const row = db.prepare(`
     SELECT i.*,
            (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
            (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count
-    FROM items i WHERE i.id = ?
-  `).get(id);
+    FROM items i WHERE i.id = ? ${limit.sql}
+  `).get(id, ...limit.values);
   if (!row) return null;
 
   const item = shapeItem(row);
@@ -146,10 +194,10 @@ export function getItem(id) {
   const videos = db.prepare(`
     SELECT v.*, p.position, p.watched
     FROM videos v
-    LEFT JOIN progress p ON p.video_id = v.id
+    LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
     WHERE v.item_id = ?
     ORDER BY v.season ASC, v.episode ASC
-  `).all(id).map(shapeVideo);
+  `).all(profileId, id).map(shapeVideo);
 
   if (item.kind === 'movie') {
     item.video = videos[0] ?? null;
@@ -190,12 +238,25 @@ export function listSubtitles(videoId) {
     .all(videoId);
 }
 
-export function getVideo(id) {
+/**
+ * One video, as the player and every streaming route need it.
+ *
+ * The item is joined in only so the rating limit can be applied here too.
+ * Hiding a film from the shelves but still serving its bytes to anyone who
+ * knew the id would make the limit decorative, and the ids are not secret —
+ * they appear in every page the profile is allowed to see.
+ */
+export function getVideo(id, profile) {
+  const profileId = idOf(profile);
+  const limit = certificationFilter(profile);
+
   const row = getDb().prepare(`
     SELECT v.*, p.position, p.watched
-    FROM videos v LEFT JOIN progress p ON p.video_id = v.id
-    WHERE v.id = ?
-  `).get(id);
+    FROM videos v
+    JOIN items i ON i.id = v.item_id
+    LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
+    WHERE v.id = ? ${limit.sql}
+  `).get(profileId, id, ...limit.values);
   if (!row) return null;
   const video = shapeVideo(row);
   video.subtitles = listSubtitles(id);
@@ -206,7 +267,10 @@ export function getVideo(id) {
  * "Continue Watching": partially-watched videos, most recent first, one row per
  * show so a series does not occupy the whole rail.
  */
-export function continueWatching(limit = 20) {
+export function continueWatching(limit = 20, profile) {
+  const profileId = idOf(profile);
+  const rated = certificationFilter(profile);
+
   const rows = getDb().prepare(`
     SELECT v.*, p.position, p.watched, p.updated_at,
            i.title AS item_title, i.kind AS item_kind,
@@ -214,9 +278,9 @@ export function continueWatching(limit = 20) {
     FROM progress p
     JOIN videos v ON v.id = p.video_id
     JOIN items i ON i.id = p.item_id
-    WHERE p.watched = 0 AND p.position > ?
+    WHERE p.profile_id = ? AND p.watched = 0 AND p.position > ? ${rated.sql}
     ORDER BY p.updated_at DESC
-  `).all(RESUME_MIN_SECONDS);
+  `).all(profileId, RESUME_MIN_SECONDS, ...rated.values);
 
   const seen = new Set();
   const result = [];
@@ -255,19 +319,21 @@ export function continueWatching(limit = 20) {
  *
  * @returns {{removed: number}|null} null when there is no such item.
  */
-export function removeFromContinueWatching(itemId) {
+export function removeFromContinueWatching(itemId, profile) {
   const db = getDb();
+  const profileId = idOf(profile);
   const item = db.prepare('SELECT id FROM items WHERE id = ?').get(itemId);
   if (!item) return null;
 
   const result = db
-    .prepare('DELETE FROM progress WHERE item_id = ? AND watched = 0')
-    .run(itemId);
+    .prepare('DELETE FROM progress WHERE profile_id = ? AND item_id = ? AND watched = 0')
+    .run(profileId, itemId);
   return { removed: Number(result.changes ?? 0) };
 }
 
-export function saveProgress({ videoId, position, duration }) {
+export function saveProgress({ videoId, position, duration, profile }) {
   const db = getDb();
+  const profileId = idOf(profile);
   const video = db.prepare('SELECT item_id, duration FROM videos WHERE id = ?').get(videoId);
   if (!video) return null;
 
@@ -275,16 +341,18 @@ export function saveProgress({ videoId, position, duration }) {
   const watched = total && position / total >= WATCHED_THRESHOLD ? 1 : 0;
 
   db.prepare(`
-    INSERT INTO progress (video_id, item_id, position, duration, watched, updated_at)
-    VALUES (?,?,?,?,?,?)
-    ON CONFLICT(video_id) DO UPDATE SET
+    INSERT INTO progress (profile_id, video_id, item_id, position, duration, watched, updated_at)
+    VALUES (?,?,?,?,?,?,?)
+    ON CONFLICT(profile_id, video_id) DO UPDATE SET
       position = excluded.position,
       duration = COALESCE(excluded.duration, progress.duration),
       watched = excluded.watched,
       updated_at = excluded.updated_at
-  `).run(videoId, video.item_id, position, total, watched, Date.now());
+  `).run(profileId, videoId, video.item_id, position, total, watched, Date.now());
 
   // Cache the runtime on the video the first time we learn it from playback.
+  // This one is a fact about the file, not about the viewer, so it is not
+  // kept per profile.
   if (total && !video.duration) {
     db.prepare('UPDATE videos SET duration = ? WHERE id = ?').run(total, videoId);
   }
@@ -292,39 +360,41 @@ export function saveProgress({ videoId, position, duration }) {
   return { videoId, position, duration: total, watched: Boolean(watched) };
 }
 
-export function setWatched(videoId, watched) {
+export function setWatched(videoId, watched, profile) {
   const db = getDb();
+  const profileId = idOf(profile);
   const video = db.prepare('SELECT item_id, duration FROM videos WHERE id = ?').get(videoId);
   if (!video) return null;
   db.prepare(`
-    INSERT INTO progress (video_id, item_id, position, duration, watched, updated_at)
-    VALUES (?,?,?,?,?,?)
-    ON CONFLICT(video_id) DO UPDATE SET
+    INSERT INTO progress (profile_id, video_id, item_id, position, duration, watched, updated_at)
+    VALUES (?,?,?,?,?,?,?)
+    ON CONFLICT(profile_id, video_id) DO UPDATE SET
       watched = excluded.watched,
       position = CASE WHEN excluded.watched = 1 THEN 0 ELSE progress.position END,
       updated_at = excluded.updated_at
-  `).run(videoId, video.item_id, 0, video.duration, watched ? 1 : 0, Date.now());
+  `).run(profileId, videoId, video.item_id, 0, video.duration, watched ? 1 : 0, Date.now());
   return { videoId, watched };
 }
 
 /** Substring search across titles, plus episode titles. */
-export function search(query, limit = 60) {
+export function search(query, limit = 60, profile) {
   const db = getDb();
   const like = '%' + query.toLowerCase().replace(/[%_]/g, '') + '%';
+  const rated = certificationFilter(profile);
 
   const items = db.prepare(`
     SELECT i.*,
            (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
            (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count
     FROM items i
-    WHERE LOWER(i.title) LIKE ?
+    WHERE LOWER(i.title) LIKE ? ${rated.sql}
     ORDER BY
       CASE WHEN LOWER(i.title) = ? THEN 0
            WHEN LOWER(i.title) LIKE ? THEN 1
            ELSE 2 END,
       i.sort_title
     LIMIT ?
-  `).all(like, query.toLowerCase(), query.toLowerCase() + '%', limit);
+  `).all(like, ...rated.values, query.toLowerCase(), query.toLowerCase() + '%', limit);
 
   return items.map(shapeItem);
 }
@@ -335,8 +405,11 @@ export function search(query, limit = 60) {
  * The table for this has existed since the schema was written; nothing ever
  * read or wrote it.
  */
-export function listFavourites() {
+export function listFavourites(profile) {
   const db = getDb();
+  const profileId = idOf(profile);
+  const rated = certificationFilter(profile);
+
   const rows = db.prepare(`
     SELECT i.*,
            (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
@@ -344,8 +417,9 @@ export function listFavourites() {
            1 AS favourite
     FROM favorites f
     JOIN items i ON i.id = f.item_id
+    WHERE f.profile_id = ? ${rated.sql}
     ORDER BY f.added_at DESC
-  `).all();
+  `).all(profileId, ...rated.values);
   return rows.map(shapeItem);
 }
 
@@ -353,23 +427,34 @@ export function listFavourites() {
  * Keep a title to hand, or stop.
  * @returns {{itemId: string, favourite: boolean}|null} null when there is no such item.
  */
-export function setFavourite(itemId, favourite) {
+export function setFavourite(itemId, favourite, profile) {
   const db = getDb();
+  const profileId = idOf(profile);
   if (!db.prepare('SELECT id FROM items WHERE id = ?').get(itemId)) return null;
 
   if (favourite) {
-    db.prepare('INSERT OR IGNORE INTO favorites (item_id, added_at) VALUES (?, ?)')
-      .run(itemId, Date.now());
+    db.prepare('INSERT OR IGNORE INTO favorites (profile_id, item_id, added_at) VALUES (?, ?, ?)')
+      .run(profileId, itemId, Date.now());
   } else {
-    db.prepare('DELETE FROM favorites WHERE item_id = ?').run(itemId);
+    db.prepare('DELETE FROM favorites WHERE profile_id = ? AND item_id = ?').run(profileId, itemId);
   }
   return { itemId, favourite: Boolean(favourite) };
 }
 
-/** Genre rails for the home screen. */
-export function listGenres() {
+/**
+ * Genre rails for the home screen.
+ *
+ * Counted over what this profile may see, so a limited one is not offered a
+ * Horror rail that opens on nothing.
+ */
+export function listGenres(profile) {
+  const rated = certificationFilter(profile);
   const counts = new Map();
-  for (const row of getDb().prepare('SELECT genres FROM items').all()) {
+  const rows = getDb()
+    .prepare('SELECT genres FROM items i WHERE 1 = 1 ' + rated.sql)
+    .all(...rated.values);
+
+  for (const row of rows) {
     for (const genre of canonicalGenres(parseJsonColumn(row.genres, []))) {
       counts.set(genre, (counts.get(genre) ?? 0) + 1);
     }
@@ -379,8 +464,8 @@ export function listGenres() {
     .sort((a, b) => b.count - a.count);
 }
 
-export function listByGenre(genre, limit = 40) {
-  return listItems()
+export function listByGenre(genre, limit = 40, profile) {
+  return listItems({ profile })
     .filter((item) => item.genres.includes(genre))
     .slice(0, limit);
 }

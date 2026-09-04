@@ -34,24 +34,44 @@ function sign(value) {
   return crypto.createHmac('sha256', sessionSecret()).update(value).digest('base64url');
 }
 
-/** A token carrying its own expiry, signed so it cannot be edited. */
-export function issueToken() {
+/**
+ * A token carrying its own expiry and who it belongs to, signed so that
+ * neither can be edited.
+ *
+ * The profile is optional and appended after a colon, so a cookie issued
+ * before profiles existed still reads as a valid session rather than signing
+ * a household out on the day they upgrade. Such a token simply names nobody,
+ * and the caller falls back to the default profile.
+ */
+export function issueToken(profileId = null) {
   const expires = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
-  const body = String(expires);
+  const body = profileId ? expires + ':' + profileId : String(expires);
   return body + '.' + sign(body);
 }
 
-export function tokenValid(token) {
-  if (typeof token !== 'string' || !token.includes('.')) return false;
-  const [body, signature] = token.split('.');
+/**
+ * Unpack a token, or null if it is not one this server issued and still honours.
+ * @returns {{expires: number, profileId: string|null}|null}
+ */
+export function readToken(token) {
+  if (typeof token !== 'string' || !token.includes('.')) return null;
+  const separator = token.lastIndexOf('.');
+  const body = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
 
   const expected = Buffer.from(sign(body));
-  const given = Buffer.from(String(signature ?? ''));
-  if (expected.length !== given.length) return false;
-  if (!crypto.timingSafeEqual(expected, given)) return false;
+  const given = Buffer.from(signature);
+  if (expected.length !== given.length) return null;
+  if (!crypto.timingSafeEqual(expected, given)) return null;
 
-  const expires = Number(body);
-  return Number.isFinite(expires) && expires > Date.now();
+  const [stamp, profileId = null] = body.split(':');
+  const expires = Number(stamp);
+  if (!Number.isFinite(expires) || expires <= Date.now()) return null;
+  return { expires, profileId: profileId || null };
+}
+
+export function tokenValid(token) {
+  return readToken(token) !== null;
 }
 
 /** Read one cookie without pulling in a parser. */
@@ -66,6 +86,18 @@ export function readCookie(req, name) {
     }
   }
   return null;
+}
+
+/**
+ * The profile a browser's cookie names, if any.
+ *
+ * Deliberately knows nothing about which profiles exist: this file's job is
+ * whether a request is genuine, and the caller checks the name against the
+ * library. Keeping the database out of here is also what lets the auth tests
+ * run without one.
+ */
+export function sessionProfileId(req) {
+  return readToken(readCookie(req, COOKIE_NAME))?.profileId ?? null;
 }
 
 export function setSessionCookie(res, token) {

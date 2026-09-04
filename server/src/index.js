@@ -29,7 +29,12 @@ import { scanComics } from './comics/scan.js';
 import {
   requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
+  sessionProfileId,
 } from './auth.js';
+import {
+  listProfiles, getProfile, createProfile, updateProfile, deleteProfile,
+  defaultProfileId, pinMatches,
+} from './profiles.js';
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
 import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
@@ -155,8 +160,123 @@ app.get(['/icon-180.png', '/icon-512.png', '/manifest.webmanifest'], (req, res, 
 // Everything past this point needs to be either local or signed in.
 app.use(requireAuth);
 
+/**
+ * Which of the household this request is speaking for.
+ *
+ * A browser carries it in the signed session cookie, put there when a profile
+ * was chosen. The desktop app cannot: it is loaded from disk and talks to this
+ * server across origins, so no cookie rides along. It sends a header instead,
+ * which is safe precisely here — a request from the machine the server runs on
+ * has already been let through without a passcode, because whoever sent it
+ * could have opened the files directly. The header grants nothing that
+ * loopback did not already grant.
+ *
+ * An unknown or deleted profile falls back to the owner rather than failing.
+ * Nobody should be locked out of their own library because a cookie outlived
+ * the profile it named.
+ */
+app.use((req, res, next) => {
+  const named = isLocalRequest(req)
+    ? (req.get('X-Profile-Id') || sessionProfileId(req))
+    : sessionProfileId(req);
+
+  req.profile = getProfile(named) ?? getProfile(defaultProfileId());
+  next();
+});
+
+/**
+ * The guard on everything that decides where the library's files come from.
+ *
+ * Scanning, the folder picker, the roots themselves: all of it belongs to the
+ * one profile that owns the library. Sharing the passcode with somebody in
+ * another city is meant to share the films, not the drives they sit on, and a
+ * profile that cannot see a path also cannot point the library at a new one.
+ */
+function requireOwner(req, res, next) {
+  if (req.profile?.isOwner) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: 'Only the owner of this library can change that' });
+}
+
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, tmdb: hasTmdb(), roots: config.libraryRoots });
+  res.json({
+    ok: true,
+    tmdb: hasTmdb(),
+    // Where the films live is the owner's business alone.
+    ...(req.profile?.isOwner ? { roots: config.libraryRoots } : {}),
+  });
+});
+
+// ----------------------------------------------------------- profiles ---
+
+/**
+ * Everyone may see who the profiles are: a picker that hid them would have
+ * nothing to pick from. Nothing secret is in the list — a name, a colour, and
+ * whether a PIN will be asked for.
+ */
+app.get('/api/profiles', (req, res) => {
+  res.json({ profiles: listProfiles(), current: req.profile });
+});
+
+/**
+ * Become one of them.
+ *
+ * Wrong PINs are counted against the address by the same lockout that guards
+ * the passcode. A PIN is four digits and a patient guesser has all evening.
+ */
+app.post('/api/profiles/switch', (req, res) => {
+  const address = req.socket?.remoteAddress ?? 'unknown';
+  const blockedFor = loginBlockedFor(address);
+  if (blockedFor > 0) {
+    return res.status(429).json({ error: 'Too many attempts. Try again in ' + blockedFor + 's.' });
+  }
+
+  const wanted = getProfile(req.body?.profileId);
+  if (!wanted) return res.status(404).json({ error: 'No such profile' });
+
+  if (!pinMatches(wanted.id, req.body?.pin)) {
+    recordFailure(address);
+    return res.status(401).json({ error: 'That PIN is not right' });
+  }
+  recordSuccess(address);
+
+  /*
+   * A browser gets a fresh cookie naming the profile. The desktop app is
+   * handed the profile back and repeats it in a header from then on, because
+   * a cookie set here would never reach it.
+   */
+  if (!isLocalRequest(req)) setSessionCookie(res, issueToken(wanted.id));
+  res.json(wanted);
+});
+
+app.post('/api/profiles', requireOwner, (req, res) => {
+  try {
+    res.json(createProfile(req.body ?? {}));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put('/api/profiles/:id', requireOwner, (req, res) => {
+  try {
+    const updated = updateProfile(req.params.id, req.body ?? {});
+    if (!updated) return res.status(404).json({ error: 'No such profile' });
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/profiles/:id', requireOwner, (req, res) => {
+  try {
+    const removed = deleteProfile(req.params.id);
+    if (!removed) return res.status(404).json({ error: 'No such profile' });
+    res.json(removed);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.get('/api/stats', (req, res) => {
@@ -168,27 +288,28 @@ app.get('/api/items', (req, res) => {
   res.json(library.listItems({
     kind: kind === 'movie' || kind === 'show' ? kind : null,
     sort: typeof sort === 'string' ? sort : 'title',
+    profile: req.profile,
   }));
 });
 
 app.get('/api/items/:id', (req, res) => {
-  const item = library.getItem(req.params.id);
+  const item = library.getItem(req.params.id, req.profile);
   if (!item) return res.status(404).json({ error: 'not found' });
   res.json(item);
 });
 
 app.get('/api/videos/:id', (req, res) => {
-  const video = library.getVideo(req.params.id);
+  const video = library.getVideo(req.params.id, req.profile);
   if (!video) return res.status(404).json({ error: 'not found' });
   res.json(video);
 });
 
 app.get('/api/continue', (req, res) => {
-  res.json(library.continueWatching(Number(req.query.limit) || 20));
+  res.json(library.continueWatching(Number(req.query.limit) || 20, req.profile));
 });
 
 app.get('/api/favourites', (req, res) => {
-  res.json(library.listFavourites());
+  res.json(library.listFavourites(req.profile));
 });
 
 // ---------------------------------------------------------------------------
@@ -260,21 +381,21 @@ app.delete('/api/collections/:id/items/:itemId', (req, res) => {
 });
 
 app.get('/api/genres', (req, res) => {
-  res.json(library.listGenres());
+  res.json(library.listGenres(req.profile));
 });
 
 app.get('/api/genres/:name', (req, res) => {
-  res.json(library.listByGenre(req.params.name));
+  res.json(library.listByGenre(req.params.name, 40, req.profile));
 });
 
 app.get('/api/search', (req, res) => {
   const query = String(req.query.q ?? '').trim();
   if (!query) return res.json([]);
-  res.json(library.search(query));
+  res.json(library.search(query, 60, req.profile));
 });
 
 /** Shows currently folded together, so a wrong answer can be found again. */
-app.get('/api/merges', (req, res) => {
+app.get('/api/merges', requireOwner, (req, res) => {
   res.json(listMerges());
 });
 
@@ -285,7 +406,7 @@ app.get('/api/merges', (req, res) => {
  * scanning again is all it takes; the episodes were never altered, only
  * filed together.
  */
-app.delete('/api/merges/:alias', async (req, res) => {
+app.delete('/api/merges/:alias', requireOwner, async (req, res) => {
   const joined = listMerges().find((entry) => entry.alias === req.params.alias);
   if (!clearMerge(req.params.alias)) {
     return res.status(404).json({ error: 'those shows are not joined' });
@@ -306,7 +427,7 @@ app.delete('/api/merges/:alias', async (req, res) => {
   }
 });
 
-app.get('/api/suggestions', (req, res) => {
+app.get('/api/suggestions', requireOwner, (req, res) => {
   res.json(library.listSuggestions());
 });
 
@@ -319,25 +440,25 @@ app.post('/api/progress', (req, res) => {
   if (!videoId || typeof position !== 'number') {
     return res.status(400).json({ error: 'videoId and position are required' });
   }
-  const saved = library.saveProgress({ videoId, position, duration });
+  const saved = library.saveProgress({ videoId, position, duration, profile: req.profile });
   if (!saved) return res.status(404).json({ error: 'video not found' });
   res.json(saved);
 });
 
 app.put('/api/items/:id/favourite', (req, res) => {
-  const result = library.setFavourite(req.params.id, req.body?.favourite !== false);
+  const result = library.setFavourite(req.params.id, req.body?.favourite !== false, req.profile);
   if (!result) return res.status(404).json({ error: 'item not found' });
   res.json(result);
 });
 
 app.delete('/api/continue/:itemId', (req, res) => {
-  const result = library.removeFromContinueWatching(req.params.itemId);
+  const result = library.removeFromContinueWatching(req.params.itemId, req.profile);
   if (!result) return res.status(404).json({ error: 'item not found' });
   res.json(result);
 });
 
 app.post('/api/videos/:id/watched', (req, res) => {
-  const result = library.setWatched(req.params.id, req.body?.watched !== false);
+  const result = library.setWatched(req.params.id, req.body?.watched !== false, req.profile);
   if (!result) return res.status(404).json({ error: 'video not found' });
   res.json(result);
 });
@@ -365,7 +486,7 @@ app.get('/api/tmdb/search', async (req, res) => {
 });
 
 /** Force an item to a specific TMDB id; survives rescans. */
-app.post('/api/items/:id/match', (req, res) => {
+app.post('/api/items/:id/match', requireOwner, (req, res) => {
   const { tmdbId } = req.body ?? {};
   const row = getDb().prepare('SELECT scan_key FROM items WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'not found' });
@@ -381,7 +502,7 @@ app.post('/api/items/:id/match', (req, res) => {
  * keeping them apart is already what the scanner does. Either way the
  * suggestion stops being raised.
  */
-app.post('/api/suggestions/:id/resolve', (req, res) => {
+app.post('/api/suggestions/:id/resolve', requireOwner, (req, res) => {
   const db = getDb();
   const row = db.prepare('SELECT payload FROM suggestions WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'not found' });
@@ -457,11 +578,35 @@ app.get('/api/logos/search', async (req, res) => {
   }
 });
 
+/**
+ * What a profile that does not own the library is told about it.
+ *
+ * The parts that describe how the library looks and behaves, and none of the
+ * parts that describe the machine it runs on: no roots, no data directory, no
+ * mpv path, no port, nothing about the passcode or the metadata key. A guest
+ * profile should not be able to learn that the films sit on G:\Entertainment,
+ * let alone point the library somewhere else.
+ */
+function viewerSettings(full) {
+  return {
+    libraryName: full.libraryName,
+    libraryColor: full.libraryColor,
+    skipIntroEnabled: full.skipIntroEnabled,
+    skipOutroEnabled: full.skipOutroEnabled,
+    showComics: full.showComics,
+    groupMoviesByGenre: full.groupMoviesByGenre,
+    groupShowsByGenre: full.groupShowsByGenre,
+    streamingReady: full.streamingReady,
+  };
+}
+
 app.get('/api/settings', (req, res) => {
-  res.json(settingsWithNetwork());
+  const full = settingsWithNetwork();
+  const owner = Boolean(req.profile?.isOwner);
+  res.json({ ...(owner ? full : viewerSettings(full)), isOwner: owner });
 });
 
-app.put('/api/settings', (req, res) => {
+app.put('/api/settings', requireOwner, (req, res) => {
   try {
     saveSettings(req.body ?? {});
     res.json(settingsWithNetwork());
@@ -474,7 +619,7 @@ app.put('/api/settings', (req, res) => {
  * Directory listing used by the in-app folder picker. Restricted to directory
  * names only — it never exposes file contents.
  */
-app.get('/api/browse', (req, res) => {
+app.get('/api/browse', requireOwner, (req, res) => {
   const target = typeof req.query.path === 'string' && req.query.path ? req.query.path : null;
   try {
     res.json(listDirectories(target));
@@ -484,7 +629,7 @@ app.get('/api/browse', (req, res) => {
 });
 
 /** Count media files under a folder, so the picker can preview what it will find. */
-app.get('/api/browse/preview', (req, res) => {
+app.get('/api/browse/preview', requireOwner, (req, res) => {
   const target = typeof req.query.path === 'string' ? req.query.path : '';
   if (!target) return res.status(400).json({ error: 'path is required' });
   try {
@@ -499,12 +644,12 @@ app.get('/api/browse/preview', (req, res) => {
   }
 });
 
-app.get('/api/artwork/stats', (req, res) => {
+app.get('/api/artwork/stats', requireOwner, (req, res) => {
   res.json(artworkStats());
 });
 
 /** Warm the whole image cache, streaming progress. */
-app.get('/api/artwork/prefetch', async (req, res) => {
+app.get('/api/artwork/prefetch', requireOwner, async (req, res) => {
   const send = openEventStream(res);
   try {
     const result = await prefetchArtwork({
@@ -533,7 +678,7 @@ app.get('/api/artwork/prefetch', async (req, res) => {
  * than simply stalling.
  */
 app.get('/api/stream/:videoId/info', async (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) {
     res.status(404).json({ error: 'No such video' });
     return;
@@ -617,7 +762,7 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
  * can seek anywhere in it.
  */
 app.get('/api/stream/:videoId/index.m3u8', async (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) return res.status(404).json({ error: 'No such video' });
   if (!ffmpegAvailable()) {
     return res.status(503).json({ error: 'ffmpeg is not installed, so browsers cannot be served' });
@@ -641,7 +786,7 @@ app.get('/api/stream/:videoId/index.m3u8', async (req, res) => {
 
 /** One segment, produced on demand the first time it is asked for. */
 app.get('/api/stream/:videoId/seg/:audio/:index.ts', async (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) return res.status(404).json({ error: 'No such video' });
 
   const index = Number(req.params.index);
@@ -678,7 +823,7 @@ app.get('/api/stream/:videoId/seg/:audio/:index.ts', async (req, res) => {
  * and converting it takes less time than deciding where to file it.
  */
 app.get('/api/stream/:videoId/subtitles/:index.vtt', async (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) return res.status(404).json({ error: 'No such video' });
 
   const index = Number(req.params.index);
@@ -706,7 +851,7 @@ app.get('/api/stream/:videoId/subtitles/:index.vtt', async (req, res) => {
 });
 
 app.get('/api/stream/:videoId/start', async (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) {
     res.status(404).json({ error: 'No such video' });
     return;
@@ -790,7 +935,7 @@ app.get('/api/stream/prepared/stats', async (req, res) => {
 });
 
 app.get('/api/stream/:videoId/direct', (req, res) => {
-  const video = library.getVideo(req.params.videoId);
+  const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) {
     res.status(404).json({ error: 'No such video' });
     return;
@@ -871,20 +1016,20 @@ async function rescanAfterChange() {
 /** The shelves, what is on them, and anything part-read. */
 app.get('/api/comics', (req, res) => {
   res.json({
-    shelves: comics.listShelves(),
-    reading: comics.continueReading(),
-    stats: comics.comicStats(),
+    shelves: comics.listShelves(req.profile.id),
+    reading: comics.continueReading(20, req.profile.id),
+    stats: comics.comicStats(req.profile.id),
   });
 });
 
 app.get('/api/comics/series/:id', (req, res) => {
-  const series = comics.getSeries(req.params.id);
+  const series = comics.getSeries(req.params.id, req.profile.id);
   if (!series) return res.status(404).json({ error: 'No such series' });
   res.json(series);
 });
 
 app.get('/api/comics/issue/:id', (req, res) => {
-  const issue = comics.getIssue(req.params.id);
+  const issue = comics.getIssue(req.params.id, req.profile.id);
   if (!issue) return res.status(404).json({ error: 'No such comic' });
   res.json(issue);
 });
@@ -977,13 +1122,14 @@ app.post('/api/comics/progress', (req, res) => {
     page: Number(req.body?.page) || 0,
     pages: req.body?.pages == null ? null : Number(req.body.pages),
     finished: Boolean(req.body?.finished),
+    profileId: req.profile.id,
   });
   if (!saved) return res.status(404).json({ error: 'No such comic' });
   res.json(saved);
 });
 
 /** Read the comic folders again. Separate from the video scan on purpose. */
-app.post('/api/comics/scan', async (req, res) => {
+app.post('/api/comics/scan', requireOwner, async (req, res) => {
   if (comicScanning) return res.status(409).json({ error: 'a comic scan is already running' });
   comicScanning = true;
   try {
@@ -995,7 +1141,7 @@ app.post('/api/comics/scan', async (req, res) => {
   }
 });
 
-app.get('/api/scan/stream', async (req, res) => {
+app.get('/api/scan/stream', requireOwner, async (req, res) => {
   if (scanning) return res.status(409).json({ error: 'a scan is already running' });
 
   const send = openEventStream(res);
@@ -1033,7 +1179,7 @@ app.get('/api/scan/stream', async (req, res) => {
   }
 });
 
-app.post('/api/scan', async (req, res) => {
+app.post('/api/scan', requireOwner, async (req, res) => {
   if (scanning) return res.status(409).json({ error: 'a scan is already running' });
   scanning = true;
   try {
