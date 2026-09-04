@@ -38,6 +38,7 @@ import {
 import { noteWhereabouts, networkKind } from './whereabouts.js';
 import { saveAvatar, clearAvatar, avatarFile } from './avatars.js';
 import { libraryHealth } from './health.js';
+import * as requests from './requests.js';
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
 import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
@@ -806,6 +807,63 @@ function viewerSettings(full) {
 /** What is wrong with the library, for the owner to act on. */
 app.get('/api/health/library', requireOwner, (req, res) => {
   res.json(libraryHealth());
+});
+
+/**
+ * Requests: anybody may make one, only the owner answers them.
+ *
+ * Everyone sees their own; the owner sees all of them, because answering is
+ * their job. A request can name something personal, so it is not a shared
+ * board unless you are the person who has to act on it.
+ */
+app.get('/api/requests', (req, res) => {
+  const owner = Boolean(req.profile?.isOwner);
+  res.json({
+    requests: requests.listRequests({ profileId: req.profile?.id, all: owner }),
+    open: owner ? requests.openRequestCount() : undefined,
+  });
+});
+
+app.post('/api/requests', (req, res) => {
+  if (!req.profile?.id) {
+    res.status(400).json({ error: 'No profile is chosen' });
+    return;
+  }
+  try {
+    res.json(requests.addRequest({
+      profileId: req.profile.id,
+      title: req.body?.title,
+      note: req.body?.note,
+    }));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/requests/:id', requireOwner, (req, res) => {
+  try {
+    const updated = requests.setRequestStatus(req.params.id, req.body?.status);
+    if (!updated) return res.status(404).json({ error: 'No such request' });
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/** Withdraw one. The owner may clear any; anybody may take back their own. */
+app.delete('/api/requests/:id', (req, res) => {
+  const all = requests.listRequests({ all: true });
+  const wanted = all.find((row) => row.id === req.params.id);
+  if (!wanted) {
+    res.status(404).json({ error: 'No such request' });
+    return;
+  }
+  if (!req.profile?.isOwner && wanted.profile.id !== req.profile?.id) {
+    res.status(403).json({ error: 'That is not your request' });
+    return;
+  }
+  requests.deleteRequest(req.params.id);
+  res.json({ id: req.params.id });
 });
 
 app.get('/api/settings', (req, res) => {

@@ -109,6 +109,20 @@ export const api = {
   /** What is wrong with the library: gaps, missing files, unmatched titles. */
   libraryHealth: () => request('/api/health/library'),
 
+  // --- requests -----------------------------------------------------------
+  requests: () => request('/api/requests'),
+  addRequest: (body) => request('/api/requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  setRequestStatus: (id, status) => request('/api/requests/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  }),
+  deleteRequest: (id) => request('/api/requests/' + encodeURIComponent(id), { method: 'DELETE' }),
+
   /** A profile's own picture, sent already shrunk as a data URL. */
   setAvatar: (id, image, source = null) => request('/api/profiles/' + encodeURIComponent(id) + '/avatar', {
     method: 'PUT',

@@ -9,6 +9,7 @@ import Comics from './components/Comics.jsx';
 import ComicReader from './components/ComicReader.jsx';
 import { shelveByGenre } from './genres.js';
 import BrandRail from './components/BrandRail.jsx';
+import ProfileFace from './components/ProfileFace.jsx';
 import Settings from './components/Settings.jsx';
 import { headerPreview, brandColor } from './branding.js';
 import { useSwipe } from './useSwipe.js';
@@ -64,6 +65,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [grouping, setGrouping] = useState({ movies: true, shows: true });
   /** Whether the Comics tab is offered; set in Settings. */
   const [showComics, setShowComics] = useState(true);
+  /** Who is watching, shown in the bar so it is never a guess. */
+  const [me, setMe] = useState(null);
   const [libraryName, setLibraryName] = useState('');
   const [libraryColor, setLibraryColor] = useState('');
 
@@ -99,6 +102,16 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Who is watching, for the bar. Its own request because it changes for
+  // reasons the library does not: switching profile, or editing a picture.
+  useEffect(() => {
+    let alive = true;
+    api.profiles()
+      .then((body) => { if (alive) setMe(body.current ?? null); })
+      .catch(() => { if (alive) setMe(null); });
+    return () => { alive = false; };
+  }, [refreshSignal]);
 
   // Something finished playing elsewhere in the app; pick up where it got to
   // rather than reloading the page and losing the reader's place.
@@ -442,7 +455,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   if (detailId) {
     return (
       <>
-        <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} scrolled
+        <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} me={me} scrolled
              brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
@@ -461,7 +474,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   return (
     <>
-      <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} scrolled={scrolled}
+      <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} me={me} scrolled={scrolled}
            brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
 
       <div className="view" key={view + (query.trim() ? ':search' : '')} {...swipe}>
@@ -635,7 +648,7 @@ const SEARCH_PLACEHOLDER = {
   library: 'Search your library',
 };
 
-function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs }) {
+function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, me }) {
   /*
    * On a phone the sections live behind a button.
    *
@@ -661,7 +674,26 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs })
         {menuOpen ? '✕' : '☰'}
       </button>
 
-      <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>
+      {/*
+        * Whose library this is, rather than what it is called.
+        *
+        * The name of the library is on the door and on the settings screen;
+        * once inside, the useful thing to know is which of you is watching —
+        * particularly on a shared tablet, where the answer decides what is on
+        * the shelves and where every episode was left.
+        */}
+      {me
+        ? (
+          <button
+            className="nav-me"
+            onClick={() => goto('library')}
+            title={'Watching as ' + me.name}
+          >
+            <ProfileFace profile={me} size="list" />
+            <span className="nav-me-name">{me.name}</span>
+          </button>
+        )
+        : <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>}
       {/* On a phone the bar names the section, since the links are hidden. */}
       <div className="nav-section">{tabs.find((entry) => entry.id === view)?.label}</div>
       <div className="nav-links">

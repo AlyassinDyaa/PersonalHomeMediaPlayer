@@ -168,6 +168,26 @@ CREATE TABLE IF NOT EXISTS collection_items (
 
 CREATE INDEX IF NOT EXISTS idx_collection_items ON collection_items(collection_id, position);
 
+-- Things people would like added.
+--
+-- A profile that is not the owner cannot add to the library or even see where
+-- the files are kept, so there was no way to say "I would like this" short of
+-- telling the owner in person. This is that, written down.
+CREATE TABLE IF NOT EXISTS requests (
+  id          TEXT PRIMARY KEY,
+  profile_id  TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title       TEXT NOT NULL,
+  note        TEXT,
+  -- open, done, or declined. Kept rather than deleted so somebody is not left
+  -- wondering whether their request was ever seen.
+  status      TEXT NOT NULL DEFAULT 'open'
+              CHECK (status IN ('open', 'done', 'declined')),
+  created_at  INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status, created_at DESC);
+
 -- A universe's logo, once it has been found.
 --
 -- Remembered rather than fetched per page: the picture for "DC" does not

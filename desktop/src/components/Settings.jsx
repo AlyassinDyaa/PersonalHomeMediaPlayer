@@ -3,6 +3,7 @@ import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
 import HealthPanel from './HealthPanel.jsx';
+import RequestsPanel from './RequestsPanel.jsx';
 import ProfilesPanel from './ProfilesPanel.jsx';
 import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
 
@@ -28,6 +29,7 @@ const SETTINGS_TABS = [
   { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
   { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
   { id: 'profiles', label: 'Profiles', hint: 'Who is watching, and what each of them can see' },
+  { id: 'requests', label: 'Requests', hint: 'Films and shows people would like added' },
   { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Scanning, storage, and the state of the library' },
 ];
 
@@ -469,6 +471,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
         {active === 'collections' && <CollectionsPanel onChanged={onSettingsChanged} />}
 
         {active === 'profiles' && <ProfilesPanel isOwner={isOwner} />}
+
+        {active === 'requests' && <RequestsPanel isOwner={isOwner} />}
 
         {active === 'comics' && (
           <>
