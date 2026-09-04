@@ -18,11 +18,14 @@ import {
   runScan, setOverride, listMerges, clearMerge, rememberSeparate,
 } from './scan/index.js';
 import * as library from './library.js';
+import * as collections from './collections.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
-import { searchTitles } from './meta/tmdb.js';
+import { tmdbGet, searchTitles } from './meta/tmdb.js';
 import { startAutoScan } from './scan/autoscan.js';
 import { segmentPlan, buildPlaylist, ensureSegment, clearAllSegments } from './stream/vod.js';
+import * as comics from './comics/library.js';
+import { scanComics } from './comics/scan.js';
 import {
   requireAuth, requestAuthorised, isLocalRequest, passcodeMatches, issueToken,
   setSessionCookie, clearSessionCookie, loginBlockedFor, recordFailure, recordSuccess,
@@ -30,6 +33,9 @@ import {
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
 import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
+import {
+  canPrepare, prepare, preparedPath, preparedState, preparedStats,
+} from './stream/prepared.js';
 import { webAppDir, loginPage } from './webapp.js';
 
 const app = express();
@@ -183,6 +189,74 @@ app.get('/api/continue', (req, res) => {
 
 app.get('/api/favourites', (req, res) => {
   res.json(library.listFavourites());
+});
+
+// ---------------------------------------------------------------------------
+// Collections
+// ---------------------------------------------------------------------------
+
+app.get('/api/collections', (req, res) => {
+  res.json(collections.listCollections());
+});
+
+/** The rails themselves, titles included, for the home screen. */
+app.get('/api/collections/shelves', (req, res) => {
+  res.json(collections.collectionShelves());
+});
+
+app.get('/api/collections/:id', (req, res) => {
+  const items = collections.collectionItems(req.params.id);
+  if (!items) return res.status(404).json({ error: 'collection not found' });
+  res.json(items);
+});
+
+app.post('/api/collections', (req, res) => {
+  try {
+    res.json(collections.createCollection({
+      name: req.body?.name,
+      folderPath: req.body?.folderPath ?? null,
+    }));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch('/api/collections/:id', (req, res) => {
+  try {
+    if (req.body?.move) {
+      const moved = collections.moveCollection(req.params.id, req.body.move);
+      if (!moved) return res.status(404).json({ error: 'collection not found' });
+      return res.json(moved);
+    }
+    const updated = collections.updateCollection(req.params.id, req.body ?? {});
+    if (!updated) return res.status(404).json({ error: 'collection not found' });
+    res.json(updated);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/collections/:id', (req, res) => {
+  if (!collections.deleteCollection(req.params.id)) {
+    return res.status(404).json({ error: 'collection not found' });
+  }
+  res.json({ removed: true });
+});
+
+app.post('/api/collections/:id/items', (req, res) => {
+  try {
+    const added = collections.addToCollection(req.params.id, req.body?.itemId);
+    if (!added) return res.status(404).json({ error: 'collection or item not found' });
+    res.json(added);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/collections/:id/items/:itemId', (req, res) => {
+  const removed = collections.removeFromCollection(req.params.id, req.params.itemId);
+  if (!removed) return res.status(404).json({ error: 'collection not found' });
+  res.json(removed);
 });
 
 app.get('/api/genres', (req, res) => {
@@ -359,6 +433,30 @@ function settingsWithNetwork() {
   };
 }
 
+/**
+ * Logos to choose from when badging a collection.
+ *
+ * The metadata provider's company images are the practical source: they cover
+ * studios, publishers and networks — DC, Marvel, Pixar, Nickelodeon — which is
+ * what people name a shelf after.
+ */
+app.get('/api/logos/search', async (req, res) => {
+  const query = String(req.query.q ?? '').trim();
+  if (!query) return res.json([]);
+
+  try {
+    const body = await tmdbGet('/search/company?query=' + encodeURIComponent(query));
+    res.json(
+      (body?.results ?? [])
+        .filter((entry) => entry.logo_path)
+        .slice(0, 12)
+        .map((entry) => ({ id: entry.id, name: entry.name, logo: entry.logo_path })),
+    );
+  } catch (error) {
+    res.status(502).json({ error: error.message });
+  }
+});
+
 app.get('/api/settings', (req, res) => {
   res.json(settingsWithNetwork());
 });
@@ -466,8 +564,23 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
     // so the container is the reliable source for a first play.
     const duration = Number(probed?.format?.duration) || video.duration || null;
 
+    /*
+     * Repack this film in the background if it would help.
+     *
+     * Nothing waits for it: this play uses the streaming path as before, and
+     * the next one gets a file the browser can seek natively. Only started for
+     * films needing no re-encoding, where the work is a straight copy.
+     */
+    const prepared = preparedState(req.params.videoId);
+    if (prepared === 'none' && plan.mode !== 'direct' && canPrepare(probed)) {
+      prepare(req.params.videoId, video.path, probed).catch(() => {
+        // Surfaced through preparedState; the stream still plays regardless.
+      });
+    }
+
     res.json({
       ...plan,
+      prepared,
       duration,
       position: video.position ?? 0,
       audioTracks: ofType('audio').map((stream, i) => ({
@@ -655,6 +768,27 @@ app.get('/api/stream/session/:id/:file', (req, res) => {
 });
 
 /** A file the browser can play as it is, served with range support. */
+/**
+ * The repacked copy, if there is one.
+ *
+ * Served as an ordinary file so the browser can ask for byte ranges and seek
+ * without anything running on the server.
+ */
+app.get('/api/stream/:videoId/prepared', (req, res) => {
+  if (preparedState(req.params.videoId) !== 'ready') {
+    res.status(404).json({ error: 'No prepared copy of that video' });
+    return;
+  }
+  res.type('video/mp4');
+  res.sendFile(preparedPath(req.params.videoId), (error) => {
+    if (error && !res.headersSent) res.status(404).end();
+  });
+});
+
+app.get('/api/stream/prepared/stats', async (req, res) => {
+  res.json(await preparedStats());
+});
+
 app.get('/api/stream/:videoId/direct', (req, res) => {
   const video = library.getVideo(req.params.videoId);
   if (!video) {
@@ -704,6 +838,8 @@ app.get('/artwork/:size/:file', async (req, res) => {
 // ---------------------------------------------------------------------------
 
 let scanning = false;
+/** The comic scan has its own guard: the two read different folders. */
+let comicScanning = false;
 /** Stops the library watcher; set once the server is listening. */
 let stopAutoScan = null;
 
@@ -727,6 +863,137 @@ async function rescanAfterChange() {
     scanning = false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Comics
+// ---------------------------------------------------------------------------
+
+/** The shelves, what is on them, and anything part-read. */
+app.get('/api/comics', (req, res) => {
+  res.json({
+    shelves: comics.listShelves(),
+    reading: comics.continueReading(),
+    stats: comics.comicStats(),
+  });
+});
+
+app.get('/api/comics/series/:id', (req, res) => {
+  const series = comics.getSeries(req.params.id);
+  if (!series) return res.status(404).json({ error: 'No such series' });
+  res.json(series);
+});
+
+app.get('/api/comics/issue/:id', (req, res) => {
+  const issue = comics.getIssue(req.params.id);
+  if (!issue) return res.status(404).json({ error: 'No such comic' });
+  res.json(issue);
+});
+
+/**
+ * Make a comic ready to read.
+ *
+ * The archive is unpacked once, which takes a few seconds, and every page
+ * after that is an ordinary file. Asked for explicitly rather than done on
+ * the first page request, so the reader can say what it is waiting for.
+ */
+app.post('/api/comics/issue/:id/open', async (req, res) => {
+  try {
+    res.json(await comics.beginIssue(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/comics/issue/:id/page/:index', async (req, res) => {
+  const index = Number(req.params.index);
+  if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'bad page' });
+
+  try {
+    let file = comics.issuePageFile(req.params.id, index);
+    if (!file) {
+      // Either the comic has not been opened at all, or the unpacking has
+      // not reached this page yet. Both are waited on rather than refused:
+      // pages are written in order, so a reader is never far ahead of it.
+      await comics.beginIssue(req.params.id);
+      file = await comics.waitForPage(req.params.id, index);
+    }
+    if (!file) return res.status(404).json({ error: 'No such page' });
+
+    res.type('image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.sendFile(file);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * A cover.
+ *
+ * Answered at once when it has been drawn before. When it has not, the work
+ * is started and this waits only a moment for it: a shelf asks for a dozen
+ * covers together, and some of these archives take ten seconds to reach their
+ * first page, so holding every one of those requests open would leave the
+ * whole shelf blank until the slowest finished. Giving up quickly lets the
+ * shelf draw with titles where the pictures are not ready, and they appear on
+ * the next visit — by which time the work has finished in the background.
+ */
+app.get('/api/comics/issue/:id/cover', async (req, res) => {
+  const ready = comics.coverReady(req.params.id);
+  if (ready) {
+    res.type('image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.sendFile(ready);
+  }
+
+  try {
+    const drawn = await Promise.race([
+      comics.coverFor(req.params.id),
+      // Long enough for an ordinary issue, which takes about eighty
+      // milliseconds, and far too short for a two gigabyte compendium,
+      // which takes eleven seconds. The big ones are drawn in the
+      // background and appear when the shelf is next looked at.
+      new Promise((resolve) => setTimeout(() => resolve(undefined), 400)),
+    ]);
+
+    if (drawn === undefined) {
+      // Still being drawn. Not an error, just not yet.
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(404).json({ error: 'The cover is still being made' });
+    }
+    if (!drawn) return res.status(404).json({ error: 'No cover' });
+
+    res.type('image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(drawn);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/comics/progress', (req, res) => {
+  const saved = comics.saveProgress({
+    issueId: req.body?.issueId,
+    page: Number(req.body?.page) || 0,
+    pages: req.body?.pages == null ? null : Number(req.body.pages),
+    finished: Boolean(req.body?.finished),
+  });
+  if (!saved) return res.status(404).json({ error: 'No such comic' });
+  res.json(saved);
+});
+
+/** Read the comic folders again. Separate from the video scan on purpose. */
+app.post('/api/comics/scan', async (req, res) => {
+  if (comicScanning) return res.status(409).json({ error: 'a comic scan is already running' });
+  comicScanning = true;
+  try {
+    res.json(await scanComics());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    comicScanning = false;
+  }
+});
 
 app.get('/api/scan/stream', async (req, res) => {
   if (scanning) return res.status(409).json({ error: 'a scan is already running' });

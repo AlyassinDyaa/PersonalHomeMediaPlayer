@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Card from './Card.jsx';
 import Row from './Row.jsx';
+import { shelveByGenre } from '../genres.js';
 
 /**
  * Browse screen for Movies or TV Shows.
@@ -11,6 +12,8 @@ import Row from './Row.jsx';
  */
 export function Browse({
   title, items, onSelect, renderLabel, query = '', groupByGenre = true,
+  /* Shown beside the title when this screen was opened from somewhere. */
+  onBack = null,
 }) {
   const [genre, setGenre] = useState(null);
   /*
@@ -49,50 +52,16 @@ export function Browse({
     return [...filtered].sort(compare);
   }, [filtered, sort]);
 
-  /** How many titles in this tab carry each genre, for deciding which is rare. */
-  const genreFrequency = useMemo(() => {
-    const counts = new Map();
-    for (const item of items) {
-      for (const name of item.genres ?? []) counts.set(name, (counts.get(name) ?? 0) + 1);
-    }
-    return counts;
-  }, [items]);
-
   /**
    * One row per title, filed under the genre that says most about it.
    *
-   * Two arrangements were tried and both were wrong. Filing by TMDB's *first*
-   * genre put X-Men alone under Kids and left nothing under Sci-Fi & Fantasy,
-   * because that order means nothing. Listing a title under every genre it
-   * carries made the counts honest but produced three consecutive identical
-   * rows — Action, Adventure and Animation, the same nineteen cartoons each
-   * time — because in a library like this those three travel together.
-   *
-   * So each title is filed under its *rarest* genre here: the one that
-   * distinguishes it from everything else on the shelf. Where everything is
-   * Action, being Action says nothing and being a Comedy or a Mystery says a
-   * great deal. The arrangement tunes itself to whatever the library holds.
+   * The home page arranges its genre rails the same way, from the same
+   * helper, so a title cannot sit under Action here and Adventure there.
    *
    * The chips above still count every genre a title has, and clicking one
    * shows all of them, so nothing is hidden by the arrangement.
    */
-  const rows = useMemo(() => {
-    const buckets = new Map();
-    for (const item of sorted) {
-      const names = item.genres?.length ? item.genres : ['Other'];
-      const shelf = [...names].sort((a, b) => (
-        (genreFrequency.get(a) ?? 0) - (genreFrequency.get(b) ?? 0)
-        // Alphabetical only to break ties, so the arrangement never depends on
-        // the order TMDB happened to return.
-        || a.localeCompare(b)
-      ))[0];
-      if (!buckets.has(shelf)) buckets.set(shelf, []);
-      buckets.get(shelf).push(item);
-    }
-    return [...buckets.entries()]
-      .map(([name, entries]) => ({ name, entries }))
-      .sort((a, b) => b.entries.length - a.entries.length || a.name.localeCompare(b.name));
-  }, [sorted, genreFrequency]);
+  const rows = useMemo(() => shelveByGenre(sorted), [sorted]);
 
   /** Every genre present, for the filter chips. */
   const genres = useMemo(() => {
@@ -113,6 +82,11 @@ export function Browse({
   return (
     <>
       <div className="page-header">
+        {onBack && (
+          <button type="button" className="btn btn-secondary btn-back" onClick={onBack}>
+            ← Home
+          </button>
+        )}
         <h1 className="page-title">{title}</h1>
         <span className="page-sub">
           {filtered.length === items.length

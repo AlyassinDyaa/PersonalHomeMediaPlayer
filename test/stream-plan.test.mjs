@@ -133,7 +133,13 @@ check('no seek argument is added when starting at the beginning', () => {
 check('an encoding run pins keyframes to the segment length', () => {
   const args = hlsArguments({ video: 'encode', audio: 'encode' }, options);
   const joined = args.join(' ');
-  assert.match(joined, /-c:v libx264/);
+  /*
+   * Either encoder is correct. Which one is chosen depends on the machine —
+   * a card with an NVIDIA encoder gets h264_nvenc, everything else libx264 —
+   * so pinning the name made this test pass or fail on the hardware rather
+   * than on the code.
+   */
+  assert.match(joined, /-c:v (?:libx264|h264_nvenc)/);
   assert.match(joined, /-g 144/, 'a keyframe every six seconds at 24fps');
   assert.match(joined, /-pix_fmt yuv420p/, '10-bit output would defeat the purpose');
 });

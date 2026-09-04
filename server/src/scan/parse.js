@@ -104,6 +104,20 @@ const JUNK_FOLDERS = [
   /^covers?$/i,
   /^\.@__thumb$/i,
   /^bdmv$/i,
+  /*
+   * A ripped DVD is one disc, not twenty films.
+   *
+   * VIDEO_TS holds .vob fragments split at arbitrary gigabyte boundaries, so
+   * every one of them arrived as a separate title: "VTS 01 1", "VTS 01 2". The
+   * damage went further than clutter — a show with two DVD seasons beside two
+   * ordinary ones had 43 fragments against 22 episodes, which pushed the
+   * proportion of recognisable episodes under the threshold and made the
+   * scanner read the whole show as a pile of films.
+   *
+   * Blu-ray's BDMV was already skipped for the same reason; this is the same
+   * rule applied to the other disc format.
+   */
+  /^video_ts$/i,
   /^certificate$/i,
 ];
 
@@ -229,6 +243,26 @@ export function findYear(normalized) {
     const year = Number(m[1]);
     if (year >= EARLIEST_YEAR && year <= CURRENT_YEAR + 2) {
       return { year, index: m.index, length: m[0].length };
+    }
+  }
+
+  /*
+   * A run of years is a run, not two dates.
+   *
+   * "Batman The Animated Series (TV Series 1992-1995) S01-S04" was read from
+   * the back, so 1995 was taken as the year and everything before it as the
+   * title — leaving "Batman The Animated Series (TV Series 1992", which no
+   * database recognises and which therefore arrived with no artwork at all.
+   * The year wanted is the one the series started, and the whole span is
+   * release furniture that belongs behind the title, not in it.
+   */
+  const span = normalized.match(/(?<![A-Za-z0-9])(\d{4})\s*[-–—]\s*(\d{4})(?![0-9])/);
+  if (span) {
+    const first = Number(span[1]);
+    const second = Number(span[2]);
+    const plausible = (value) => value >= 1920 && value <= CURRENT_YEAR + 2;
+    if (plausible(first) && plausible(second) && second >= first) {
+      return { year: first, index: span.index, length: span[0].length };
     }
   }
 
@@ -467,6 +501,16 @@ export function parseTitle(rawName, { isFile = false } = {}) {
   if (year) {
     // Everything before the year is the title; the tail is release metadata.
     text = text.slice(0, year.index);
+  }
+
+  /*
+   * A bracket opened and never closed was holding the year that has just been
+   * cut away — "Batman The Animated Series (TV Series " — and whatever it
+   * introduced was describing the release, not naming the show.
+   */
+  const opened = text.lastIndexOf('(');
+  if (opened >= 0 && !text.slice(opened).includes(')')) {
+    text = text.slice(0, opened);
   }
 
   const title = stripReleaseTokens(text);

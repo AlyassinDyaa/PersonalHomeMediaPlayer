@@ -108,6 +108,26 @@ function classifyFolder(topFolder, videos) {
  * Justice League Unlimited. Episodes are therefore grouped by the series title
  * parsed from the *files*, not by the folder they happen to sit in.
  */
+/**
+ * Whether one series name is the other with words added to the end.
+ *
+ * Plain prefix matching needs the spacing to agree, and it does not: one
+ * release writes "Ultimate.Spiderman" and the next "Ultimate.Spider-Man.Web
+ * Warriors", which are the same show under a title change. Comparing with the
+ * spaces taken out sees through that.
+ *
+ * The length floor keeps short names from swallowing each other — without it a
+ * two-word name would claim anything starting with the same letters.
+ */
+function isExtensionOf(shorterKey, longerKey) {
+  if (longerKey.startsWith(shorterKey + ' ')) return true;
+
+  const compact = (key) => key.replace(/\s+/g, '');
+  const short = compact(shorterKey);
+  const long = compact(longerKey);
+  return short.length >= 8 && long.length > short.length && long.startsWith(short);
+}
+
 function buildSeriesFolders(topFolder, classification) {
   const { parsed, ratio, folderSaysSeries } = classification;
 
@@ -140,12 +160,28 @@ function buildSeriesFolders(topFolder, classification) {
   // "x-men" (S1, named "1x01") and "X-Men TAS" (S2-S5, named "201").
   // Overlapping seasons mean the opposite: two distinct shows that happen to
   // share a folder, such as Justice League and Justice League Unlimited.
-  const seasonsOf = (bucket) => new Set(bucket.items.map((p) => p.episode.season ?? 1));
+  /*
+   * Which episode slots a bucket claims — season and episode together.
+   *
+   * This compared seasons alone, and that read one show as two. "Ultimate
+   * Spider-Man" was retitled "Web Warriors" partway through its second series,
+   * so one folder holds S02E01-13 under the old name and S02E14-26 under the
+   * new one. Both touch season 2, so a season-level test called it an overlap
+   * and kept them apart — as two shows, one of them unmatched and without
+   * artwork.
+   *
+   * Sharing a season number means nothing; two shows in one folder collide on
+   * the *episodes* — Justice League and Justice League Unlimited both have an
+   * S01E01, and still separate correctly under this test.
+   */
+  const seasonsOf = (bucket) => new Set(
+    bucket.items.map((p) => (p.episode.season ?? 1) + ':' + p.episode.episode),
+  );
   for (let i = kept.length - 1; i > 0; i--) {
     for (let j = 0; j < i; j++) {
       const [a, b] = [kept[i], kept[j]];
       const [shorter, longer] = a.key.length <= b.key.length ? [a, b] : [b, a];
-      if (!longer.key.startsWith(`${shorter.key} `)) continue;
+      if (!isExtensionOf(shorter.key, longer.key)) continue;
 
       const seasonsA = seasonsOf(a);
       const overlaps = [...seasonsOf(b)].some((season) => seasonsA.has(season));
@@ -305,6 +341,14 @@ function mergeSeriesFolders(seriesFolders) {
       title,
       year,
       sourceFolders: folders.map((f) => f.topFolder),
+      /*
+       * Other names this show answers to, for when the chosen one draws a
+       * blank. Scene releases abbreviate inside the file names while spelling
+       * the show out on the folder — "TMNT.2003.S01E01.mkv" sitting inside
+       * "Teenage.Mutant.Ninja.Turtles.2003.COMPLETE" — and only one of those
+       * is a name any database has heard of.
+       */
+      titleCandidates: [...new Set(folders.flatMap((f) => f.titleCandidates ?? []))],
       root: folders[0].root,
       seasons: [...seasons.entries()]
         .sort((a, b) => a[0] - b[0])
@@ -339,7 +383,7 @@ function findMergeSuggestions(shows) {
       const a = shows[i];
       const b = shows[j];
       const [shorter, longer] = a.key.length <= b.key.length ? [a, b] : [b, a];
-      if (!longer.key.startsWith(`${shorter.key} `)) continue;
+      if (!isExtensionOf(shorter.key, longer.key)) continue;
 
       // Seasons that overlap mean these are probably distinct shows.
       const aSeasons = new Set(a.seasons.map((s) => s.number));

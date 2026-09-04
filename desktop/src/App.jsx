@@ -5,6 +5,10 @@ import Row from './components/Row.jsx';
 import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
+import Comics from './components/Comics.jsx';
+import ComicReader from './components/ComicReader.jsx';
+import { shelveByGenre } from './genres.js';
+import BrandRail from './components/BrandRail.jsx';
 import Settings from './components/Settings.jsx';
 import { headerPreview, brandColor } from './branding.js';
 import { useSwipe } from './useSwipe.js';
@@ -24,6 +28,7 @@ const VIEWS = [
   { id: 'home', label: 'Home' },
   { id: 'shows', label: 'TV Shows' },
   { id: 'movies', label: 'Movies' },
+  { id: 'comics', label: 'Comics' },
   { id: 'library', label: 'Library' },
 ];
 
@@ -42,28 +47,36 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     return VIEWS.some((entry) => entry.id === fromHash) ? fromHash : 'home';
   });
   const [detailId, setDetailId] = useState(null);
+  /** The comic open in the reader, which covers everything else. */
+  const [readingComic, setReadingComic] = useState(null);
   const [query, setQuery] = useState('');
 
   const [items, setItems] = useState([]);
   const [resume, setResume] = useState([]);
   const [favourites, setFavourites] = useState([]);
   const [genres, setGenres] = useState([]);
+  /** Shelves the user arranged by hand, in Settings. */
+  const [collections, setCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [scrolled, setScrolled] = useState(false);
   /** Whether each screen arranges titles by genre; set in Settings. */
   const [grouping, setGrouping] = useState({ movies: true, shows: true });
+  /** Whether the Comics tab is offered; set in Settings. */
+  const [showComics, setShowComics] = useState(true);
   const [libraryName, setLibraryName] = useState('');
   const [libraryColor, setLibraryColor] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, kept, genreList, settings] = await Promise.all([
+      const [allItems, continueWatching, kept, genreList, settings, shelves] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
         api.favourites(),
         api.genres(),
         api.settings().catch(() => ({})),
+        // A library with no collections is the normal case, not a failure.
+        api.collectionShelves().catch(() => []),
       ]);
       setLibraryName(settings.libraryName ?? '');
       setLibraryColor(settings.libraryColor ?? '');
@@ -71,10 +84,12 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         movies: settings.groupMoviesByGenre ?? true,
         shows: settings.groupShowsByGenre ?? true,
       });
+      setShowComics(settings.showComics !== false);
       setItems(allItems);
       setResume(continueWatching);
       setFavourites(kept);
       setGenres(genreList);
+      setCollections(shelves);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -131,6 +146,22 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
 
 
+  /**
+   * The tabs on offer.
+   *
+   * Comics can be turned off in Settings, and a view already open on it
+   * falls back to Home rather than leaving a tab selected that is no longer
+   * in the strip.
+   */
+  const tabs = useMemo(
+    () => VIEWS.filter((entry) => entry.id !== 'comics' || showComics),
+    [showComics],
+  );
+
+  useEffect(() => {
+    if (!showComics && view === 'comics') setView('home');
+  }, [showComics, view]);
+
   const searchable = view === 'movies' ? 'movie' : view === 'shows' ? 'show' : null;
 
   /** Titles matching the header search, scoped to the tab that is open. */
@@ -146,18 +177,97 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const movies = useMemo(() => items.filter((item) => item.kind === 'movie'), [items]);
   const shows = useMemo(() => items.filter((item) => item.kind === 'show'), [items]);
 
-  const featured = useMemo(() => {
+  /* Declared above the banner, which reads it to decide whether to rotate. */
+  const [openCategory, setOpenCategory] = useState(null);
+
+  /*
+   * The handful of titles the banner rotates through.
+   *
+   * Needs a backdrop and a description to fill the space, and is sorted by
+   * rating so the largest thing on screen is something worth showing. Titles
+   * with a logo are preferred — the banner is built around one — but only
+   * while there are enough of them to rotate through.
+   */
+  const heroPicks = useMemo(() => {
     const withArt = items.filter((item) => item.backdrop && item.overview);
-    if (!withArt.length) return items[0] ?? null;
-    // Stable per session rather than per render, so it does not flicker.
-    const index = Math.floor((Date.now() / 60000) % withArt.length);
-    return withArt[index];
+    const withLogo = withArt.filter((item) => item.logo);
+    const pool = withLogo.length >= 5 ? withLogo : withArt;
+    return [...pool]
+      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+      .slice(0, 10);
   }, [items]);
+
+  const [heroIndex, setHeroIndex] = useState(0);
+
+  // A rescan can shorten the list under us; start again rather than point past
+  // the end of it.
+  useEffect(() => { setHeroIndex(0); }, [heroPicks]);
+
+  /*
+   * Move along every twelve seconds.
+   *
+   * Only while the banner is actually on screen: rotating behind a detail page
+   * or a category would mean returning to a home screen that had silently
+   * changed underneath you.
+   */
+  useEffect(() => {
+    const visible = view === 'home' && !openCategory && !detailId && !query.trim();
+    if (!visible || heroPicks.length < 2) return undefined;
+
+    const timer = setInterval(
+      () => setHeroIndex((index) => (index + 1) % heroPicks.length),
+      12000,
+    );
+    return () => clearInterval(timer);
+  }, [heroPicks, view, openCategory, detailId, query]);
+
+  const featured = heroPicks[heroIndex] ?? heroPicks[0] ?? items[0] ?? null;
 
   const recentlyAdded = useMemo(
     () => [...items].sort((a, b) => (b.year ?? 0) - (a.year ?? 0)).slice(0, 24),
     [items],
   );
+
+  /**
+   * The genre rails on the home page.
+   *
+   * Short shelves are left out rather than shown as a rail of one or two, and
+   * only the largest handful are kept, because the page already carries
+   * Continue Watching, Your List and the rest above them.
+   */
+  const genreRails = useMemo(
+    () => shelveByGenre(items).filter((rail) => rail.entries.length >= 3).slice(0, 8),
+    [items],
+  );
+
+  /*
+   * Universes: DC, Marvel and the rest, worked out from the titles.
+   *
+   * Computed over everything rather than per kind, so a universe tile covers
+   * both its films and its shows — which is how somebody thinks about them.
+   */
+  /*
+   * Badged shelves are the ones with a logo on them.
+   *
+   * These used to be worked out from the titles, and it did real damage:
+   * Pixar's patterns took "Batman: The Brave and the Bold", "Captain America:
+   * Brave New World" and "Guns Up" — three titles from three different places,
+   * none of them Pixar — and because Pixar was listed first it took them off
+   * the shelves where they belonged. No pattern list survives contact with a
+   * real library. A shelf is now something a person made and named.
+   */
+  const badged = useMemo(
+    () => collections.filter((collection) => collection.logo),
+    [collections],
+  );
+
+  // A category stops existing when the library is rescanned into a different
+  // shape, and a screen showing a shelf that is no longer there is a dead end.
+  useEffect(() => {
+    if (!openCategory) return;
+    const still = collections.some((entry) => entry.id === openCategory.id);
+    if (!still) setOpenCategory(null);
+  }, [collections, openCategory]);
 
   const topRated = useMemo(
     () => [...items].filter((i) => i.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, 24),
@@ -237,6 +347,16 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     if (target) playItem(target);
   }, [loading, items, playItem]);
 
+  /** Open a comic, fetching what the reader needs to step through a series. */
+  const readComic = useCallback((issue) => {
+    const id = typeof issue === "string" ? issue : issue.id;
+    api.comicIssue(id)
+      .then(setReadingComic)
+      // Without the neighbours the reader still works, just without
+      // "next issue" at the end.
+      .catch(() => setReadingComic(typeof issue === "string" ? null : issue));
+  }, []);
+
   const openDetail = useCallback((entry) => {
     const item = entry.item ?? entry;
     setDetailId(item.id);
@@ -249,8 +369,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
    * where a desktop would reach for the Back button.
    */
   const step = (direction) => {
-    const at = VIEWS.findIndex((entry) => entry.id === view);
-    const next = VIEWS[at + direction];
+    const at = tabs.findIndex((entry) => entry.id === view);
+    const next = tabs[at + direction];
     if (next) goto(next.id);
   };
 
@@ -270,10 +390,27 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     window.scrollTo(0, 0);
   };
 
+  /*
+   * A comic being read takes the whole screen and nothing else is drawn.
+   *
+   * Keyed on the issue so moving to the next one starts the reader afresh
+   * rather than leaving the previous comic's page number behind.
+   */
+  if (readingComic) {
+    return (
+      <ComicReader
+        key={readingComic.id}
+        issue={readingComic}
+        onClose={() => setReadingComic(null)}
+        onOpenIssue={readComic}
+      />
+    );
+  }
+
   if (detailId) {
     return (
       <>
-        <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled
+        <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} scrolled
              brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
@@ -292,7 +429,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   return (
     <>
-      <Nav view={view} goto={goto} query={query} setQuery={setQuery} scrolled={scrolled}
+      <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} scrolled={scrolled}
            brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
 
       <div className="view" key={view + (query.trim() ? ':search' : '')} {...swipe}>
@@ -333,9 +470,31 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         </>
       )}
 
-      {!loading && !query.trim() && view === 'home' && items.length > 0 && (
+      {/* One category, opened from a tile. */}
+      {!loading && view === 'home' && openCategory && (
+        <Browse
+          title={openCategory.name}
+          items={openCategory.items}
+          onSelect={openDetail}
+          renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>}
+          query={query}
+          groupByGenre={false}
+          onBack={() => setOpenCategory(null)}
+        />
+      )}
+
+      {!loading && !query.trim() && !openCategory && view === 'home' && items.length > 0 && (
         <>
-          <Hero item={featured} onPlay={playItem} onDetails={openDetail} />
+          <Hero
+            item={featured}
+            onPlay={playItem}
+            onDetails={openDetail}
+            dots={{
+              count: heroPicks.length,
+              index: heroIndex,
+              onSelect: setHeroIndex,
+            }}
+          />
           <div className="rows">
             <Row
               title="Continue Watching"
@@ -352,8 +511,36 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
             />
             <Row title="Your List" items={favourites} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
+            {/*
+              * The user's own shelves, above everything the library worked out
+              * for itself. Somebody who took the trouble to arrange a shelf
+              * means it more than any genre we inferred.
+              */}
+            {collections.filter((entry) => !entry.logo).map((collection) => (
+              <Row key={collection.id} title={collection.name} items={collection.items}
+                   onSelect={openDetail}
+                   renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
+            ))}
             <Row title="Recently Released" items={recentlyAdded} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
+
+            {/*
+              * Universes as tiles, and the two kinds beside them.
+              *
+              * These were three more rails of posters in a screen already made
+              * of rails, so nothing stood out and the shelves below were never
+              * reached. As tiles they read as places rather than as more of the
+              * same, and DC and Marvel say far more about this library than
+              * "Animation" ever did.
+              */}
+            {/*
+              * The shelves you badged, as a rail of logos — the row of
+              * providers people already know from streaming apps. Only
+              * collections with a logo appear here; the rest keep an ordinary
+              * poster rail lower down, so badging one is how you promote it.
+              */}
+            <BrandRail title="Collections" categories={badged} onOpen={setOpenCategory} />
+
             <Row title="TV Shows" items={shows} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             <Row title="Movies" items={movies} onSelect={openDetail}
@@ -361,16 +548,28 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
             <Row title="Top Rated" items={topRated} onSelect={openDetail}
                  renderLabel={(item) => <><strong>{item.title}</strong>{item.rating?.toFixed(1)}</>} />
 
-            {genres.slice(0, 8).map((genre) => {
-              const inGenre = items.filter((item) => item.genres.includes(genre.name));
-              if (inGenre.length < 3) return null;
-              return (
-                <Row key={genre.name} title={genre.name} items={inGenre} onSelect={openDetail}
-                     renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
-              );
-            })}
+            {/*
+              * Genre rails, each title on one shelf only.
+              *
+              * These used to list every title carrying the genre, so the same
+              * show appeared under Action, then Adventure, then Animation —
+              * three rails deep in the same posters. Each title now sits under
+              * whichever of its genres is rarest in the library, which is both
+              * the more telling shelf and the one that stops the repetition.
+              */}
+            <BrandRail
+              title="Genres"
+              categories={genreRails.map((rail) => ({
+                id: 'genre-' + rail.name, name: rail.name, items: rail.entries,
+              }))}
+              onOpen={setOpenCategory}
+            />
           </div>
         </>
+      )}
+
+      {!loading && view === 'comics' && (
+        <Comics onRead={readComic} query={query} />
       )}
 
       {!loading && view === 'library' && (
@@ -404,12 +603,12 @@ const SEARCH_PLACEHOLDER = {
   library: 'Search your library',
 };
 
-function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor }) {
+function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs }) {
   return (
     <nav className={scrolled ? 'nav scrolled' : 'nav'}>
       <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>
       <div className="nav-links">
-        {VIEWS.map((entry) => (
+        {tabs.map((entry) => (
           <button
             key={entry.id}
             className={view === entry.id ? 'nav-link active' : 'nav-link'}

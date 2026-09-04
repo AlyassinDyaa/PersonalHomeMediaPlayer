@@ -46,17 +46,53 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  *   TTL is ignored. Used as an offline fallback: out-of-date metadata is far
  *   better than none, which would otherwise strip a title of its identity.
  */
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+/**
+ * How long a cached answer can be trusted.
+ *
+ * A month is right for something finished — a series that ended in 2003 will
+ * not gain an episode — but wrong for one going out weekly. "Lanterns" was
+ * read while episode 3 was still unaired, so it was stored as "Episode 3" with
+ * no picture; the episode aired three days later and the library went on
+ * showing the blank because the cached season had another twenty-five days to
+ * run.
+ *
+ * A season still receiving episodes is therefore kept for a day instead. The
+ * test is the season's own air dates: anything due, or aired recently enough
+ * that its details are probably still being filled in, means come back sooner.
+ */
+function ageLimitFor(body) {
+  const episodes = body?.episodes;
+  if (!Array.isArray(episodes) || !episodes.length) return CACHE_TTL_MS;
+
+  const settled = Date.now() - 14 * DAY_MS;
+  const stillArriving = episodes.some((episode) => {
+    if (!episode.air_date) return true; // No date yet: certainly not settled.
+    const aired = Date.parse(episode.air_date + 'T00:00:00Z');
+    return !Number.isFinite(aired) || aired > settled;
+  });
+
+  return stillArriving ? DAY_MS : CACHE_TTL_MS;
+}
+
 function cacheGet(url, { allowStale = false } = {}) {
   const row = getDb()
     .prepare('SELECT body, fetched_at FROM tmdb_cache WHERE url = ?')
     .get(url);
   if (!row) return null;
-  if (!allowStale && now() - Number(row.fetched_at) > CACHE_TTL_MS) return null;
+
+  let body;
   try {
-    return JSON.parse(row.body);
+    body = JSON.parse(row.body);
   } catch {
     return null;
   }
+
+  // Judged on what was stored: a season still gaining episodes goes stale in a
+  // day, everything else keeps the long life it had.
+  if (!allowStale && now() - Number(row.fetched_at) > ageLimitFor(body)) return null;
+  return body;
 }
 
 function cachePut(url, body) {

@@ -38,6 +38,16 @@ async function request(pathname, options) {
   return response.json();
 }
 
+/** The image for one page of a comic. */
+export function comicPage(issueId, index) {
+  return apiBase + '/api/comics/issue/' + encodeURIComponent(issueId) + '/page/' + index;
+}
+
+/** The cover of a comic, at shelf size. */
+export function comicCover(issueId) {
+  return apiBase + '/api/comics/issue/' + encodeURIComponent(issueId) + '/cover';
+}
+
 /** Absolute base URL, needed for EventSource which cannot use a relative path. */
 export function apiBaseUrl() {
   return apiBase;
@@ -77,6 +87,37 @@ export const api = {
       body: JSON.stringify({ action }),
     }),
 
+  /** Badges a collection can wear, from the metadata provider's companies. */
+  searchLogos: (q) => request('/api/logos/search?q=' + encodeURIComponent(q)),
+
+  // --- collections --------------------------------------------------------
+  collections: () => request('/api/collections'),
+  /** The rails with their titles, for the home screen. */
+  collectionShelves: () => request('/api/collections/shelves'),
+  collectionItems: (id) => request('/api/collections/' + encodeURIComponent(id)),
+  createCollection: (body) => request('/api/collections', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  updateCollection: (id, body) => request('/api/collections/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  deleteCollection: (id) =>
+    request('/api/collections/' + encodeURIComponent(id), { method: 'DELETE' }),
+  addToCollection: (id, itemId) =>
+    request('/api/collections/' + encodeURIComponent(id) + '/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemId }),
+    }),
+  removeFromCollection: (id, itemId) => request(
+    '/api/collections/' + encodeURIComponent(id) + '/items/' + encodeURIComponent(itemId),
+    { method: 'DELETE' },
+  ),
+
   favourites: () => request('/api/favourites'),
   setFavourite: (itemId, favourite) =>
     request('/api/items/' + encodeURIComponent(itemId) + '/favourite', {
@@ -111,6 +152,21 @@ export const api = {
     '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0))
     + '&audio=' + audioTrack,
   ),
+  // --- comics -------------------------------------------------------------
+  comics: () => request('/api/comics'),
+  comicSeries: (id) => request('/api/comics/series/' + encodeURIComponent(id)),
+  comicIssue: (id) => request('/api/comics/issue/' + encodeURIComponent(id)),
+  /** Ask for a comic to be made ready; comes back with the page count. */
+  openComic: (id) => request(
+    '/api/comics/issue/' + encodeURIComponent(id) + '/open', { method: 'POST' },
+  ),
+  saveComicProgress: (body) => request('/api/comics/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }),
+  scanComics: () => request('/api/comics/scan', { method: 'POST' }),
+
   genres: () => request('/api/genres'),
   search: (query) => request('/api/search?q=' + encodeURIComponent(query)),
   suggestions: () => request('/api/suggestions'),

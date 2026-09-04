@@ -84,6 +84,19 @@ const dataDir = process.env.MEDIA_DATA_DIR
   ?? defaults.dataDir
   ?? path.join(PROJECT_ROOT, 'data');
 
+/**
+ * Tidy a list of folders: one separator, no trailing slash, no blanks, no
+ * repeats. Shared by the film roots and the comic roots, which want the same
+ * treatment and used to have two copies of it.
+ */
+function normaliseRoots(roots) {
+  return [...new Set(
+    (Array.isArray(roots) ? roots : [])
+      .filter((root) => typeof root === 'string' && root.trim())
+      .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
+  )];
+}
+
 export const config = {
   /** Directories to scan. A missing root is reported, not fatal. */
   libraryRoots: (process.env.MEDIA_LIBRARY_ROOTS?.split(path.delimiter).filter(Boolean))
@@ -117,6 +130,23 @@ export const config = {
    */
   skipIntroEnabled: local.skipIntroEnabled ?? defaults.skipIntroEnabled ?? true,
   skipOutroEnabled: local.skipOutroEnabled ?? defaults.skipOutroEnabled ?? true,
+
+  /**
+   * Folders holding comics.
+   *
+   * Separate from libraryRoots because they are a different medium read by
+   * different code: pointing the video scanner at a shelf of .cbr files would
+   * find nothing, and pointing the comic scanner at a film folder the same.
+   */
+  comicRoots: normaliseRoots(local.comicRoots ?? defaults.comicRoots ?? []),
+
+  /**
+   * Whether the Comics tab is offered at all.
+   *
+   * A library of films and nothing else should not carry a tab that opens on
+   * an empty shelf.
+   */
+  showComics: local.showComics ?? defaults.showComics ?? true,
 
   /*
    * Whether the Movies and TV Shows screens arrange titles under genre
@@ -231,12 +261,11 @@ export function saveSettings(patch) {
   const allowed = {};
 
   if (Array.isArray(patch.libraryRoots)) {
-    // Normalise separators and drop blanks and duplicates.
-    allowed.libraryRoots = [...new Set(
-      patch.libraryRoots
-        .filter((root) => typeof root === 'string' && root.trim())
-        .map((root) => root.trim().replace(/\\/g, '/').replace(/\/+$/, '')),
-    )];
+    allowed.libraryRoots = normaliseRoots(patch.libraryRoots);
+  }
+  if (typeof patch.showComics === 'boolean') allowed.showComics = patch.showComics;
+  if (Array.isArray(patch.comicRoots)) {
+    allowed.comicRoots = normaliseRoots(patch.comicRoots);
   }
   if (typeof patch.groupMoviesByGenre === 'boolean') allowed.groupMoviesByGenre = patch.groupMoviesByGenre;
   if (typeof patch.groupShowsByGenre === 'boolean') allowed.groupShowsByGenre = patch.groupShowsByGenre;
@@ -307,6 +336,12 @@ export function settingsView() {
     libraryColor: config.libraryColor,
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
+    comicRoots: config.comicRoots,
+    showComics: config.showComics,
+    comicRootsStatus: config.comicRoots.map((root) => ({
+      path: root,
+      available: fs.existsSync(root),
+    })),
     groupMoviesByGenre: config.groupMoviesByGenre,
     groupShowsByGenre: config.groupShowsByGenre,
     libraryRoots: config.libraryRoots,

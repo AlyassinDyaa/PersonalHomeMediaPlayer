@@ -10,7 +10,10 @@ import Card from './Card.jsx';
  * ignore every `::-webkit-scrollbar` rule, which produced a bright white bar
  * under each row.
  */
-export function Row({ title, items, onSelect, wide = false, renderLabel = null, onRemove = null }) {
+export function Row({
+  title, items, onSelect, wide = false, renderLabel = null, onRemove = null,
+  renderImage = null, onSeeAll = null,
+}) {
   const scroller = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
   const [canRight, setCanRight] = useState(false);
@@ -45,6 +48,10 @@ export function Row({ title, items, onSelect, wide = false, renderLabel = null, 
       <div className="row-header">
         <h2 className="row-title">{title}</h2>
         <span className="row-count">{items.length}</span>
+        {/* A shelf too long for one rail can be opened in full. */}
+        {onSeeAll && (
+          <button className="chip row-see-all" onClick={onSeeAll}>See all</button>
+        )}
       </div>
 
       <div className="row-viewport">
@@ -64,6 +71,9 @@ export function Row({ title, items, onSelect, wide = false, renderLabel = null, 
                 wide={wide}
                 progress={entry.progressPercent ?? null}
                 label={renderLabel ? renderLabel(entry) : null}
+                // Comics keep their covers somewhere else entirely, so a rail
+                // can be told where to find the picture for each tile.
+                image={renderImage ? renderImage(entry) : null}
                 onClick={() => onSelect(entry)}
                 onRemove={onRemove ? () => onRemove(entry) : null}
                 removeLabel="Remove from Continue Watching"

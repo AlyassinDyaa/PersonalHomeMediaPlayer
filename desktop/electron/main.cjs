@@ -12,6 +12,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron
 const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
+const net = require('node:net');
 const { startServerProcess } = require('./server-process.cjs');
 const { moveWindowTo, releaseWindowMover } = require('./window-move.cjs');
 const {
@@ -34,6 +35,8 @@ let player = null;
 let overlayState = { title: '', subtitles: [], audioTracks: [] };
 let serverChild = null;
 let serverPort = 8787;
+/** True when the server was already running and this app merely joined it. */
+let adoptedServer = false;
 let mpvPath = null;
 let startMuted = false;
 /** Upcoming videos, so the player can advance without asking the UI. */
@@ -240,6 +243,43 @@ async function relocateDataDir(target) {
   return { ok: true, dataDir: destination, adopted: outcome.adopted };
 }
 
+/**
+ * Whether a library server is already answering on this port.
+ *
+ * The server can be run on its own — as a logon task, so a phone or tablet
+ * keeps working with no window open on the computer. When it is, the app must
+ * join that one rather than start a second: two servers cannot hold the same
+ * port, and the second would lose the race and leave the app with nothing.
+ */
+async function serverAlreadyRunning(port) {
+  /*
+   * Ask the socket, not the HTTP layer.
+   *
+   * This first tried fetching /api/health, and in the packaged app it decided
+   * nothing was listening when something plainly was — so the app started a
+   * second server which then lost the race for the port and sat there useless.
+   * Whatever the cause inside Electron's main process, a health check is the
+   * wrong question: the thing that decides whether a second server can start
+   * is whether the port is free, and a TCP connection answers that directly.
+   *
+   * Anything holding the port means ours must not start. Refusing to spawn is
+   * right even in the odd case where the listener is not our server: a second
+   * one could not bind either way, and this at least fails visibly.
+   */
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ port, host: '127.0.0.1' });
+    const done = (answer) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(answer);
+    };
+    socket.setTimeout(2000);
+    socket.once('connect', () => done(true));
+    socket.once('timeout', () => done(false));
+    socket.once('error', () => done(false)); // Refused: the port is free.
+  });
+}
+
 async function startApiServer() {
   const config = readConfig();
   serverPort = Number(process.env.PORT || config.port || 8787);
@@ -253,6 +293,14 @@ async function startApiServer() {
   // library can live on whichever drive has room for it.
   const dataDir = config.dataDir || path.join(writableDir, 'data');
   console.log('Data folder: ' + dataDir + (isPortable() ? ' (portable)' : ''));
+
+  // A server started outside the app owns its own lifetime: it was here first
+  // and must still be here after this window closes.
+  if (await serverAlreadyRunning(serverPort)) {
+    adoptedServer = true;
+    console.log('Joined the library server already running on port ' + serverPort);
+    return;
+  }
 
   const started = await startServerProcess({
     nodePath: bundledBinary('runtime', 'node.exe'),
@@ -276,6 +324,9 @@ async function startApiServer() {
 }
 
 function stopApiServer() {
+  // Someone else's server keeps running after this window closes; that is the
+  // whole point of having started it separately.
+  if (adoptedServer) return;
   if (serverChild && serverChild.exitCode === null) {
     serverChild.kill();
     serverChild = null;

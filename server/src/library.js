@@ -54,7 +54,7 @@ function parseJsonColumn(value, fallback) {
   }
 }
 
-function shapeItem(row) {
+export function shapeItem(row) {
   return {
     id: row.id,
     kind: row.kind,
@@ -161,14 +161,19 @@ export function getItem(id) {
     'SELECT * FROM seasons WHERE item_id = ? ORDER BY number ASC',
   ).all(id);
 
-  item.seasons = seasonRows.map((season) => ({
-    number: season.number,
-    name: season.name || 'Season ' + season.number,
-    overview: season.overview,
-    poster: season.poster_path,
-    airDate: season.air_date,
-    episodes: videos.filter((video) => video.season === season.number),
-  }));
+  item.seasons = seasonRows
+    .map((season) => ({
+      number: season.number,
+      name: season.name || 'Season ' + season.number,
+      overview: season.overview,
+      poster: season.poster_path,
+      airDate: season.air_date,
+      episodes: videos.filter((video) => video.season === season.number),
+    }))
+    // A season with nothing in it is a tab that opens on an empty list. The
+    // scan clears these away, but a folder can be deleted between scans, and
+    // the shelf should be honest in the meantime.
+    .filter((season) => season.episodes.length > 0);
 
   // Next unwatched episode, which is what the play button should target.
   item.nextUp = videos.find((video) => !video.watched && video.position === 0)

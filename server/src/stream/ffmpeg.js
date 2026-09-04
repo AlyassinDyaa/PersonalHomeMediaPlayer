@@ -7,6 +7,7 @@
  * prefer.
  */
 
+import { execFileSync } from 'node:child_process';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,4 +109,47 @@ export function probeFile(filePath) {
       resolve(parsed);
     });
   });
+}
+
+/**
+ * The best H.264 encoder this machine actually has.
+ *
+ * Re-encoding on the processor is what makes "converting for this device" a
+ * wait: a graphics card does the same work many times faster and leaves the
+ * processor free for everything else the library is doing. Asked of ffmpeg
+ * once and remembered, because the answer cannot change while it runs, and
+ * because the question costs a process launch.
+ *
+ * Falls back to libx264, which is always present — a build without hardware
+ * support, or a machine without the card, still plays, just more slowly.
+ */
+let cachedEncoder;
+
+export function hardwareEncoder() {
+  if (cachedEncoder !== undefined) return cachedEncoder;
+
+  const { ffmpeg } = ffmpegPaths();
+  if (!ffmpeg) {
+    cachedEncoder = 'libx264';
+    return cachedEncoder;
+  }
+
+  try {
+    const listed = execFileSync(ffmpeg, ['-hide_banner', '-encoders'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+    // Order is preference: NVIDIA, then Intel, then AMD.
+    for (const candidate of ['h264_nvenc', 'h264_qsv', 'h264_amf']) {
+      if (listed.includes(candidate)) {
+        cachedEncoder = candidate;
+        return cachedEncoder;
+      }
+    }
+  } catch {
+    // Could not ask. The software encoder is the safe answer.
+  }
+
+  cachedEncoder = 'libx264';
+  return cachedEncoder;
 }

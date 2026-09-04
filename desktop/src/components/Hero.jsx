@@ -1,8 +1,19 @@
 import React from 'react';
 import { artwork, formatRuntime } from '../api.js';
 
-/** Featured banner at the top of the home screen. */
-export function Hero({ item, onPlay, onDetails }) {
+/**
+ * Featured banner at the top of the home screen.
+ *
+ * Shows one title at a time out of a handful, moving on by itself. The banner
+ * is the largest thing on the screen and was the same title every session,
+ * which wasted the space on something already seen; rotating it makes the top
+ * of the library a place where different things surface.
+ *
+ * `dots` carries the position in the rotation and a way to jump. It is
+ * optional: with one candidate there is nothing to page through and no dots
+ * are drawn.
+ */
+export function Hero({ item, onPlay, onDetails, dots = null }) {
   if (!item) return null;
 
   const backdrop = artwork(item.backdrop, 'w1280');
@@ -10,8 +21,18 @@ export function Hero({ item, onPlay, onDetails }) {
 
   return (
     <div className="hero">
-      <div className="hero-bg" style={backdrop ? { backgroundImage: 'url(' + backdrop + ')' } : undefined} />
-      <div className="hero-content">
+      {/*
+        * Keyed on the item so React swaps the element rather than mutating it,
+        * which lets the new backdrop fade in over the old one instead of
+        * snapping between them.
+        */}
+      <div
+        key={item.id}
+        className="hero-bg"
+        style={backdrop ? { backgroundImage: 'url(' + backdrop + ')' } : undefined}
+      />
+
+      <div className="hero-content" key={'content-' + item.id}>
         {logo
           ? <img className="hero-logo" src={logo} alt={item.title} />
           : <h1 className="hero-title">{item.title}</h1>}
@@ -32,6 +53,21 @@ export function Hero({ item, onPlay, onDetails }) {
           <button className="btn btn-secondary" onClick={() => onDetails(item)}>More Info</button>
         </div>
       </div>
+
+      {dots && dots.count > 1 && (
+        <div className="hero-dots">
+          {Array.from({ length: dots.count }, (_, index) => (
+            <button
+              key={index}
+              type="button"
+              className={index === dots.index ? 'hero-dot on' : 'hero-dot'}
+              aria-label={'Show featured title ' + (index + 1)}
+              aria-current={index === dots.index}
+              onClick={() => dots.onSelect(index)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

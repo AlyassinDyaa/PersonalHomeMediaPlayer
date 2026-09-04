@@ -101,6 +101,16 @@ async function resolveMetadata(item, scanKey) {
     let match = null;
     try {
       match = await findBestMatch(kind, { title: item.title, year: item.year });
+
+      // The name taken from the files is not always the name of the show. Try
+      // whatever else the folder called it before giving up on artwork.
+      if (!match) {
+        for (const alternate of item.titleCandidates ?? []) {
+          if (alternate === item.title) continue;
+          match = await findBestMatch(kind, { title: alternate, year: item.year });
+          if (match) break;
+        }
+      }
     } catch (error) {
       // Search is unavailable (typically offline). Reuse the id resolved on a
       // previous scan so this title keeps its identity, and therefore its id,
@@ -577,6 +587,32 @@ function persist(enriched, suggestions, scanId, startedAt) {
       .filter((row) => !seenItems.has(row.id));
     const deleteItem = db.prepare('DELETE FROM items WHERE id = ?');
     for (const row of staleItems) deleteItem.run(row.id);
+
+    /*
+     * Seasons and shows that no longer hold a single file.
+     *
+     * Deleting a folder leaves the rows describing it behind: the videos go,
+     * because they were not seen, but the season survives and the title keeps
+     * offering "Season 4 (0)" — a tab that opens on nothing. A show whose every
+     * file has gone should not be in the library at all.
+     *
+     * After the stale videos above, not before, or the counts would still
+     * include files that are on their way out.
+     */
+    const emptySeasons = db.prepare(`
+      SELECT s.id FROM seasons s
+      WHERE NOT EXISTS (SELECT 1 FROM videos v WHERE v.season_id = s.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM videos v WHERE v.item_id = s.item_id AND v.season = s.number
+        )
+    `).all();
+    const deleteSeason = db.prepare('DELETE FROM seasons WHERE id = ?');
+    for (const row of emptySeasons) deleteSeason.run(row.id);
+
+    const emptyItems = db.prepare(
+      'SELECT id FROM items WHERE NOT EXISTS (SELECT 1 FROM videos v WHERE v.item_id = items.id)',
+    ).all();
+    for (const row of emptyItems) deleteItem.run(row.id);
 
     db.prepare('DELETE FROM suggestions WHERE resolved = 0').run();
     const insertSuggestion = db.prepare(

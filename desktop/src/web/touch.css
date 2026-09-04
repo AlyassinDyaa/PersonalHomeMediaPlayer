@@ -178,6 +178,137 @@ html, body {
   white-space: nowrap;
 }
 
+/*
+ * Full screen puts this box, not the video, into the corner-to-corner state,
+ * so the controls go with it. The height then comes from the screen rather
+ * than the measured viewport, which no longer applies.
+ */
+.player:fullscreen,
+.player:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+}
+
+.player:fullscreen .player-video,
+.player:-webkit-full-screen .player-video {
+  /* Nothing is overlapping the bottom edge here, so the picture can use it. */
+  padding-bottom: 0;
+}
+
+/*
+ * The transport, along the bottom of the picture.
+ *
+ * Large targets and generous spacing because this is used with a thumb on a
+ * tablet held in two hands, not a mouse.
+ */
+.player-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 28px max(16px, env(safe-area-inset-left, 0))
+    calc(env(safe-area-inset-bottom, 0) + 14px);
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0) 100%);
+  transition: opacity 0.25s ease;
+}
+
+.player-bar.hidden { opacity: 0; pointer-events: none; }
+
+.player-key {
+  flex: 0 0 auto;
+  min-width: 46px;
+  height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.player-key:hover { background: rgba(255, 255, 255, 0.24); }
+
+.player-time {
+  flex: 0 0 auto;
+  color: #fff;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: center;
+}
+
+/* The strip itself, tall enough to be caught by a thumb. */
+/*
+ * The timeline, drawn rather than left to the browser.
+ *
+ * The default control is a hairline with a small thumb, which is hard to catch
+ * with a thumb on glass and gives no sense of how far through the film you
+ * are. This is a thicker track, filled to the current position, with a target
+ * big enough to grab without looking.
+ *
+ * touch-action matters most: without it iOS treats a drag along the bar as a
+ * gesture on the page and the scrub fights the scroll, which is what made it
+ * feel like it was sticking.
+ */
+.player-seek {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  touch-action: none;
+}
+
+.player-seek::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background:
+    linear-gradient(to right,
+      var(--accent, #e50914) 0 var(--played, 0%),
+      rgba(255, 255, 255, 0.28) var(--played, 0%) 100%);
+}
+
+.player-seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  /* Centres the thumb on a 6px track. */
+  margin-top: -6px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.55);
+  transition: transform 0.12s ease;
+}
+
+/* Grows under the finger, so the thumb is not hidden by it. */
+.player-seek:active::-webkit-slider-thumb { transform: scale(1.35); }
+
+.player-seek::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
+}
+.player-seek::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent, #e50914);
+}
+.player-seek::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+}
+
 /* Episode stepping and the sound-track chooser, pushed to the right. */
 .player-actions {
   margin-left: auto;
@@ -271,4 +402,64 @@ body:has(.player) { overflow: hidden; }
   .nav-links::-webkit-scrollbar { display: none; }
   .nav-link { white-space: nowrap; flex: 0 0 auto; }
   .search-box { max-width: 132px; }
+}
+
+/* ------------------------------------------------ transport on screen --- */
+
+/*
+ * Play and the two skips, over the middle of the picture.
+ *
+ * A tablet is held at the edges and the middle is where a thumb naturally
+ * falls; a 44px control in a strip along the bottom is the hardest place on
+ * the screen to hit. These are the three things wanted while watching, so they
+ * sit where they can be reached, and everything else stays in the bar.
+ */
+.player-touch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(28px, 9vw, 84px);
+  /* Only the buttons take taps; a tap anywhere else still toggles the chrome. */
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 0.22s ease;
+}
+
+.player-touch.hidden { opacity: 0; }
+
+.touch-key {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 68px;
+  height: 68px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(16, 16, 22, 0.56);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  transition: transform 0.14s ease, background 0.14s ease;
+}
+
+/* Play is the one reached for most, so it is the largest. */
+.touch-key.play { width: 88px; height: 88px; background: rgba(16, 16, 22, 0.66); }
+
+.touch-key:active { transform: scale(0.92); background: rgba(16, 16, 22, 0.8); }
+
+.touch-glyph { font-size: 24px; line-height: 1; }
+.touch-glyph.big { font-size: 34px; }
+.touch-num { font-size: 11px; font-weight: 700; letter-spacing: 0.4px; }
+
+.player-touch.hidden .touch-key { pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .player-touch, .touch-key { transition: none; }
 }

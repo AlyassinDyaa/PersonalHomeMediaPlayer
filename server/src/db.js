@@ -132,6 +132,91 @@ CREATE TABLE IF NOT EXISTS favorites (
   added_at INTEGER NOT NULL
 );
 
+-- Shelves arranged by hand.
+--
+-- A collection either lists its titles in collection_items, or names a folder
+-- and takes whatever is under it. folder_path is what tells the two apart:
+-- null means somebody picked the titles, a path means the disk decides.
+CREATE TABLE IF NOT EXISTS collections (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  folder_path TEXT,
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS collection_items (
+  collection_id TEXT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  item_id       TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  position      INTEGER NOT NULL DEFAULT 0,
+  added_at      INTEGER NOT NULL,
+  PRIMARY KEY (collection_id, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_items ON collection_items(collection_id, position);
+
+-- A universe's logo, once it has been found.
+--
+-- Remembered rather than fetched per page: the picture for "DC" does not
+-- change between scans, and a library opened without a network connection
+-- should still look like itself.
+CREATE TABLE IF NOT EXISTS universe_logos (
+  id         TEXT PRIMARY KEY,
+  company    TEXT NOT NULL,
+  logo_path  TEXT,
+  updated_at INTEGER NOT NULL
+);
+
+-- Comics.
+--
+-- Kept apart from items and videos rather than folded into them: a comic is
+-- a folder of archives read a page at a time, with no seasons, no episodes
+-- and no runtime, and the two would only be sharing the word "library".
+--
+-- A series is any folder that directly holds comic files. The shelf above it
+-- is remembered as a plain string, because that is what the folder tree
+-- already says and there is nothing to gain by modelling it twice.
+CREATE TABLE IF NOT EXISTS comic_series (
+  id         TEXT PRIMARY KEY,
+  title      TEXT NOT NULL,
+  sort_title TEXT NOT NULL,
+  shelf      TEXT NOT NULL DEFAULT '',
+  path       TEXT NOT NULL UNIQUE,
+  added_at   INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_comic_series_shelf ON comic_series(shelf);
+
+CREATE TABLE IF NOT EXISTS comic_issues (
+  id         TEXT PRIMARY KEY,
+  series_id  TEXT NOT NULL REFERENCES comic_series(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  number     REAL,
+  year       INTEGER,
+  path       TEXT NOT NULL UNIQUE,
+  format     TEXT NOT NULL,
+  size       INTEGER NOT NULL DEFAULT 0,
+  -- Filled in the first time the comic is opened, not during a scan: it
+  -- means reading the archive, and a library of a thousand issues would
+  -- turn a scan into an afternoon.
+  pages      INTEGER,
+  added_at   INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_comic_issues_series ON comic_issues(series_id);
+
+-- Where a reader got to, mirroring what progress does for video.
+CREATE TABLE IF NOT EXISTS comic_progress (
+  issue_id   TEXT PRIMARY KEY REFERENCES comic_issues(id) ON DELETE CASCADE,
+  series_id  TEXT NOT NULL REFERENCES comic_series(id) ON DELETE CASCADE,
+  page       INTEGER NOT NULL DEFAULT 0,
+  pages      INTEGER,
+  finished   INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL
+);
+
 -- Cached TMDB responses, so rescans do not re-hit the API.
 CREATE TABLE IF NOT EXISTS tmdb_cache (
   url        TEXT PRIMARY KEY,
@@ -158,6 +243,11 @@ let database = null;
  */
 const MIGRATIONS = [
   { table: 'videos', column: 'runtime', definition: 'INTEGER' },
+  // A collection's own badge: an image path at the metadata provider, and a
+  // colour to ring it with. Added after collections shipped, so existing
+  // libraries need the columns put on rather than the table rebuilt.
+  { table: 'collections', column: 'logo_path', definition: 'TEXT' },
+  { table: 'collections', column: 'accent', definition: 'TEXT' },
 ];
 
 function migrate(db) {

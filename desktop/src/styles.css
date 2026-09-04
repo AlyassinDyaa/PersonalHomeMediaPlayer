@@ -1260,3 +1260,468 @@ button {
   border: none;
   padding: 0;
 }
+
+/* ------------------------------------------------------------- comics --- */
+
+.comic-section { margin-bottom: 34px; }
+
+/* Covers are portrait and taller than a film poster, so they get their own
+   ratio rather than being squeezed into the 2:3 one. */
+.comic-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.comic-card .card-poster { aspect-ratio: 2 / 3; }
+
+.comic-list { display: flex; flex-direction: column; gap: 2px; }
+
+.comic-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.comic-row:hover { background: var(--surface-lift, rgba(255, 255, 255, 0.08)); }
+.comic-row span { color: var(--text-dim); font-size: 13px; }
+
+/* ------------------------------------------------------------- reader --- */
+
+/*
+ * The page fills the screen and everything else floats over it.
+ *
+ * Reading is the whole point here, so the artwork gets the room and the
+ * furniture appears when asked for and leaves again on its own.
+ */
+.reader {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  background: #07070a;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.reader-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  overflow: auto;
+  /* The sides turn the page, so a press must not be read as text selection. */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+
+/* Two pages open like a printed comic: the second is to the left when the
+   reading runs right to left. */
+.reader-stage.rtl { flex-direction: row-reverse; }
+
+.reader-page {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* Filling the width and scrolling down suits a page of dense panels better
+   than shrinking the whole thing to fit a short screen. */
+.reader-stage.fit-width { align-items: flex-start; }
+.reader-stage.fit-width .reader-page { max-height: none; width: 100%; }
+
+/* Fetched so the next turn is instant, never drawn. */
+.reader-preload { position: absolute; width: 0; height: 0; overflow: hidden; opacity: 0; }
+
+.reader-top,
+.reader-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px max(16px, env(safe-area-inset-left, 0));
+  transition: opacity 0.25s ease;
+}
+
+.reader-top {
+  top: 0;
+  padding-top: calc(env(safe-area-inset-top, 0) + 12px);
+  padding-bottom: 26px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.reader-bar {
+  bottom: 0;
+  padding-top: 26px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0) + 12px);
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0) 100%);
+}
+
+.reader-top.hidden,
+.reader-bar.hidden { opacity: 0; pointer-events: none; }
+
+/* A control that is currently on, so the two-page and right-to-left choices
+   read as switches rather than buttons that did nothing. */
+.player-step.on { background: var(--accent); color: #fff; }
+
+.reader-note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(7, 7, 10, 0.86);
+  text-align: center;
+  padding: 24px;
+}
+
+.reader-note p { margin: 0; color: var(--text-dim); }
+
+/*
+ * The zoomed page.
+ *
+ * Transformed rather than resized so the browser can hand the work to the
+ * graphics card; a two-thousand-pixel scan re-laid-out on every pinch frame is
+ * visibly slow.
+ */
+.reader-stage { transform-origin: center center; will-change: transform; touch-action: none; }
+
+/* "See all" sits at the end of a shelf's heading. */
+.row-see-all { margin-left: auto; }
+
+/* --- Settings: groups and collections ----------------------------------- */
+
+/*
+ * Ten cards stacked down one page meant scrolling past nine to reach the tenth.
+ * The same cards, behind six labels, put every setting two clicks away.
+ */
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  /* Inset to match .settings and .page-header, which both sit 42px in. */
+  padding: 0 42px;
+  margin: -6px 0 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-tabs::-webkit-scrollbar { display: none; }
+
+.settings-tab {
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-tab:hover { color: var(--text); border-color: var(--text-faint); }
+
+.settings-tab.is-active {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0b0b0f;
+}
+
+.collection-row {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--surface);
+}
+
+.collection-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.collection-name { font-size: 15px; font-weight: 650; color: var(--text); }
+.collection-meta { font-size: 12.5px; color: var(--text-faint); }
+
+.collection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.collection-actions .btn-ghost { padding: 5px 11px; font-size: 12.5px; }
+.collection-actions .danger:hover { color: #ff6b74; border-color: #ff6b74; }
+
+.collection-body {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.collection-members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.collection-members .chip { display: inline-flex; align-items: center; gap: 7px; }
+
+.chip-x {
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chip-x:hover { color: #ff6b74; }
+
+/* Capped so a large library cannot push the rest of the page off screen. */
+.collection-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.collection-candidates .btn-ghost { padding: 5px 11px; font-size: 12.5px; }
+
+.collection-new {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.collection-new h3 {
+  font-size: 14px;
+  font-weight: 650;
+  margin: 0 0 12px;
+  color: var(--text-dim);
+}
+
+/* -------------------------------------------------------- brand badges --- */
+
+/*
+ * Square badges in a rail, the way streaming apps show the services they carry.
+ *
+ * These replaced poster mosaics the height of a hero: two of those filled the
+ * screen, so the page was one decision deep and everything below went unseen.
+ * A badge is small enough that the whole set is taken in at once, which is the
+ * point of a category.
+ */
+
+.row-scroller.brands { gap: 14px; padding-top: 4px; padding-bottom: 18px; }
+
+.brand {
+  position: relative;
+  flex: 0 0 auto;
+  width: 148px;
+  height: 148px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  /* The brand's colour, lifted at the top so the badge has a light source
+     rather than sitting flat like a swatch. */
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 60%),
+    var(--brand-accent, #2a2a35);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.brand:hover, .brand:focus-visible {
+  transform: translateY(-4px);
+  border-color: rgba(255, 255, 255, 0.24);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.6);
+  outline: none;
+}
+
+.brand-mark {
+  font-size: 23px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  line-height: 1.05;
+  text-align: center;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  /* A long genre name shrinks rather than escaping the badge. */
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+.brand-mark:not(:first-letter) { font-size: inherit; }
+
+.brand-count {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+/*
+ * A badge showing a logo stands on a light chip.
+ *
+ * Company logos are drawn for print on white — Lucasfilm's is black line art
+ * on nothing at all — so on a dark field they range from weak to invisible.
+ * Guessing each logo's brightness and picking a background to suit would break
+ * the first time a new one did not fit the guess; a light chip is right for
+ * every logo a provider hands over, including ones not collected yet. The
+ * brand's colour stays as a ring, so the badge is still its own.
+ */
+.brand.has-logo {
+  background: #fbfbfd;
+  border-color: var(--brand-accent, rgba(0, 0, 0, 0.14));
+  box-shadow:
+    inset 0 0 0 2px var(--brand-accent, transparent),
+    0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.brand.has-logo .brand-count { color: #55555f; text-shadow: none; }
+.brand.has-logo:hover, .brand.has-logo:focus-visible {
+  box-shadow:
+    inset 0 0 0 2px var(--brand-accent, transparent),
+    0 14px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* Genres carry no brand colour, so they take the surface used elsewhere. */
+.brand:not([style]) { background: var(--bg-raised); }
+.brand:not([style]) .brand-mark { font-size: 17px; color: var(--text); text-shadow: none; }
+.brand:not([style]) .brand-count { color: var(--text-faint); }
+
+@media (pointer: coarse) {
+  .brand { width: 132px; height: 132px; }
+  .brand:hover { transform: none; }
+  .brand:active { transform: scale(0.96); }
+}
+
+/* Sits level with the title it returns from, rather than on the baseline. */
+.btn-back { align-self: center; padding: 7px 14px; font-size: 13px; }
+
+/* A logo sits inside the badge with room to breathe, never cropped. */
+.brand-logo {
+  max-width: 82%;
+  max-height: 58%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ---------------------------------------------- a collection's badge --- */
+
+.collection-logo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.collection-logo-current { display: flex; align-items: center; gap: 12px; }
+
+/* On white, because company logos are drawn for print on white — several are
+   black line art and would vanish on the surface used everywhere else. */
+.collection-logo-current img {
+  width: 96px; height: 54px; object-fit: contain;
+  background: #fbfbfd; border-radius: 8px; padding: 6px;
+}
+
+.collection-logo-search { display: flex; gap: 8px; }
+.collection-logo-search .key-input { flex: 1; }
+
+.collection-logo-results { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.logo-option {
+  width: 92px; height: 52px; padding: 6px;
+  background: #fbfbfd; border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer;
+}
+.logo-option:hover { border-color: var(--brand); }
+.logo-option img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+/* ------------------------------------------------- rotating banner --- */
+
+/*
+ * The backdrop fades in rather than cutting.
+ *
+ * React swaps the element because it is keyed on the title, so each new
+ * backdrop starts transparent and comes up over the one leaving. A cut at this
+ * size reads as a glitch; a fade reads as the page turning.
+ */
+.hero-bg { animation: hero-fade 900ms ease both; }
+.hero-content { animation: hero-rise 620ms ease both; }
+
+@keyframes hero-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.hero-dots {
+  position: absolute;
+  right: 42px;
+  bottom: 26px;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+}
+
+.hero-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.34);
+  cursor: pointer;
+  transition: background 0.2s ease, width 0.2s ease;
+}
+.hero-dot:hover { background: rgba(255, 255, 255, 0.62); }
+
+/* The current one is a lozenge, so position is readable without counting. */
+.hero-dot.on { width: 22px; border-radius: 4px; background: var(--brand); }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-bg, .hero-content { animation: none; }
+  .hero-dot { transition: none; }
+}
+
+@media (pointer: coarse) {
+  .hero-dots { right: 20px; bottom: 18px; }
+  .hero-dot { width: 10px; height: 10px; }
+  .hero-dot.on { width: 24px; }
+}

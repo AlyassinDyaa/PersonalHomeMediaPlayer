@@ -11,6 +11,8 @@
  * or a network.
  */
 
+import { hardwareEncoder } from './ffmpeg.js';
+
 /** Video codecs Safari decodes, given an acceptable container. */
 const PLAYABLE_VIDEO = new Set(['h264', 'hevc']);
 
@@ -117,6 +119,46 @@ export function hlsArguments(plan, options) {
 
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin'];
 
+  /*
+   * Decode on the graphics card too, not just encode.
+   *
+   * Measured on an AV1 film: encoding on the card alone moved 2.6x real time
+   * to 2.9x, because the wait was never the encoding — it was unpacking AV1 in
+   * software. Decoding on the card as well took the same file to 10x. The card
+   * has to do both halves before it is worth anything.
+   *
+   * Only when the picture is actually being re-encoded: a copied stream is
+   * never decoded, so this would ask the card to open a file for no reason.
+   * Plain -hwaccel (rather than pinning the frames to card memory) falls back
+   * to software by itself for a codec the card cannot read, which keeps an
+   * unusual file playing instead of failing.
+   */
+  if (plan.video === 'encode') {
+    const decoders = {
+      h264_nvenc: 'cuda',
+      h264_qsv: 'qsv',
+      h264_amf: 'd3d11va',
+    };
+    const hwaccel = decoders[hardwareEncoder()];
+    if (hwaccel) args.push('-hwaccel', hwaccel);
+  }
+
+  /*
+   * Run ahead of the viewer, but not flat out.
+   *
+   * Left uncapped, one stream reads a film as fast as the disk will go — over
+   * forty times playback speed — and a second stream on the same drive halves
+   * both. Measured on an external drive: alone it managed 46x, but with
+   * several running the one being watched fell to 0.4x, slower than playback,
+   * which is a stall. Ten times playback builds a comfortable buffer and still
+   * leaves the drive with room to spare.
+   *
+   * The burst is what keeps starting quick: the opening minute is read as fast
+   * as possible, so the first segments appear immediately and the cap only
+   * applies once there is already something to watch.
+   */
+  args.push('-readrate', '10', '-readrate_initial_burst', '60');
+
   // Seeking before the input is the fast form: ffmpeg jumps rather than
   // decoding its way there, which matters on a two hour file.
   if (startSeconds > 0) args.push('-ss', String(startSeconds));
@@ -129,10 +171,31 @@ export function hlsArguments(plan, options) {
   if (plan.video === 'copy') {
     args.push('-c:v', 'copy');
   } else {
+    /*
+     * Re-encode on the graphics card where there is one.
+     *
+     * Quality is asked for differently by each: x264 takes -crf, NVIDIA and
+     * AMD take their own constant-quality knob, and Intel takes a global
+     * quality. Passing the wrong one is not ignored — ffmpeg refuses to start,
+     * which would be a video that never plays rather than one that plays
+     * slowly, so each gets its own flags rather than a shared guess.
+     */
+    const encoder = hardwareEncoder();
+    args.push('-c:v', encoder);
+
+    if (encoder === 'h264_nvenc') {
+      args.push('-preset', 'p4', '-rc', 'vbr', '-cq', '23');
+    } else if (encoder === 'h264_qsv') {
+      args.push('-global_quality', '23');
+    } else if (encoder === 'h264_amf') {
+      args.push('-quality', 'balanced', '-rc', 'vbr_peak');
+    } else {
+      // libx264: scene-cut detection has to be off or keyframes wander off the
+      // segment boundaries.
+      args.push('-preset', 'veryfast', '-crf', '21', '-sc_threshold', '0');
+    }
+
     args.push(
-      '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '21',
       // A cap keeps an old cartoon from being encoded at a bitrate no home
       // network benefits from.
       '-maxrate', '6M',
@@ -141,7 +204,6 @@ export function hlsArguments(plan, options) {
       // Keyframes on segment boundaries, so every segment stands alone.
       '-g', String(segmentSeconds * 24),
       '-keyint_min', String(segmentSeconds * 24),
-      '-sc_threshold', '0',
     );
   }
 
@@ -174,6 +236,20 @@ export function hlsArguments(plan, options) {
     '-hls_segment_type', 'fmp4',
     '-hls_fmp4_init_filename', initFile,
     '-hls_segment_filename', segmentPattern,
+    /*
+     * Cut on time, not only on keyframes.
+     *
+     * With the picture copied rather than re-encoded, ffmpeg can only end a
+     * segment where the source already has a keyframe — and a Blu-ray rip puts
+     * those ten seconds apart. Segments came out at 10.4s against the 6s asked
+     * for, and a player wants two or three of them before it will start, so
+     * the wait to begin watching was twenty to thirty seconds of video rather
+     * than twelve.
+     *
+     * Splitting by time gives segments the length they were asked for, which
+     * is most of that wait back.
+     */
+    '-hls_flags', 'split_by_time+independent_segments',
     // An event playlist grows as segments appear, so playback can start long
     // before the whole file has been through ffmpeg.
     '-hls_playlist_type', 'event',

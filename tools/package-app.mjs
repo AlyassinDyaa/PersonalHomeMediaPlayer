@@ -136,6 +136,14 @@ const notes = [
 
 await fsp.writeFile(path.join(appPath, 'README.txt'), notes, 'utf8');
 
+// Scripts for running the server without the app.
+//
+// Copied rather than written inline: a rebuild replaces this folder wholesale,
+// so anything a person drops in by hand disappears with the next build.
+for (const name of ['start-library-server.cmd', 'start-library-hidden.vbs']) {
+  await fsp.copyFile(path.join(ROOT, 'tools', 'standalone', name), path.join(appPath, name));
+}
+
 const size = await folderSize(appPath);
 console.log('\nBuilt: ' + appPath);
 console.log('Size:  ' + (size / 1024 / 1024).toFixed(0) + ' MB');
