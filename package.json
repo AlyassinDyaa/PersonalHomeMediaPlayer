@@ -15,7 +15,7 @@
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",
     "package": "npm run build && node tools/package-app.mjs",
-    "test": "node tools/check-hook-order.mjs && node test/video-frame.test.cjs && node test/data-location.test.cjs && node test/stream-plan.test.mjs && node test/auth.test.mjs && node test/profiles.test.mjs"
+    "test": "node tools/check-hook-order.mjs && node test/video-frame.test.cjs && node test/data-location.test.cjs && node test/stream-plan.test.mjs && node test/auth.test.mjs && node test/profiles.test.mjs && node test/recent.test.mjs && node test/grouping.test.mjs && node test/sections.test.mjs && node test/shelf-order.test.mjs && node test/collections.test.mjs"
   },
   "engines": {
     "node": ">=22.5.0"

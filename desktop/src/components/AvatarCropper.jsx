@@ -132,7 +132,7 @@ export function AvatarCropper({ file = null, src = null, onCancel, onDone, busy 
       <div className="cropper">
         <p className="settings-hint">{error}</p>
         <div className="settings-actions">
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>Close</button>
+          <button type="button" className="btn btn-secondary" onClick={onCancel}>Close</button>
         </div>
       </div>
     );

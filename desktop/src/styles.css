@@ -1,3 +1,19 @@
+/*
+ * The library's own face.
+ *
+ * One variable file covering every weight the interface uses, shipped with the
+ * build. Fetching it from a font service would mean the titles arrive in a
+ * different typeface — or not at all — on the one device most likely to be
+ * offline, which is the television in the next room.
+ */
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  src: url('./fonts/bricolage-grotesque-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #0b0b0f;
   --bg-raised: #16161d;
@@ -5,12 +21,44 @@
   --text: #f4f4f6;
   --text-dim: #a8a8b3;
   --text-faint: #6e6e7a;
-  --accent: #e50914;
-  --accent-hover: #f6121d;
+  /*
+   * The colour of the title in front of you, not a house colour.
+   *
+   * What is set here is only the fallback, for a screen that is not about any
+   * one title and for a poster nothing could be taken from. Every hero, every
+   * detail page and every card overrides it with the colour drawn out of its
+   * own artwork — which is why this is a quiet slate rather than the red it
+   * used to be. A fixed red made Arcane and Avatar look like the same place.
+   */
+  --accent: #7d8aa0;
+  --accent-hover: #94a1b7;
+  --display: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  /* Fine grain, so the dark reads as film rather than as an empty buffer. */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E");
   --border: #2a2a35;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
   --radius: 6px;
-  --nav-height: 64px;
+  /*
+   * The strip a phone will not let anything be drawn in: the notch, the
+   * camera, the rounded corners. Zero everywhere else, so the same arithmetic
+   * is correct on a desktop without a special case.
+   */
+  --safe-top: env(safe-area-inset-top, 0px);
+  /*
+   * How much room the bar takes, the notch included.
+   *
+   * Everything that has to sit below the bar is positioned from this: the back
+   * button, the top of a detail page, the top of the hero. Leaving the notch
+   * out of it was why the back button landed inside the bar on a phone — the
+   * bar was told to be 64 tall and then given the notch as padding on top of
+   * that, so its contents sat exactly where the button was.
+   */
+  --nav-height: calc(64px + var(--safe-top));
+  /* The strip along the bottom a phone reserves for its own home indicator. */
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Only ever more than nothing on a phone, where the destinations live down
+     there and the page has to end above them. */
+  --tabbar-height: 0px;
 }
 
 * { box-sizing: border-box; }
@@ -26,6 +74,51 @@ body {
   font-family: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Grain over everything, at the strength of a held breath.
+ *
+ * Flat #0b0b0f reads as an empty buffer; a little noise reads as film. Fixed
+ * rather than scrolled, so it sits on the screen like grain on a print instead
+ * of travelling with the content. Nothing can be clicked through it.
+ */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  background-image: var(--grain);
+  /*
+   * Barely there, and soft-light rather than overlay.
+   *
+   * Overlay at a twentieth was enough to lift the black off the floor: the
+   * whole library came up looking as though it were behind a net curtain,
+   * posters and all. Soft-light leaves the darks where they are and only
+   * disturbs the surface, which is the whole of the intention.
+   */
+  opacity: 0.035;
+  mix-blend-mode: soft-light;
+}
+
+/*
+ * The light a title throws onto its own page.
+ *
+ * Sits under the content and over the artwork, taking its colour from whatever
+ * the poster gave up. On a page with no title in particular this is the same
+ * quiet slate as everything else, and reads as nothing at all.
+ */
+.tinted { position: relative; }
+.tint-glow {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 46%;
+  pointer-events: none;
+  background: radial-gradient(70% 100% at 30% 100%, color-mix(in srgb, var(--accent) 34%, transparent), transparent 72%);
+  transition: background 600ms ease;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -52,7 +145,8 @@ button {
   display: flex;
   align-items: center;
   gap: 28px;
-  padding: 0 42px;
+  /* The notch is padding inside the height, so the two stay in step. */
+  padding: var(--safe-top) 42px 0;
   z-index: 100;
   background: linear-gradient(180deg, rgba(6, 6, 10, 0.95) 0%, rgba(6, 6, 10, 0) 100%);
   transition: background 0.25s ease;
@@ -139,6 +233,7 @@ button {
 .hero-logo { max-width: 380px; max-height: 150px; margin-bottom: 18px; }
 
 .hero-title {
+  font-family: var(--display);
   font-size: 52px;
   font-weight: 800;
   letter-spacing: -1.5px;
@@ -193,10 +288,46 @@ button {
 .btn:active { transform: scale(0.97); }
 .btn-primary { background: var(--text); color: #0b0b0f; }
 .btn-primary:hover { background: #ffffff; }
+
+/*
+ * Play, in the colour of the thing it plays.
+ *
+ * Only where a title is being looked at: a white button is right for Save and
+ * for Add, which belong to the library rather than to any one film. Here the
+ * button is the loudest thing on a screen that is entirely about one title,
+ * and it is the clearest place to say which title that is.
+ */
+.tinted .btn-primary,
+.detail-hero .btn-primary {
+  background: var(--accent);
+  color: #08080c;
+}
+.tinted .btn-primary:hover,
+.detail-hero .btn-primary:hover {
+  background: color-mix(in srgb, var(--accent) 82%, white);
+}
 .btn-secondary { background: rgba(109, 109, 120, 0.55); color: var(--text); }
 .btn-secondary:hover { background: rgba(109, 109, 120, 0.75); }
 .btn-ghost { border: 1px solid var(--border); color: var(--text-dim); padding: 8px 16px; font-size: 13px; }
 .btn-ghost:hover { color: var(--text); border-color: var(--text-faint); }
+
+/*
+ * The one button in a row that cannot be taken back.
+ *
+ * A panel where Rename, Earlier, Later and Remove were all the same grey is a
+ * panel where the dangerous button is found by reading, every time. It is not
+ * filled red, because it only asks a question — the red on the button that
+ * answers it is what actually destroys something.
+ */
+.btn-ghost.danger {
+  color: #ff8189;
+  border-color: rgba(229, 57, 70, 0.42);
+}
+.btn-ghost.danger:hover:not(:disabled) {
+  background: rgba(229, 57, 70, 0.16);
+  border-color: #e53946;
+  color: #ff9ba1;
+}
 
 /* --------------------------------------------------------------- rows --- */
 
@@ -212,7 +343,13 @@ button {
   margin-bottom: 12px;
 }
 
-.row-title { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; margin: 0; }
+.row-title {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  margin: 0;
+}
 .row-count { font-size: 13px; color: var(--text-faint); }
 
 .row-viewport { position: relative; }
@@ -230,6 +367,16 @@ button {
 }
 
 .row-scroller::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/*
+ * Wide cards want more air than posters do.
+ *
+ * The same ten pixels sits between two 168px posters and two 300px stills, and
+ * against the wider card it reads as half the gap — Continue Watching came out
+ * as one long strip of pictures with hairlines through it rather than three
+ * separate things. The spacing is set from the card, not from the rail.
+ */
+.row-scroller.wide { gap: 20px; }
 
 .row-arrow {
   position: absolute;
@@ -259,6 +406,7 @@ button {
 /* --------------------------------------------------------------- card --- */
 
 .card {
+  position: relative;
   flex: 0 0 auto;
   width: 168px;
   cursor: pointer;
@@ -302,6 +450,46 @@ button {
 
 .card-progress span { display: block; height: 100%; background: var(--accent); }
 
+/*
+ * Newly arrived.
+ *
+ * Bottom left, because the top right already belongs to the control that
+ * takes a title out of Continue Watching, and two marks in one corner read
+ * as one confusing mark.
+ */
+.card-new {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+  z-index: 2;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #08080c;
+  background: var(--accent);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+
+/* The colour of the poster, escaping from under it. */
+.card-glow {
+  position: absolute;
+  left: -8px;
+  right: -8px;
+  /* Just below the poster, above the label, so the colour looks like light
+     coming off the picture rather than a box drawn around it. */
+  top: calc(100% * 2 / 3 - 14px);
+  height: 26px;
+  border-radius: 50%;
+  filter: blur(12px);
+  opacity: 0;
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.card:hover .card-glow { opacity: 0.8; }
+
 .card-label { margin-top: 8px; font-size: 13px; color: var(--text-dim); line-height: 1.35; }
 .card-label strong { display: block; color: var(--text); font-weight: 600; }
 
@@ -313,33 +501,55 @@ button {
  * hover, and a control that only exists for a mouse would be unreachable on
  * the device the library is most often watched from.
  */
+/*
+ * A disc of the artwork behind it rather than a black sticker on top of it.
+ *
+ * A flat opaque circle reads as something stuck to the picture, and going
+ * blacker still on hover only made it heavier at the moment it was being
+ * looked at. Frosted glass with a hairline edge sits on any frame, dark or
+ * bright, and turning red under the pointer says what pressing it does — which
+ * is what the tooltip used to say, in a browser box that covered the next card
+ * along. The name is still on the button for anything reading the page aloud.
+ */
 .card-remove {
   position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 28px;
-  height: 28px;
+  top: 7px;
+  right: 7px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-size: 17px;
+  background: rgba(10, 10, 14, 0.42);
+  -webkit-backdrop-filter: blur(9px) saturate(130%);
+  backdrop-filter: blur(9px) saturate(130%);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0.45;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, background 0.15s ease,
+              border-color 0.15s ease, transform 0.12s ease;
 }
 
 .card:hover .card-remove,
-.card-remove:hover,
-.card-remove:focus-visible { opacity: 1; background: rgba(0, 0, 0, 0.8); }
+.card-remove:focus-visible { opacity: 1; }
+
+.card-remove:hover {
+  opacity: 1;
+  background: rgba(229, 57, 70, 0.92);
+  border-color: rgba(255, 255, 255, 0.34);
+  color: #fff;
+  transform: scale(1.08);
+}
+
+.card-remove:active { transform: scale(0.94); }
 
 /* A finger needs a larger target than the circle the eye is given. */
 @media (pointer: coarse) {
-  .card-remove { width: 34px; height: 34px; font-size: 19px; opacity: 0.7; }
+  .card-remove { width: 34px; height: 34px; font-size: 18px; opacity: 0.72; }
 }
 
 .suggestion {
@@ -461,7 +671,13 @@ button {
   gap: 14px;
 }
 
-.page-title { font-size: 32px; font-weight: 800; letter-spacing: -0.8px; margin: 0; }
+.page-title {
+  font-family: var(--display);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  margin: 0;
+}
 .page-sub { font-size: 14px; color: var(--text-faint); }
 
 /* ------------------------------------------------------------- detail --- */
@@ -597,6 +813,245 @@ button {
 
 .back-btn:hover { background: rgba(0, 0, 0, 0.85); }
 
+
+/* --------------------------------------------------- along the bottom --- */
+
+/*
+ * The destinations, where the thumb is.
+ *
+ * Hidden entirely on anything wider than a phone, where the same destinations
+ * are already a row of words across the top and a second copy of them would be
+ * clutter. On a phone this is the navigation, and the top bar is left to say
+ * who is watching and where you are.
+ */
+.tabbar { display: none; }
+
+/*
+ * Gathering titles for a shelf.
+ *
+ * The same shape as the refresh button beside it: both act on the screen
+ * rather than leading anywhere, so they read as a pair.
+ */
+.nav-gather {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  font-size: 19px;
+  line-height: 1;
+  transition: color 150ms ease, background 150ms ease;
+}
+.nav-gather:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.nav-gather.on { background: var(--accent); color: #08080c; font-size: 15px; }
+
+/* ------------------------------------------------ gathering a shelf --- */
+
+/*
+ * A tick on every poster, while titles are being chosen.
+ *
+ * Drawn empty rather than appearing only once ticked: an empty circle on each
+ * cover is what says the covers can be chosen at all, which is otherwise
+ * invisible until somebody guesses.
+ */
+.card-tick {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(8, 8, 12, 0.6);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.card.picking .card-poster { transition: opacity 140ms ease; }
+.card.picking:not(.ticked) .card-poster { opacity: 0.72; }
+.card.picking:hover .card-poster { opacity: 1; }
+
+.card.ticked .card-tick {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #08080c;
+  transform: scale(1.06);
+}
+.card.ticked .card-poster {
+  outline: 3px solid var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius);
+}
+
+/* Along the bottom: what has been chosen, and where it is going. */
+.gather {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px max(24px, env(safe-area-inset-left, 0)) calc(env(safe-area-inset-bottom, 0) + 14px);
+  background: rgba(12, 12, 17, 0.9);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  animation: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.25, 1);
+}
+
+.gather-count {
+  flex: none;
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.gather-shelves {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.gather-shelves::-webkit-scrollbar { display: none; }
+.gather-shelves .btn { flex: 0 0 auto; }
+.gather-note { font-size: 13.5px; color: var(--text-dim); align-self: center; }
+
+@media (max-width: 760px) {
+  /* Clear of the destinations along the bottom. */
+  .gather { bottom: var(--tabbar-height); padding-left: 16px; padding-right: 16px; gap: 10px; }
+  .gather-count { font-size: 14px; }
+}
+
+/* Fetching the library again, by hand. Always there, on every width. */
+.nav-refresh {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-dim);
+  font-size: 16px;
+  transition: color 150ms ease, background 150ms ease;
+}
+.nav-refresh:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.nav-refresh:disabled { color: var(--accent); }
+.nav-refresh.turning { animation: turning 900ms linear infinite; }
+
+/* On a wide window the field in the bar is the search, and this is not drawn. */
+.nav-search { display: none; }
+
+/* ------------------------------------------------------ search screen --- */
+
+.search-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.search-screen-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(var(--safe-top) + 14px) 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.search-screen-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-faint);
+}
+
+.search-screen-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;   /* Anything smaller and iOS zooms the page on focus. */
+  outline: none;
+}
+
+.search-screen-cancel {
+  flex: none;
+  padding: 8px 4px;
+  color: var(--text-dim);
+  font-size: 15px;
+}
+.search-screen-cancel:hover { color: var(--text); }
+
+.search-screen-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 20px calc(var(--safe-bottom) + 40px);
+}
+
+.search-screen-hint,
+.search-screen-count {
+  margin: 4px 0 16px;
+  font-size: 13.5px;
+  color: var(--text-faint);
+}
+
+.search-recent { display: flex; flex-direction: column; }
+
+.search-recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.search-recent-head button { font-size: 12px; color: var(--text-dim); letter-spacing: 0; text-transform: none; }
+.search-recent-head button:hover { color: var(--text); }
+
+.search-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 2px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 15px;
+  text-align: left;
+}
+.search-recent-row span { color: var(--text-faint); }
+.search-recent-row:hover { color: var(--accent); }
+
 /* ----------------------------------------------------------- settings --- */
 
 .settings {
@@ -617,6 +1072,104 @@ button {
   font-weight: 700;
   margin: 0 0 8px;
 }
+
+/* ------------------------------------------- who is let into a section --- */
+
+/*
+ * The house, with a tick beside each person.
+ *
+ * Faces rather than a list of names: the question is "which of us", and the
+ * household already knows itself by the pictures on the who's-watching screen.
+ * The whole row is the target, because a checkbox alone is a small thing to
+ * ask a thumb to find.
+ */
+.section-access {
+  margin: 16px 0 18px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--border);
+}
+
+.section-access h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+
+.section-access-list { display: flex; flex-direction: column; gap: 6px; }
+
+.section-access-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.section-access-row:hover { border-color: var(--text-faint); }
+
+/* Allowed reads as lit rather than as merely ticked. */
+.section-access-row.on {
+  background: rgba(148, 161, 183, 0.12);
+  border-color: rgba(148, 161, 183, 0.4);
+}
+
+.section-access-row input { flex: none; width: 17px; height: 17px; cursor: pointer; }
+.section-access-row input:disabled { cursor: default; }
+.section-access-row:has(input:disabled) { cursor: default; opacity: 0.85; }
+
+.section-access-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.section-access-name strong { font-size: 14px; font-weight: 600; }
+.section-access-name span { font-size: 12px; color: var(--text-faint); }
+
+/*
+ * A whole section put away behind its own heading.
+ *
+ * Settings runs long, and the shelves are the longest thing on it — every one
+ * in the library, under three headings, above a form for making another. The
+ * heading was already the line somebody read to find the section; making it
+ * the thing they press to close it costs no extra furniture. Shut, the card is
+ * one line, and it says how many shelves are inside so folding it away does
+ * not hide the fact.
+ */
+.settings-fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.settings-fold h2 { margin: 0 0 8px; }
+.settings-fold:hover h2 { color: var(--text); }
+
+.settings-fold-caret {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+  transition: transform 160ms ease;
+}
+.settings-fold.folded .settings-fold-caret { transform: rotate(-90deg); }
+
+.settings-fold-count {
+  margin: 0 0 8px auto;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shut, the card is a line rather than a box with a line in it. */
+.settings-card.is-shut { padding-bottom: 14px; }
+.settings-card.is-shut .settings-fold h2,
+.settings-card.is-shut .settings-fold-caret,
+.settings-card.is-shut .settings-fold-count { margin-bottom: 0; }
 
 .settings-hint {
   font-size: 13.5px;
@@ -706,6 +1259,15 @@ button {
 
 /* -------------------------------------------------------------- modal --- */
 
+/*
+ * A dialogue in the middle of a wide window, and a sheet from the bottom of a
+ * phone.
+ *
+ * The same markup either way. A box centred on a short screen ends up with the
+ * keyboard over half of it and its buttons somewhere in the middle of nowhere;
+ * anchored to the bottom edge it stays where the hand is, and grows upward
+ * only as far as it needs.
+ */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -1410,8 +1972,17 @@ body.modal-open { overflow: hidden; }
  */
 .reader-stage { transform-origin: center center; will-change: transform; touch-action: none; }
 
-/* "See all" sits at the end of a shelf's heading. */
-.row-see-all { margin-left: auto; }
+/*
+ * The actions sit together at the end of a shelf's heading.
+ *
+ * Each of them carried its own margin-left:auto, which works for one button
+ * and falls apart for two: the first is pushed away from the title and the
+ * second away from the first, so they end up stranded at a third and at the
+ * far edge with nothing between them. Pushing the group once puts them where
+ * a pair of buttons belongs — side by side, at the end.
+ */
+.row-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.row-see-all { margin-left: 0; }
 
 /* --- Settings: groups and collections ----------------------------------- */
 
@@ -1456,11 +2027,30 @@ body.modal-open { overflow: hidden; }
 
 .collection-row {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 12px 14px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   background: var(--surface);
+  transition: border-color 150ms ease, background 150ms ease;
 }
+.collection-row:hover { border-color: var(--text-faint); }
+/* The one being worked on is lifted out of the stack. */
+.collection-row.open { border-color: var(--accent); background: var(--bg-raised); }
+
+/*
+ * The name on the left, where it lives on the right.
+ *
+ * One line per shelf, so a page of them reads as a list rather than as a stack
+ * of cards each carrying its own row of buttons.
+ */
+.collection-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.collection-top .collection-head { flex: 1 1 200px; width: auto; }
+.collection-top .shelf-kinds { flex: 0 0 auto; }
 
 .collection-head {
   display: flex;
@@ -1476,14 +2066,26 @@ body.modal-open { overflow: hidden; }
   cursor: pointer;
 }
 
-.collection-name { font-size: 15px; font-weight: 650; color: var(--text); }
+.collection-name {
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
 .collection-meta { font-size: 12.5px; color: var(--text-faint); }
 
 .collection-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
+  margin-bottom: 14px;
+}
+
+.collection-top .shelf-kinds .chip {
+  padding: 5px 12px;
+  font-size: 12.5px;
 }
 
 .collection-actions .btn-ghost { padding: 5px 11px; font-size: 12.5px; }
@@ -1664,12 +2266,35 @@ body.modal-open { overflow: hidden; }
 
 .collection-logo-current { display: flex; align-items: center; gap: 12px; }
 
+/*
+ * Where the badge goes, whether or not there is one.
+ *
+ * "No badge" used to be a line of grey text floating above the search field,
+ * which read as a heading for it rather than as the state of a picture. An
+ * empty frame the size of the picture says what it is, and stops everything
+ * below from jumping when a badge is finally chosen.
+ */
+.collection-logo-slot {
+  flex: none;
+  width: 96px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px dashed rgba(148, 161, 183, 0.3);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* On white, because company logos are drawn for print on white — several are
    black line art and would vanish on the surface used everywhere else. */
-.collection-logo-current img {
-  width: 96px; height: 54px; object-fit: contain;
-  background: #fbfbfd; border-radius: 8px; padding: 6px;
+.collection-logo-slot.has-badge {
+  background: #fbfbfd;
+  border: 1px solid transparent;
+  padding: 6px;
 }
+.collection-logo-slot img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
 .collection-logo-search { display: flex; gap: 8px; }
 .collection-logo-search .key-input { flex: 1; }
@@ -1765,7 +2390,7 @@ body.modal-open { overflow: hidden; }
   /* Two soft washes over the base colour, so the faces have something to sit
      on. Kept low in contrast: the tiles are the subject, not this. */
   background:
-    radial-gradient(1200px 600px at 50% -10%, rgba(229, 9, 20, 0.16), transparent 60%),
+    radial-gradient(1200px 600px at 50% -10%, rgba(125, 138, 160, 0.18), transparent 60%),
     radial-gradient(900px 500px at 80% 110%, rgba(70, 90, 200, 0.14), transparent 60%),
     var(--bg);
 }
@@ -1824,7 +2449,7 @@ body.modal-open { overflow: hidden; }
   transform: scale(1.04);
 }
 
-.profile-face-large { width: 88px; height: 88px; font-size: 36px; }
+.profile-face.profile-face-large { width: 88px; height: 88px; font-size: 36px; }
 
 .profile-name { font-size: 16px; font-weight: 500; }
 
@@ -1878,7 +2503,7 @@ body.modal-open { overflow: hidden; }
 .profile-pin input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(229, 9, 20, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .profile-pin-actions {
@@ -1923,7 +2548,7 @@ body.modal-open { overflow: hidden; }
 
 .profile-list-item:last-child { border-bottom: none; }
 
-.profile-face-small {
+.profile-face.profile-face-small {
   width: 34px;
   height: 34px;
   font-size: 16px;
@@ -2012,11 +2637,20 @@ body.modal-open { overflow: hidden; }
 }
 
 /* Removing somebody is the one destructive action here, and says so. */
-.btn.danger-text { color: var(--accent); }
+/*
+ * Removing somebody, in the colour of removing somebody.
+ *
+ * This was painted with the accent, which was red when it was written and is
+ * now a slate grey taken from whatever poster is on screen — so the button
+ * that takes a person and everything they have watched came out the same
+ * colour as Edit beside it. Red is not decoration here; it is the only thing
+ * separating the two.
+ */
+.btn.danger-text { color: #ff8189; border-color: rgba(229, 57, 70, 0.42); }
 .btn.danger-text:hover:not(:disabled) {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  background: rgba(229, 57, 70, 0.16);
+  border-color: #e53946;
+  color: #ff9ba1;
 }
 
 /* The row of buttons that closes a settings form. */
@@ -2098,7 +2732,15 @@ body.modal-open { overflow: hidden; }
 .cropper-zoom input { flex: 1; accent-color: var(--accent); touch-action: none; }
 
 @media (max-width: 520px) {
-  .profile-face { width: 104px; height: 104px; font-size: 42px; }
+  /*
+   * Only the tiles on the who is watching screen.
+   *
+   * Written as a bare .profile-face this also caught the face in the bar
+   * and the ones in the profile lists, which are given their size by a
+   * modifier declared earlier in this file — so on a phone every one of
+   * them grew to a hundred pixels and the header wore a portrait.
+   */
+  .profile-choice .profile-face { width: 104px; height: 104px; font-size: 42px; }
   .profile-row { gap: 22px; }
 }
 
@@ -2162,7 +2804,74 @@ body.modal-open { overflow: hidden; }
    * library; it does not need saying), the links keep their space and scroll
    * if a fifth is ever added, and search takes what is left.
    */
-  .nav { padding: 0 16px; gap: 12px; height: 60px; }
+  /* A shorter bar on a phone, but the notch is still the notch. */
+  :root {
+    --nav-height: calc(58px + var(--safe-top));
+    --tabbar-height: calc(58px + var(--safe-bottom));
+  }
+
+  /*
+   * The destinations move to the bottom of the screen.
+   *
+   * Glass rather than a solid slab, so the artwork carries on underneath it
+   * and the page does not appear to end early.
+   */
+  .tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 120;
+    display: flex;
+    align-items: flex-start;
+    height: var(--tabbar-height);
+    padding: 7px 6px var(--safe-bottom);
+    background: rgba(12, 12, 17, 0.82);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .tabbar-tab {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 5px 2px;
+    border-radius: 12px;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    /* A long label must not push the others out of shape. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tabbar-glyph { font-size: 17px; line-height: 1; }
+  .tabbar-tab.on { color: var(--text); }
+  .tabbar-tab.on .tabbar-glyph { color: var(--accent); }
+  .tabbar-tab:active { background: rgba(255, 255, 255, 0.06); }
+
+  /* Nothing may end underneath the bar. */
+  .view { padding-bottom: calc(var(--tabbar-height) + 8px); }
+
+  /* The field gives way to a button that opens the search screen. */
+  .search-box { display: none; }
+  .nav-search {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    flex: none;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text);
+    font-size: 17px;
+  }
+  .nav { padding: var(--safe-top) 16px 0; gap: 12px; height: var(--nav-height); }
   .nav-brand { display: none; }
 
   .nav-links {
@@ -2451,10 +3160,19 @@ body.modal-open { overflow: hidden; }
  */
 @media (max-width: 760px) {
   .detail-hero {
-    /* The bar is fixed; without this the description ran underneath it. */
-    padding: calc(var(--nav-height) + 24px) 16px 28px;
+    /*
+     * Below the bar, and below the back button that floats under it.
+     *
+     * Clearing only the bar left the button sitting on top of the title's
+     * logo — two things drawn in the same place, neither readable. The extra
+     * room is the button's own height plus a gap.
+     */
+    padding: calc(var(--nav-height) + 62px) 16px 28px;
     min-height: 0;
   }
+
+  /* In line with the content it belongs to, not the desktop's wide gutter. */
+  .back-btn { left: 16px; }
 
   /* Three buttons on one line means three two-line labels. Let the row wrap. */
   .hero-actions { flex-wrap: wrap; gap: 8px; }
@@ -2571,4 +3289,2162 @@ body.modal-open { overflow: hidden; }
   /* The name goes; the face is enough, and the section title needs the room. */
   .nav-me-name { display: none; }
   .nav-me { padding: 4px; }
+}
+
+
+
+/* ------------------------------------------------- ranked, held, pulled --- */
+
+/*
+ * The numeral on a rail whose order is the point.
+ *
+ * Drawn behind and below the poster in outline rather than on top of it: a
+ * solid figure over the artwork hides the face the artwork was chosen for,
+ * and the position is worth saying quietly.
+ */
+.card-rank {
+  position: absolute;
+  left: -10px;
+  bottom: 26px;
+  z-index: 1;
+  font-family: var(--display);
+  font-size: 62px;
+  font-weight: 800;
+  line-height: 0.8;
+  letter-spacing: -0.06em;
+  color: transparent;
+  -webkit-text-stroke: 2px color-mix(in srgb, var(--accent) 70%, transparent);
+  pointer-events: none;
+}
+
+/* Room for the figure, so it does not sit under the poster beside it. */
+.row-scroller .card:has(.card-rank) { margin-left: 16px; }
+
+/* -------------------------------------------------------------- pulled --- */
+
+.pull {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.pull-mark { font-size: 15px; color: var(--accent); }
+.pull.ready .pull-mark { color: var(--accent); }
+.pull.refreshing .pull-mark { animation: turning 900ms linear infinite; }
+
+@keyframes turning { to { transform: rotate(360deg); } }
+
+/* ---------------------------------------------------- what can be done --- */
+
+.modal.actions { width: min(420px, 92vw); padding: 20px 18px 18px; }
+
+.actions-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.actions-head strong { font-family: var(--display); font-size: 18px; font-weight: 700; }
+.actions-head span { font-size: 13px; color: var(--text-faint); }
+
+.actions-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 4px;
+  font-size: 15.5px;
+  color: var(--text);
+  text-align: left;
+  border-radius: 10px;
+}
+.actions-row:hover { background: var(--bg-raised); }
+.actions-row.quiet { color: var(--text-dim); }
+.actions-mark { width: 20px; color: var(--accent); font-size: 15px; text-align: center; }
+.actions-row.quiet .actions-mark { color: var(--text-faint); }
+
+/* ------------------------------------------------------ from a remote --- */
+
+/*
+ * The ring, and only once a remote is in use.
+ *
+ * A television is looked at from across a room by somebody holding five
+ * buttons, so the answer to "where am I" has to carry that far. On a desktop
+ * the same ring following the mouse would be noise, which is why nothing is
+ * drawn until an arrow key is actually pressed.
+ */
+body.by-remote :focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--bg), 0 0 0 6px var(--accent);
+  border-radius: 10px;
+}
+
+body.by-remote .card:focus,
+body.by-remote .card:focus-within {
+  transform: scale(1.06);
+  z-index: 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body.by-remote .card:focus { transform: none; }
+}
+
+/* The poster in flight between a rail and the page it opens. */
+.poster-in-flight {
+  position: fixed;
+  z-index: 200;
+  object-fit: cover;
+  pointer-events: none;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+
+/* -------------------------------------------------- while it loads --- */
+
+/*
+ * The page, drawn empty, at the size it will be.
+ *
+ * The shimmer travels across rather than pulsing in place: a pulse reads as
+ * something broken blinking, a sweep reads as something arriving.
+ */
+.skeleton { padding-bottom: 60px; }
+
+.shimmer {
+  display: block;
+  border-radius: var(--radius);
+  background: linear-gradient(100deg,
+    var(--bg-raised) 30%,
+    var(--surface) 48%,
+    var(--bg-raised) 66%);
+  background-size: 300% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  from { background-position: 130% 0; }
+  to { background-position: -30% 0; }
+}
+
+.skeleton-banner { height: 58vh; min-height: 320px; border-radius: 0; }
+
+.skeleton-row { margin: 30px 0 0; padding: 0 42px; }
+.skeleton-heading { width: 190px; height: 20px; margin-bottom: 14px; }
+.skeleton-posters { display: flex; gap: 14px; overflow: hidden; }
+.skeleton-poster {
+  flex: 0 0 168px;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+}
+
+.skeleton-lines { display: flex; flex-direction: column; gap: 12px; padding: 26px 42px 0; }
+.skeleton-lines span { height: 15px; }
+
+/* The title that replaces the section name once a banner has scrolled off. */
+.nav-section.titled {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46vw;
+  animation: title-in 260ms ease;
+}
+
+@keyframes title-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px) {
+  .skeleton-banner { height: 46vh; min-height: 260px; }
+  .skeleton-row { padding: 0 16px; }
+  .skeleton-poster { flex: 0 0 118px; }
+  .skeleton-lines { padding: 20px 16px 0; }
+}
+
+/*
+ * The bar names the title on a wide window too.
+ *
+ * Ordinarily this only appears on a phone, where the row of links is hidden
+ * and something has to say where you are. A title is worth saying at every
+ * width, so it is allowed through.
+ */
+@media (min-width: 761px) {
+  .nav-section.titled {
+    display: block;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+}
+
+
+/* ------------------------------------------------- across the room --- */
+
+/*
+ * The library on a television.
+ *
+ * Not a wider phone and not a bigger window: a different distance. Type that
+ * is comfortable at arm's length is unreadable at three metres, and a row of
+ * links along the top is nowhere near the five buttons somebody is holding.
+ * So the destinations come down the left where a remote expects them, and
+ * everything else grows.
+ *
+ * Switched on by the device rather than by a setting — see television.js —
+ * and forced either way with ?tv=1 or ?tv=0 on the address.
+ */
+body.tv-layout {
+  font-size: 17px;
+  --nav-height: 76px;
+  --rail-width: 104px;
+  /*
+   * The strip a television may not actually show.
+   *
+   * Sets are still sold that crop the edges of the picture, and a stick has no
+   * way of knowing whether this one does. Everything that has to be read or
+   * pressed is held in from the edge by this much; the artwork behind it is
+   * still allowed to run to the edge, because losing a little of a backdrop
+   * costs nothing and losing the first tab does.
+   */
+  --overscan: 26px;
+}
+
+/* The row of links belongs to a pointer; the rail replaces it. */
+body.tv-layout .nav-links,
+body.tv-layout .nav-search,
+body.tv-layout .nav-burger { display: none; }
+
+body.tv-layout .nav {
+  padding-left: calc(var(--rail-width) + 20px);
+  padding-right: calc(34px + var(--overscan));
+  padding-top: var(--overscan);
+}
+body.tv-layout .nav-me-name { font-size: 17px; }
+body.tv-layout .nav-section { display: block; font-size: 20px; font-weight: 600; }
+body.tv-layout .search-box { max-width: 300px; }
+
+/* The destinations, down the left, always there. */
+body.tv-layout .tabbar {
+  display: flex;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  right: auto;
+  width: var(--rail-width);
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px 12px;
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.07);
+  background: linear-gradient(90deg, rgba(7, 7, 10, 0.96), rgba(7, 7, 10, 0.6));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  z-index: 120;
+}
+
+body.tv-layout .tabbar-tab {
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 14px 6px;
+  border-radius: 14px;
+  font-size: 13px;
+}
+body.tv-layout .tabbar-glyph { font-size: 24px; }
+
+/* Everything else moves over to make room for it. */
+body.tv-layout .view { padding-left: var(--rail-width); padding-bottom: calc(40px + var(--overscan)); }
+body.tv-layout .hero,
+body.tv-layout .detail-hero { padding-left: calc(var(--rail-width) + 46px); }
+
+/* Read from a sofa, not from a desk. */
+body.tv-layout .hero-title { font-size: 62px; }
+body.tv-layout .hero-logo { max-width: 460px; max-height: 190px; }
+body.tv-layout .hero-overview { font-size: 19px; max-width: 62ch; }
+body.tv-layout .hero-meta { font-size: 16px; }
+body.tv-layout .btn { padding: 15px 30px; font-size: 18px; }
+
+body.tv-layout .row-title { font-size: 26px; }
+body.tv-layout .row-header { padding-left: 46px; padding-right: var(--overscan); }
+body.tv-layout .row-scroller { padding-left: 46px; padding-right: var(--overscan); gap: 20px; }
+body.tv-layout .card { width: 210px; }
+body.tv-layout .card.wide { width: 340px; }
+body.tv-layout .card-label { font-size: 15px; }
+body.tv-layout .card-rank { font-size: 84px; }
+
+/* The arrows belong to a pointer, and a remote scrolls the row itself. */
+body.tv-layout .row-arrow { display: none; }
+
+/* Thicker, because it is being read from three metres away. */
+body.tv-layout.by-remote :focus {
+  box-shadow: 0 0 0 4px var(--bg), 0 0 0 9px var(--accent);
+}
+
+body.tv-layout .detail-body,
+body.tv-layout .settings,
+body.tv-layout .page-header { padding-left: calc(var(--rail-width) + 46px); }
+
+
+/* ------------------------------------------------- asking first --- */
+
+/*
+ * The question before something is destroyed.
+ *
+ * Narrow, because it holds one sentence and two buttons; the confirming one
+ * sits on the right where the eye ends up, and is the only red thing on the
+ * screen so it cannot be pressed by accident on the way past.
+ */
+.modal.confirm { width: min(420px, 92vw); padding: 22px 20px 18px; }
+
+.confirm-title {
+  font-family: var(--display);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 8px;
+  text-wrap: balance;
+}
+
+.confirm-body { margin: 0 0 18px; font-size: 14.5px; color: var(--text-dim); }
+
+.confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 18px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.confirm-field .key-input { font-size: 16px; }
+
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* The one button in the library that destroys something. */
+.btn-danger {
+  background: #b3202a;
+  color: #fff;
+}
+.btn-danger:hover { background: #cc2733; }
+.btn-danger:disabled { opacity: 0.5; }
+
+@media (max-width: 760px) {
+  /* A sheet, like every other question on a phone. */
+  .confirm-actions { flex-direction: column-reverse; }
+  .confirm-actions .btn { width: 100%; justify-content: center; }
+}
+
+/* --------------------------------------------------------- the shelves --- */
+
+/*
+ * Shelves listed under the screen they appear on.
+ *
+ * "Which shelves are on Films" is the question somebody arrives with, so the
+ * page answers it before being asked. Each shelf is one quiet row; everything
+ * you can do to one is behind opening it, which happens in a sheet rather
+ * than by unfolding the row and pushing the others off the screen.
+ */
+.shelf-group { margin-bottom: 18px; }
+
+/* A heading that folds its group away. Open unless somebody says otherwise. */
+.shelf-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.shelf-group-head span {
+  font-size: 11.5px;
+  letter-spacing: 0;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.shelf-group-head:hover { color: var(--text-dim); }
+
+.shelf-group-caret {
+  font-size: 11px;
+  transition: transform 160ms ease;
+}
+.shelf-group-head.folded .shelf-group-caret { transform: rotate(-90deg); }
+
+.shelf-list { display: flex; flex-direction: column; gap: 6px; }
+
+.shelf-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+.shelf-item:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-raised); }
+.shelf-item:active:not(:disabled) { transform: scale(0.995); }
+.shelf-item:disabled { cursor: default; }
+
+/* The badge, or the shelf’s initial when it has not been given one. */
+.shelf-item-badge {
+  flex: none;
+  width: 46px;
+  height: 32px;
+  object-fit: contain;
+  border-radius: 6px;
+}
+.shelf-item-badge.blank {
+  display: grid;
+  place-items: center;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-faint);
+  background: var(--bg-raised);
+}
+
+.shelf-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.shelf-item-text strong {
+  font-family: var(--display);
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shelf-item-text span {
+  font-size: 12.5px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shelf-item-more { flex: none; color: var(--text-faint); font-size: 18px; }
+
+/* ---------------------------------------------------------- one shelf --- */
+
+.modal.shelf-sheet {
+  width: min(560px, 94vw);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.shelf-sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.shelf-sheet-head h3 {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 2px;
+}
+
+/* The middle scrolls; the name and the actions stay put. */
+.shelf-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  max-height: 52vh;
+  padding-right: 2px;
+}
+
+.shelf-sheet-members { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/*
+ * A title on the shelf.
+ *
+ * These wore the same pill as the Films / TV Shows / Both control a few lines
+ * above them, which made one list of things look like a second row of choices
+ * — and the cross was jammed against the last letter with no room to press it.
+ * A softer fill, a divider before the cross, and a target big enough to hit.
+ */
+.shelf-member {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 999px;
+  background: rgba(148, 161, 183, 0.13);
+  border: 1px solid transparent;
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+}
+.shelf-member:hover { border-color: rgba(148, 161, 183, 0.34); }
+
+/* Pressable, because pressing it sends the title to another shelf. */
+.shelf-member-name {
+  padding: 7px 4px 7px 14px;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+.shelf-member-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+.shelf-member-name:disabled { cursor: default; text-decoration: none; }
+
+.shelf-member-x {
+  padding: 0 11px 0 8px;
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.shelf-member-x:hover { background: rgba(229, 57, 70, 0.22); color: #ff8189; }
+.shelf-member-x:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.shelf-sheet-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+
+/* Pushes Remove away from everything it is not. */
+.shelf-sheet-gap { flex: 1 1 12px; }
+
+/* Two nudges at the same thing, so they are drawn joined rather than apart. */
+.shelf-order { display: inline-flex; }
+.shelf-order .btn {
+  border-radius: 0;
+  margin-left: -1px;
+  position: relative;
+}
+.shelf-order .btn:first-child {
+  border-radius: var(--radius) 0 0 var(--radius);
+  margin-left: 0;
+}
+.shelf-order .btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+/* The hovered one draws its whole outline, over its neighbour's. */
+.shelf-order .btn:hover:not(:disabled) { z-index: 1; }
+
+/* Folder shelves are the rarer kind, so they are folded away. */
+.shelf-folder { margin-top: 14px; }
+.shelf-folder summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  color: var(--text-dim);
+  padding: 4px 0;
+}
+.shelf-folder summary:hover { color: var(--text); }
+
+@media (max-width: 760px) {
+  .shelf-item { padding: 12px; gap: 11px; }
+  .shelf-item-badge { width: 38px; height: 28px; }
+  .shelf-sheet-body { max-height: 46vh; }
+  /* On a phone the row wraps, so each thing takes a whole finger's width —
+     the joined pair staying joined, and Remove keeping its own line. */
+  .shelf-sheet-actions > .btn { flex: 1 1 auto; justify-content: center; }
+  .shelf-order { flex: 1 1 100%; }
+  .shelf-order .btn { flex: 1 1 0; justify-content: center; }
+  .shelf-sheet-gap { flex-basis: 100%; }
+  .shelf-where { gap: 8px; }
+  .shelf-where-label { flex: 1 1 100%; }
+}
+
+/* ------------------------------------------------- building a shelf --- */
+
+/* Which screen a shelf belongs on. */
+.shelf-where { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.shelf-where-label { font-size: 13px; color: var(--text-faint); }
+
+/* The shelves an owner arranged, at the top of the screen they belong to. */
+.browse-shelves { display: flex; flex-direction: column; gap: 22px; margin: 0 0 26px; }
+
+.shelf-search { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.shelf-search .key-input { flex: 1 1 240px; }
+/*
+ * One choice out of three, drawn as one control.
+ *
+ * As three separate outlined pills the chosen one was barely darker than the
+ * other two, so which screen a shelf belonged to had to be worked out rather
+ * than seen. A sunken track with a single lit pill in it can only be read one
+ * way.
+ */
+.shelf-kinds {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border);
+}
+.shelf-kinds .chip {
+  background: transparent;
+  border-color: transparent;
+  padding: 6px 15px;
+  font-weight: 600;
+}
+.shelf-kinds .chip:hover { background: rgba(255, 255, 255, 0.05); border-color: transparent; }
+.shelf-kinds .chip.on {
+  background: var(--text);
+  color: #0b0b0f;
+  border-color: transparent;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.4);
+}
+.shelf-kinds .chip.on:hover { background: #ffffff; }
+
+/*
+ * The library, as covers to tick.
+ *
+ * A shelf is chosen by recognising posters, not by reading a list of names —
+ * which is also why the covers are large enough to recognise. Several are
+ * ticked and added together, because a shelf is a run of titles somebody
+ * already has in mind rather than one decision repeated thirty times.
+ */
+.shelf-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 14px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+
+.shelf-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 0;
+  text-align: left;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.shelf-pick-art {
+  position: relative;
+  display: block;
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 2px solid transparent;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+.shelf-pick-art img { display: block; width: 100%; aspect-ratio: 2 / 3; object-fit: cover; }
+
+.shelf-pick-blank {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 2 / 3;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* The tick is always there, so it is obvious the covers can be chosen. */
+.shelf-tick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(10, 10, 14, 0.66);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.shelf-pick.on .shelf-pick-art { border-color: var(--accent); transform: scale(0.97); }
+.shelf-pick.on .shelf-tick { background: var(--accent); color: #08080c; }
+.shelf-pick.on .shelf-pick-name { color: var(--text); }
+
+.shelf-pick-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.shelf-pick-year { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+
+/* What was ticked, and the one press that puts it all on the shelf. */
+.shelf-add {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+@media (max-width: 760px) {
+  .shelf-picker { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); max-height: 50vh; }
+  .shelf-add .btn { flex: 1; justify-content: center; }
+}
+
+/* ------------------------------------------------- sheets on a phone --- */
+
+@media (max-width: 760px) {
+  /*
+   * Anchored to the bottom edge rather than floating in the middle.
+   *
+   * The padding that keeps a centred dialogue off the edges of a wide window
+   * is exactly wrong here: it held the sheet sixteen pixels clear of the
+   * bottom and twelve in from the sides, so a shape with square lower corners
+   * and rounded upper ones floated in the middle of nowhere.
+   */
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+
+  /* Every sheet is the width of the screen, whatever it asked for. */
+  .modal,
+  .modal.confirm,
+  .modal.shelf-sheet,
+  .modal.cropper-modal {
+    width: 100%;
+    max-width: none;
+    max-height: 86vh;
+    border-radius: 20px 20px 0 0;
+    padding-bottom: calc(var(--safe-bottom) + 18px);
+    animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.25, 1);
+  }
+
+  /* The grab handle every sheet on this phone has, so it reads as one. */
+  .modal::before {
+    content: "";
+    display: block;
+    width: 38px;
+    height: 4px;
+    margin: 0 auto 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22);
+  }
+
+  /* The cropper is a fixed square; letting it stretch would distort it. */
+  .modal.cropper-modal { max-width: none; }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(14%); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ------------------------------------------- how the shelves are laid out --- */
+
+/*
+ * Choosing between rails, tiles and lines.
+ *
+ * The header sits above the shelves rather than in the page header, because it
+ * governs the shelves and nothing else on the screen — put it beside the page
+ * title and it reads as a control over the whole library.
+ */
+.browse-shelves-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 42px 12px;
+  flex-wrap: wrap;
+}
+
+/*
+ * The two controls that decide how the shelves read: their order, and their
+ * shape. Kept together at the right so the heading is the only thing on the
+ * left, and allowed to drop onto their own line rather than squeezing the word
+ * "Collections" off the screen on a narrow one.
+ */
+.browse-shelves-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shelf-order-pick { font-size: 12.5px; color: var(--text-dim); }
+.shelf-order-pick .shelf-order-word { color: var(--text-faint); }
+
+.browse-shelves-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* --- every shelf as a tile ------------------------------------------------ */
+
+.shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 18px 16px;
+  padding: 0 42px 30px;
+}
+
+.shelf-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+/*
+ * A shelf is recognised by what stands on it.
+ *
+ * Its badge when it has one; otherwise the first few covers, fanned out — a
+ * shelf of films with no badge would be a grey square with a word in it, which
+ * is exactly as useful as the word on its own.
+ */
+.shelf-tile-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(140deg, #21212b, #15151d);
+  border: 1px solid var(--border);
+  transition: border-color 0.15s ease, transform 0.14s ease;
+}
+.shelf-tile:hover .shelf-tile-art { border-color: var(--text-faint); transform: translateY(-2px); }
+
+/*
+ * The badge sits on white, because that is what it was drawn for.
+ *
+ * Company marks come as artwork for print: DC and Marvel happen to be bright
+ * and read anywhere, but Lucasfilm is near-black line art and disappeared
+ * completely against the dark tile. A light plate is how the shelf sheet
+ * already shows them, and it is the only thing that works for all of them.
+ */
+.shelf-tile-badge {
+  max-width: 72%;
+  max-height: 62%;
+  object-fit: contain;
+  background: #fbfbfd;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+
+.shelf-tile-cover {
+  position: absolute;
+  top: 50%;
+  width: 34%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+  border-radius: 5px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.55);
+  transform: translateY(-50%);
+}
+.shelf-tile-cover.at-0 { left: 12%; z-index: 3; }
+.shelf-tile-cover.at-1 { left: 33%; z-index: 2; opacity: 0.92; }
+.shelf-tile-cover.at-2 { left: 54%; z-index: 1; opacity: 0.8; }
+
+.shelf-tile-letter {
+  font-family: var(--display);
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--text-faint);
+}
+
+.shelf-tile-name { font-size: 14px; font-weight: 600; }
+.shelf-tile-count { font-size: 12px; color: var(--text-faint); margin-top: -6px; }
+
+/* --- every shelf as one line ---------------------------------------------- */
+
+.shelf-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 42px 30px;
+}
+
+.shelf-line {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.shelf-line:hover { border-color: var(--text-faint); background: var(--bg-raised); }
+
+.shelf-line-badge {
+  flex: none;
+  width: 44px;
+  height: 30px;
+  object-fit: contain;
+  background: #fbfbfd;
+  border-radius: 5px;
+  padding: 3px;
+}
+.shelf-line-badge.blank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(148, 161, 183, 0.16);
+  color: var(--text-dim);
+  font-weight: 700;
+  padding: 0;
+}
+
+.shelf-line-name { flex: 1; font-size: 14.5px; font-weight: 600; min-width: 0; }
+.shelf-line-count { font-size: 12.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.shelf-line-more { color: var(--text-faint); font-size: 17px; }
+
+@media (max-width: 760px) {
+  .browse-shelves-head { padding: 0 16px 10px; }
+  /* On a phone the pair takes the full width under the heading, so neither
+     control has to shrink to fit beside the other. */
+  .browse-shelves-tools { flex: 1 1 100%; justify-content: space-between; }
+  .shelf-order-pick { font-size: 12px; }
+  .shelf-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px 12px; padding: 0 16px 24px; }
+  .shelf-lines { padding: 0 16px 24px; }
+  .shelf-tile-letter { font-size: 30px; }
+}
+
+/* Read from a sofa: fewer, larger tiles, and lines a remote can land on. */
+body.tv-layout .shelf-grid {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  padding-left: 46px;
+  padding-right: var(--overscan);
+}
+body.tv-layout .browse-shelves-head { padding-left: 46px; padding-right: var(--overscan); }
+body.tv-layout .shelf-lines { padding-left: 46px; padding-right: var(--overscan); }
+body.tv-layout .shelf-line { padding: 15px 18px; }
+body.tv-layout .shelf-line-name { font-size: 18px; }
+body.tv-layout .shelf-tile-name { font-size: 17px; }
+
+/*
+ * A rail unfolded where it stands.
+ *
+ * The grid is the same one the whole screen uses below, so an unfolded shelf
+ * and "everything else" read as the same kind of thing rather than as two
+ * different pages stacked on each other.
+ */
+.shelf-stack .grid { padding-bottom: 10px; }
+
+
+/* ------------------------------------------------ what sits behind it all --- */
+
+/*
+ * The room the library stands in.
+ *
+ * One fixed layer under everything, painted by whichever design is chosen and
+ * absent entirely for the flat one — so the default costs nothing at all, not
+ * even an element.
+ *
+ * Every design reads --bg-tint, which is either a colour the owner picked or,
+ * when they have not, the accent each page already sets from the artwork in
+ * front of you. So the same stylesheet gives a fixed room or one that follows
+ * the film, with no second set of rules for the difference.
+ */
+body[class*="bg-"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* Named once so no design has to repeat the fallback chain. */
+  --tint: var(--bg-tint, var(--accent, #7d8aa0));
+}
+
+/* A single soft wash, brightest behind the top of the page where the hero is. */
+body.bg-glow::before {
+  background:
+    radial-gradient(120% 80% at 50% -10%,
+      color-mix(in srgb, var(--tint) 26%, transparent) 0%, transparent 62%),
+    radial-gradient(90% 60% at 12% 8%,
+      color-mix(in srgb, var(--tint) 14%, transparent) 0%, transparent 55%);
+}
+
+/*
+ * Three blurred shapes, drifting.
+ *
+ * Slow enough that nothing appears to move unless you watch for it. Only the
+ * transform is animated, so this stays on the compositor and costs a
+ * television nothing.
+ */
+body.bg-aurora::before {
+  background:
+    radial-gradient(38% 44% at 18% 22%,
+      color-mix(in srgb, var(--tint) 34%, transparent) 0%, transparent 70%),
+    radial-gradient(32% 38% at 82% 16%,
+      color-mix(in srgb, var(--tint) 22%, transparent) 0%, transparent 70%),
+    radial-gradient(46% 40% at 62% 84%,
+      color-mix(in srgb, var(--tint) 18%, transparent) 0%, transparent 72%);
+  filter: blur(38px) saturate(115%);
+  animation: aurora-drift 78s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+@keyframes aurora-drift {
+  from { transform: translate3d(-2.5%, -1.5%, 0) scale(1.06); }
+  to   { transform: translate3d(2.5%, 2%, 0) scale(1.14); }
+}
+
+/*
+ * Colours bleeding into one another, still.
+ *
+ * The same idea as the aurora with the movement taken out and the shapes
+ * pushed into the corners: a room that has been painted rather than one that
+ * is breathing. The safe choice on a television.
+ */
+body.bg-mesh::before {
+  background:
+    radial-gradient(58% 52% at 6% 4%,
+      color-mix(in srgb, var(--tint) 30%, transparent) 0%, transparent 68%),
+    radial-gradient(50% 48% at 96% 12%,
+      color-mix(in srgb, var(--tint) 20%, transparent) 0%, transparent 66%),
+    radial-gradient(64% 56% at 88% 96%,
+      color-mix(in srgb, var(--tint) 24%, transparent) 0%, transparent 70%),
+    radial-gradient(48% 44% at 14% 92%,
+      color-mix(in srgb, var(--tint) 14%, transparent) 0%, transparent 68%);
+  filter: blur(24px);
+}
+
+/* Light falling at an angle, as through a window off to one side. */
+body.bg-rays::before {
+  background:
+    repeating-linear-gradient(108deg,
+      color-mix(in srgb, var(--tint) 13%, transparent) 0px,
+      color-mix(in srgb, var(--tint) 13%, transparent) 90px,
+      transparent 90px, transparent 260px),
+    radial-gradient(90% 70% at 20% -10%,
+      color-mix(in srgb, var(--tint) 22%, transparent) 0%, transparent 62%);
+  filter: blur(26px);
+  /* Faded out towards the bottom, so the rows of covers sit on clean dark. */
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 78%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 78%);
+}
+
+/* A wide ring, as though something bright sat just behind the page. */
+body.bg-halo::before {
+  background:
+    radial-gradient(closest-side circle at 50% 34%,
+      transparent 0%, transparent 46%,
+      color-mix(in srgb, var(--tint) 26%, transparent) 62%,
+      transparent 82%),
+    radial-gradient(70% 50% at 50% 30%,
+      color-mix(in srgb, var(--tint) 10%, transparent) 0%, transparent 70%);
+  filter: blur(30px);
+}
+
+/*
+ * A ruled grid, receding.
+ *
+ * Lines rather than colour, which is the one texture here that does not depend
+ * on the tint being bright enough to see. Kept to the upper half and faded
+ * out, so it reads as depth behind the hero and not as graph paper.
+ */
+body.bg-grid::before {
+  background-image:
+    linear-gradient(to right,
+      color-mix(in srgb, var(--tint) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--tint) 22%, transparent) 1px, transparent 1px);
+  background-size: 62px 62px;
+  background-position: center top;
+  -webkit-mask-image: radial-gradient(80% 60% at 50% 6%, #000 0%, transparent 76%);
+  mask-image: radial-gradient(80% 60% at 50% 6%, #000 0%, transparent 76%);
+  opacity: 0.55;
+}
+
+/* Soft horizontal bands, like light moving on water. */
+body.bg-waves::before {
+  background:
+    repeating-linear-gradient(174deg,
+      color-mix(in srgb, var(--tint) 15%, transparent) 0px,
+      transparent 70px, transparent 150px,
+      color-mix(in srgb, var(--tint) 15%, transparent) 220px);
+  filter: blur(34px);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 88%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 88%);
+}
+
+/* Darker at the edges, so the middle of the screen lifts without adding light. */
+body.bg-vignette::before {
+  background:
+    radial-gradient(120% 90% at 50% 40%,
+      color-mix(in srgb, var(--tint) 10%, transparent) 0%, transparent 45%),
+    radial-gradient(140% 110% at 50% 50%,
+      transparent 40%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/*
+ * The library's own artwork, far enough back to be texture rather than
+ * pictures. Three posters, heavily blurred and nearly black, with the tint
+ * laid over the top so it still belongs to the page.
+ */
+body.bg-posters::before {
+  background-image:
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--tint) 18%, rgba(11, 11, 15, 0.93)) 0%,
+      rgba(11, 11, 15, 0.97) 70%),
+    var(--wall-1, none), var(--wall-2, none), var(--wall-3, none);
+  background-size: cover, 46% auto, 46% auto, 46% auto;
+  background-position: center, -6% 12%, 52% -14%, 104% 62%;
+  background-repeat: no-repeat;
+  filter: blur(46px) saturate(90%);
+  transform: scale(1.16);
+}
+
+/*
+ * Anybody who has asked for less movement gets none.
+ *
+ * The drift is decoration; for somebody who finds motion uncomfortable it is
+ * the whole screen very slowly breathing, which is exactly what that setting
+ * exists to stop.
+ */
+@media (prefers-reduced-motion: reduce) {
+  body.bg-aurora::before { animation: none; }
+}
+
+/*
+ * A television is the one screen where this has to earn its keep.
+ *
+ * A Fire stick or a Roku composites a full-screen blurred layer on hardware
+ * that is doing well to decode the film at all, so the moving one is stilled
+ * and the heavy blurs are lightened. The look survives; the cost does not.
+ */
+body.tv-layout.bg-aurora::before { animation: none; filter: blur(30px); }
+body.tv-layout.bg-posters::before { filter: blur(34px); }
+body.tv-layout.bg-rays::before { filter: blur(20px); }
+body.tv-layout.bg-waves::before { filter: blur(24px); }
+body.tv-layout.bg-mesh::before { filter: blur(18px); }
+
+/* ------------------------------------------- choosing what sits behind --- */
+
+.bg-choice {
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+
+.bg-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.bg-option {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 7px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.bg-option:hover { border-color: var(--text-faint); }
+.bg-option.selected {
+  border-color: var(--text);
+  background: rgba(148, 161, 183, 0.14);
+}
+
+.bg-option-name { font-size: 12px; color: var(--text-dim); }
+.bg-option.selected .bg-option-name { color: var(--text); font-weight: 600; }
+
+/*
+ * A small window onto each design.
+ *
+ * The pane wears the same class the body wears, and the rules below repeat
+ * each design at swatch scale — a picture of the thing would drift away from
+ * it the first time either was touched.
+ */
+.bg-swatch {
+  display: block;
+  width: 100%;
+  /* All three, so the pane cannot be collapsed by whatever it sits inside. */
+  height: 52px;
+  min-height: 52px;
+  flex: none;
+  border-radius: 7px;
+  background: #0b0b0f;
+  overflow: hidden;
+  --tint: var(--bg-tint, var(--accent, #7d8aa0));
+}
+
+.bg-swatch.bg-plain { background: #0b0b0f; }
+
+.bg-swatch.bg-glow {
+  background:
+    radial-gradient(120% 80% at 50% -10%,
+      color-mix(in srgb, var(--tint) 46%, transparent) 0%, transparent 62%), #0b0b0f;
+}
+
+.bg-swatch.bg-aurora {
+  background:
+    radial-gradient(46% 52% at 22% 26%, color-mix(in srgb, var(--tint) 62%, transparent) 0%, transparent 70%),
+    radial-gradient(40% 46% at 80% 18%, color-mix(in srgb, var(--tint) 40%, transparent) 0%, transparent 70%),
+    radial-gradient(52% 46% at 62% 88%, color-mix(in srgb, var(--tint) 32%, transparent) 0%, transparent 72%), #0b0b0f;
+  filter: blur(5px);
+}
+
+.bg-swatch.bg-mesh {
+  background:
+    radial-gradient(58% 52% at 6% 4%, color-mix(in srgb, var(--tint) 58%, transparent) 0%, transparent 68%),
+    radial-gradient(50% 48% at 96% 12%, color-mix(in srgb, var(--tint) 40%, transparent) 0%, transparent 66%),
+    radial-gradient(64% 56% at 88% 96%, color-mix(in srgb, var(--tint) 46%, transparent) 0%, transparent 70%),
+    radial-gradient(48% 44% at 14% 92%, color-mix(in srgb, var(--tint) 30%, transparent) 0%, transparent 68%), #0b0b0f;
+  filter: blur(4px);
+}
+
+.bg-swatch.bg-rays {
+  background:
+    repeating-linear-gradient(108deg,
+      color-mix(in srgb, var(--tint) 30%, transparent) 0px,
+      color-mix(in srgb, var(--tint) 30%, transparent) 10px,
+      transparent 10px, transparent 28px),
+    radial-gradient(90% 70% at 20% -10%, color-mix(in srgb, var(--tint) 34%, transparent) 0%, transparent 62%), #0b0b0f;
+  filter: blur(3px);
+}
+
+.bg-swatch.bg-halo {
+  background:
+    radial-gradient(closest-side circle at 50% 42%,
+      transparent 0%, transparent 40%,
+      color-mix(in srgb, var(--tint) 55%, transparent) 60%, transparent 84%), #0b0b0f;
+  filter: blur(3px);
+}
+
+.bg-swatch.bg-grid {
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--tint) 46%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--tint) 46%, transparent) 1px, transparent 1px);
+  background-size: 13px 13px;
+  background-color: #0b0b0f;
+}
+
+.bg-swatch.bg-waves {
+  background:
+    repeating-linear-gradient(174deg,
+      color-mix(in srgb, var(--tint) 34%, transparent) 0px,
+      transparent 12px, transparent 24px,
+      color-mix(in srgb, var(--tint) 34%, transparent) 36px), #0b0b0f;
+  filter: blur(4px);
+}
+
+.bg-swatch.bg-vignette {
+  background:
+    radial-gradient(120% 90% at 50% 40%, color-mix(in srgb, var(--tint) 24%, transparent) 0%, transparent 45%),
+    radial-gradient(130% 110% at 50% 50%, transparent 34%, rgba(0, 0, 0, 0.72) 100%), #12121a;
+}
+
+.bg-swatch.bg-posters {
+  background:
+    linear-gradient(to bottom,
+      color-mix(in srgb, var(--tint) 28%, rgba(11, 11, 15, 0.9)) 0%, rgba(11, 11, 15, 0.96) 70%),
+    repeating-linear-gradient(115deg,
+      rgba(255, 255, 255, 0.18) 0 9px, rgba(255, 255, 255, 0.03) 9px 20px), #0b0b0f;
+  filter: blur(3px);
+}
+
+/* The colour every design is drawn from, chosen or followed. */
+.backdrop-colour {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.backdrop-follow {
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.backdrop-follow:hover { color: var(--text); border-color: var(--text-faint); }
+.backdrop-follow.selected {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0b0b0f;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- a title's page --- */
+
+/*
+ * The banner, with the picture bleeding off to one side.
+ *
+ * It used to be a full-width image with a flat dark sheet over all of it,
+ * which dimmed the artwork everywhere in order to make text readable in one
+ * corner. Fading it sideways instead leaves the right-hand side of the picture
+ * at full strength — the faces, usually — and puts the darkness only where the
+ * words are.
+ */
+.detail-hero .hero-bg {
+  background-position: right center;
+}
+
+.detail-hero .hero-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right,
+      var(--bg, #0b0b0f) 0%,
+      color-mix(in srgb, var(--bg, #0b0b0f) 82%, transparent) 34%,
+      transparent 68%),
+    linear-gradient(to top,
+      var(--bg, #0b0b0f) 0%,
+      transparent 42%);
+}
+
+/* One line of small marks: rating, length, year, and what the file is. */
+.hero-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0 0 12px;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
+.hero-fact { white-space: nowrap; }
+
+/*
+ * What the file actually is, marked out from what the database says.
+ *
+ * A quieter outline than the certification badge beside it: these are facts
+ * about the copy in this house, not about the film, and they should read as a
+ * footnote rather than as a claim.
+ */
+.badge.tech {
+  border-color: rgba(148, 161, 183, 0.45);
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/*
+ * The synopsis, cut to a few lines until asked for.
+ *
+ * Clamped rather than truncated with an ellipsis in script, so the text stays
+ * selectable and readable by anything reading the page aloud — it is all
+ * there, just not all shown.
+ */
+.hero-overview {
+  position: relative;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hero-overview.open {
+  display: block;
+  overflow: visible;
+}
+
+.hero-more {
+  display: inline;
+  margin-left: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hero-more:hover { text-decoration: underline; }
+
+.hero-genres {
+  margin: 10px 0 16px;
+  font-size: 13px;
+  color: var(--text-faint);
+  letter-spacing: 0.02em;
+}
+
+/*
+ * The actions that are not the reason you came.
+ *
+ * Round, quiet, and the same size as each other, so the one filled button
+ * beside them is unmistakably the thing to press. Their names live in the
+ * title and the label rather than on the face.
+ */
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(20, 20, 26, 0.5);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
+}
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: scale(1.06);
+}
+.icon-btn:active { transform: scale(0.95); }
+
+/* Already on the list: filled, so it reads as a state and not as a button. */
+.icon-btn.on {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0b0b0f;
+}
+
+/* The panels beneath the banner. */
+.detail-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 42px;
+  margin: 4px 0 18px;
+}
+
+.detail-tab {
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-faint);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+.detail-tab:hover { color: var(--text-dim); }
+
+/* The one you are on gets the outline, which is how the screen it came from
+   marks the current thing. */
+.detail-tab.on {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
+@media (max-width: 760px) {
+  .detail-tabs { padding: 0 16px; gap: 6px; overflow-x: auto; flex-wrap: nowrap; }
+  .detail-tab { flex: 0 0 auto; padding: 8px 14px; font-size: 13px; }
+  .hero-badges { font-size: 12.5px; gap: 7px; }
+  .icon-btn { width: 38px; height: 38px; font-size: 17px; }
+  /* On a phone the picture is behind the words rather than beside them, so it
+     is faded from the bottom instead of from the side. */
+  .detail-hero .hero-bg::after {
+    background:
+      linear-gradient(to top,
+        var(--bg, #0b0b0f) 0%,
+        color-mix(in srgb, var(--bg, #0b0b0f) 78%, transparent) 40%,
+        transparent 88%);
+  }
+}
+
+/* A television reads this from across the room, and drives it with a pad. */
+body.tv-layout .detail-tabs { padding: 0 56px; gap: 12px; }
+body.tv-layout .detail-tab { font-size: 17px; padding: 11px 22px; }
+body.tv-layout .icon-btn { width: 52px; height: 52px; font-size: 23px; }
+body.tv-layout .hero-badges { font-size: 16px; }
+
+/* ------------------------------------- the banner, and what comes after --- */
+
+/*
+ * Room between the picture and the panels.
+ *
+ * The tab strip sat immediately under the banner, on the hard line where the
+ * artwork stops, so it read as part of the picture rather than as the start of
+ * the page below it. The gap is what says one thing has ended and another has
+ * begun.
+ */
+.detail-tabs {
+  padding-top: 6px;
+  margin-top: 22px;
+  margin-bottom: 26px;
+}
+
+/* The actions sit slightly clear of the text above them. */
+.hero-actions {
+  gap: 10px;
+  margin-top: 20px;
+  align-items: center;
+}
+
+/*
+ * The round buttons, matched to the one beside them.
+ *
+ * They were a little smaller than the play button and outlined in a thin grey,
+ * so a row meant to read as "one action, then two lesser ones" read instead as
+ * one button and two afterthoughts. Same height as the play button now, and a
+ * fill rather than an outline, so the row has one shape in it.
+ */
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.1);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  font-size: 0;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  /* The glyphs are drawn as strokes, so they take the button's colour. */
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.42);
+}
+
+/* On the list: filled, because it is a state rather than an invitation. */
+.icon-btn.on {
+  background: var(--text);
+  border-color: var(--text);
+  color: #0b0b0f;
+}
+
+/* The play button carries the title's colour and should be the tallest thing. */
+.detail-hero .hero-actions .btn-primary {
+  height: 44px;
+  padding: 0 26px;
+  font-size: 15px;
+}
+
+@media (max-width: 760px) {
+  .icon-btn { width: 40px; height: 40px; }
+  .icon-btn svg { width: 18px; height: 18px; }
+  .detail-hero .hero-actions .btn-primary { height: 40px; padding: 0 20px; }
+  .detail-tabs { margin-top: 16px; margin-bottom: 18px; }
+}
+
+body.tv-layout .icon-btn { width: 56px; height: 56px; }
+body.tv-layout .icon-btn svg { width: 26px; height: 26px; }
+body.tv-layout .detail-hero .hero-actions .btn-primary { height: 56px; padding: 0 34px; }
+
+/* ------------------------------------------------ the sections, down the side --- */
+
+/*
+ * How wide the sidebar is, and therefore how far the page moves over.
+ *
+ * A television already had one of these, built out of the bottom bar and sized
+ * by this same variable — see the tv-layout block above, which sets it to 104
+ * on the body and so wins over this. Everything below is deliberately kept
+ * away from that layout rather than competing with it: two rails on one screen
+ * is what happens if these rules are allowed to apply there.
+ */
+:root { --rail-width: 0px; }
+
+.rail { display: none; }
+
+/*
+ * Below this width the sidebar is not offered at all.
+ *
+ * A phone keeps the bar along the bottom, where a thumb already rests; a
+ * column of targets at the far left edge would be worse than what it replaced.
+ */
+@media (min-width: 900px) {
+  :root { --rail-width: 72px; }
+
+  /*
+   * A picture and five drawings, and nothing else.
+   *
+   * It began as a strip that opened on hover to show the words. That was wrong
+   * with a pointer — it lunged open whenever the cursor crossed the left edge
+   * on its way elsewhere, so the page appeared to flinch — and worse without
+   * one, since a tablet or a television cannot hover and would have been left
+   * with glyphs it could never read the names of.
+   *
+   * So: no words, no opening, one width. The names are still on the buttons
+   * for anything reading the page aloud, and as the tooltip for anyone unsure.
+   * That keeps the strip narrow enough to cost nothing, which was the point of
+   * moving the sections off the top in the first place.
+   */
+  body:not(.tv-layout) .rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 40;
+    width: var(--rail-width);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 14px 0;
+    background: rgba(8, 8, 12, 0.92);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .rail-items {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .rail-item,
+  .rail-me {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Square, so the column reads as one row of equal targets. */
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+  }
+
+  .rail-item:hover,
+  .rail-me:hover { background: rgba(255, 255, 255, 0.09); color: var(--text); }
+
+  .rail-item.on,
+  .rail-me.on { color: var(--text); background: rgba(255, 255, 255, 0.07); }
+
+  /* Where you are, marked down the edge rather than by a fill alone. */
+  .rail-item.on::before,
+  .rail-me.on::before {
+    content: "";
+    position: absolute;
+    left: -13px;
+    width: 3px;
+    height: 22px;
+    border-radius: 0 3px 3px 0;
+    background: var(--accent, #7d8aa0);
+  }
+
+  .rail-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 19px;
+    line-height: 1;
+  }
+
+  /* Drawn, not typed: one weight, one baseline, and the button's own colour. */
+  .rail-glyph svg {
+    width: 23px;
+    height: 23px;
+    display: block;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .rail-me { margin-bottom: 4px; }
+
+  /*
+   * The names are read aloud, not drawn.
+   *
+   * Kept in the page rather than deleted: taking them out would leave a screen
+   * reader announcing five unlabelled buttons, which is a nav nobody blind can
+   * use. This is the usual way to say "for listening, not for looking".
+   */
+  .rail-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /*
+   * The page moves over once, at the top.
+   *
+   * Padding each region separately made them stack: a row already carries its
+   * own 42px gutter, so adding the sidebar's width to its container put the
+   * first poster 118px from the edge while the banner beside it used a
+   * different number again. One offset here, and every gutter inside stays
+   * exactly what it was.
+   */
+  body:not(.tv-layout) { padding-left: var(--rail-width); }
+
+  /*
+   * The bar starts where the sidebar ends.
+   *
+   * Being fixed, the page's padding does not move it: at left:0 it ran — and
+   * the line beneath it ran — straight through the sidebar, which is what made
+   * the two dividers read as a mistake rather than as an edge. Now they meet
+   * at a corner, which is the only place two rules ought to touch.
+   */
+  body:not(.tv-layout) .nav { left: var(--rail-width); }
+
+  /* The row of words along the top goes, having been replaced. The bar itself
+     stays: it carries the search, the reload and the gather button, which
+     belong to the screen you are on rather than to the list of screens. */
+  body:not(.tv-layout) .nav-links { display: none; }
+
+  /* And the profile chip goes, because the sidebar carries the picture now —
+     the two were on screen together, a few pixels apart, looking like one
+     person twice. */
+  body:not(.tv-layout) .nav-me { display: none; }
+
+  /*
+   * The controls keep the right-hand end of the row.
+   *
+   * They were moved to the left when the bar was a row of its own and that
+   * side was empty. It is not empty now — the name of the screen sits there —
+   * so bringing them back to the far edge is what puts the two on one line
+   * instead of on top of each other, which is exactly what happened when both
+   * started at the same gutter.
+   */
+  body:not(.tv-layout) .search-box {
+    flex: 0 1 420px;
+    min-width: 260px;
+  }
+
+  /*
+   * The page's name shares the bar's row.
+   *
+   * The header was padded down by the bar's whole height plus 34, which left a
+   * band of nothing between the search box and the title of the screen it
+   * searches. Sitting them together costs nothing and removes a row.
+   */
+  /*
+   * The row needs room above it.
+   *
+   * Brought level with the bar, the title inherited the bar's job of hugging
+   * the top of the window — which is right for a strip of controls and wrong
+   * for the name of the screen, which arrived pressed against the frame. The
+   * band is made taller and both are centred in it, so the two stay on one
+   * line and the line stops touching the edge.
+   */
+  body:not(.tv-layout) { --nav-height: calc(92px + var(--safe-top)); }
+
+  body:not(.tv-layout) .page-header {
+    padding-top: var(--safe-top);
+    padding-bottom: 20px;
+    /* The band, plus the padding beneath it: min-height counts the padding, so
+       matching the bar exactly would centre the title 10px higher than the
+       search box beside it. */
+    min-height: calc(var(--nav-height) + 20px);
+    align-items: center;
+  }
+
+  /*
+   * So the bar has to stop covering it.
+   *
+   * It spans the window and sits above the page, so at rest its empty left
+   * half lay over the title — invisible, but swallowing every click and any
+   * attempt to select the text. Transparent, and letting presses through
+   * except on the controls themselves, which keep theirs.
+   *
+   * Scrolled, it goes back to being a solid bar that the page slides under.
+   * That is the one moment it should cover the title.
+   */
+  body:not(.tv-layout) .nav {
+    background: none;
+    pointer-events: none;
+  }
+  body:not(.tv-layout) .nav > * { pointer-events: auto; }
+
+  body:not(.tv-layout) .nav.scrolled {
+    background: rgba(9, 9, 13, 0.97);
+    pointer-events: auto;
+  }
+
+  /*
+   * The bar keeps the same gutter as the page under it.
+   *
+   * A safe-area rule holds the bar to max(24px, the notch), which is right on
+   * a phone with a rounded corner and wrong on a desktop window — it left the
+   * search box starting 14px to the left of the first poster, close enough to
+   * read as a mistake rather than as a decision. The notch is still honoured;
+   * the floor is simply the gutter everything else uses.
+   */
+  body:not(.tv-layout) .nav {
+    padding-left: max(42px, env(safe-area-inset-left, 0px));
+  }
+
+  /* A little more presence, now that it is the only thing on its side. */
+  body:not(.tv-layout) .search-box input { font-size: 14.5px; }
+
+  /*
+   * The two that remain, held together at the other end.
+   *
+   * Grouped rather than merely adjacent, so the gap between them stays the
+   * same as the bar widens instead of drifting apart with it.
+   */
+  body:not(.tv-layout) .nav-search,
+  body:not(.tv-layout) .nav-gather,
+  body:not(.tv-layout) .nav-refresh { flex: none; }
+}
+
+/* ------------------------------------------------------- settings, calmer --- */
+
+/*
+ * The settings, in the shape a phone taught everyone to read.
+ *
+ * The screen held fifteen bordered boxes, each with a heading inside it and a
+ * paragraph under every control — a page where everything was outlined and so
+ * nothing was grouped. The arrangement below is the one iOS settled on and
+ * every phone has since copied, because it works: a quiet name above a group,
+ * the group as one soft slab with hairlines between its rows, and the
+ * explanation as a footnote underneath rather than a sentence between each
+ * pair of controls.
+ *
+ * Nothing is taken away. Every option that was on this page is still on it —
+ * this is entirely a matter of where the lines are drawn and how loud they
+ * are.
+ */
+
+.settings {
+  /* Narrower than the library behind it: a column of settings is read, and a
+     line of text 940px wide is a line nobody finishes. */
+  max-width: 720px;
+}
+
+/*
+ * The group: one slab, no outline.
+ *
+ * A border around a box that already has a different background is the belt
+ * and the braces. Losing it is most of what makes a page like this feel calm.
+ */
+.settings-card {
+  background: rgba(255, 255, 255, 0.045);
+  border: none;
+  border-radius: 14px;
+  padding: 4px 18px;
+  margin-bottom: 26px;
+}
+
+/*
+ * The name of the group sits above it, not inside it.
+ *
+ * Small, quiet and set in capitals — it is a label for the slab beneath rather
+ * than a title competing with the page's own.
+ */
+.settings-card h2 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin: 0 0 10px 2px;
+  /* Lifted clear of the slab it names. */
+  transform: translateY(-6px);
+}
+
+/* A heading inside a group, for the handful of cards that have two parts. */
+.settings-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 8px;
+  color: var(--text);
+}
+
+/*
+ * Rows.
+ *
+ * The hairline starts where the words start rather than at the edge of the
+ * slab, which is what makes a list read as a list instead of as a stack of
+ * separate bars. The last row has none, because there is nothing under it to
+ * be separated from.
+ */
+.toggle-row,
+.root-row,
+.status-row {
+  align-items: center;
+  gap: 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin: 0;
+}
+
+.toggle-row:last-of-type,
+.root-row:last-of-type,
+.status-row:last-of-type { border-bottom: none; }
+
+.toggle-row > span:first-of-type,
+.toggle-row > span:last-of-type { flex: 1; }
+
+/*
+ * The switch.
+ *
+ * A checkbox is a 13px square with a tick in it, which on a settings page is
+ * both hard to hit and hard to read at a glance — the state of a whole row
+ * comes down to a few pixels. A switch says on or off from across the room,
+ * and it is the control anybody who has held a phone already knows.
+ */
+.toggle-row input[type="checkbox"],
+.settings-card input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  position: relative;
+  width: 50px;
+  height: 30px;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: background 0.22s ease;
+}
+
+.toggle-row input[type="checkbox"]::after,
+.settings-card input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 0.22s cubic-bezier(0.3, 0.9, 0.4, 1);
+}
+
+.toggle-row input[type="checkbox"]:checked,
+.settings-card input[type="checkbox"]:checked { background: #32d158; }
+
+.toggle-row input[type="checkbox"]:checked::after,
+.settings-card input[type="checkbox"]:checked::after { transform: translateX(20px); }
+
+.toggle-row input[type="checkbox"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* The switch belongs at the end of its row, whatever order the markup is in. */
+.toggle-row { flex-direction: row-reverse; }
+.toggle-row > span { text-align: left; }
+
+/*
+ * The explanation, as a footnote.
+ *
+ * Under the group rather than between the controls: a paragraph after every
+ * switch is what turned this page into a wall, and the answer people actually
+ * want from it is usually the switch itself.
+ */
+.settings-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  margin: 10px 2px 0;
+}
+
+/* Inside a slab it is a note about the row above, so it stays close to it. */
+.settings-card .settings-hint { margin: 8px 0 14px; }
+
+.toggle-note {
+  font-size: 12.5px;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+.settings-empty {
+  font-size: 13px;
+  color: var(--text-faint);
+  padding: 13px 0;
+}
+
+/* Fields and the rows of buttons that follow them. */
+.key-row {
+  gap: 10px;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+
+.key-input {
+  border-radius: 10px;
+  padding: 11px 14px;
+  background: rgba(0, 0, 0, 0.32);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.key-input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.45);
+}
+
+/*
+ * Buttons, rounded to match everything else on the page.
+ *
+ * Only inside the settings: the library's own buttons are a different
+ * question and are left where they are.
+ */
+.settings .btn,
+.settings-card .btn {
+  border-radius: 10px;
+  font-size: 13.5px;
+  padding: 9px 18px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+/* The tabs across the top, as a segmented control rather than loose chips. */
+.settings-tabs {
+  gap: 3px;
+  padding: 3px;
+  margin: 0 42px 22px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  width: fit-content;
+  max-width: calc(100% - 84px);
+}
+
+/* Rows that carry a path or a status keep their monospace, just quieter. */
+.root-path { font-size: 13px; }
+
+@media (max-width: 760px) {
+  .settings-card { padding: 2px 14px; border-radius: 12px; }
+  .settings-tabs { margin: 0 16px 18px; max-width: calc(100% - 32px); }
+  .settings { max-width: none; }
+}
+
+/* --------------------------------------------- settings groups that fold --- */
+
+/*
+ * The name of a group is now the thing you press to close it.
+ *
+ * Built on <details> rather than on state of its own: the browser already
+ * knows how a disclosure behaves when tabbed to, pressed, or read aloud, and
+ * fifteen of these would otherwise be fifteen pieces of state to keep in step.
+ *
+ * All of them start open. A settings page that opens closed hides the thing
+ * somebody came to change behind a list of names.
+ */
+.settings-card > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /*
+   * The room the title was missing.
+   *
+   * The heading sat hard against the top edge of its slab with four pixels
+   * above it, which read as a mistake — a title needs air above it more than
+   * almost anything else on a page does.
+   */
+  padding: 16px 0 13px;
+  cursor: pointer;
+  /* Both spellings: one browser reads the property, the others the marker. */
+  list-style: none;
+  user-select: none;
+}
+
+.settings-card > summary::-webkit-details-marker { display: none; }
+
+/* The heading no longer floats above the slab; it is a row inside it. */
+.settings-card > summary h2 {
+  margin: 0;
+  transform: none;
+  flex: 1;
+}
+
+/*
+ * A chevron that turns, at the far end.
+ *
+ * Drawn from a border rather than a character so it is the same weight as the
+ * hairlines under the rows, and so it cannot be re-shaped by whatever font the
+ * machine happens to have.
+ */
+.settings-card > summary::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-right: 1.6px solid var(--text-faint);
+  border-bottom: 1.6px solid var(--text-faint);
+  transform: rotate(-45deg) translate(-1px, -1px);
+  transition: transform 0.2s ease;
+}
+
+.settings-card[open] > summary::after {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.settings-card > summary:hover::after { border-color: var(--text-dim); }
+.settings-card > summary:hover h2 { color: var(--text-dim); }
+
+/*
+ * Closed, the slab is just its own title.
+ *
+ * The bottom padding belongs to the contents, so it goes with them; without
+ * this a shut group keeps a band of empty space under the heading and the list
+ * of closed groups looks gappy rather than tidy.
+ */
+.settings-card { padding: 0 18px; }
+.settings-card[open] { padding-bottom: 14px; }
+
+/* The first row under the heading needs a line between it and the heading. */
+.settings-card[open] > summary { border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+
+@media (max-width: 760px) {
+  .settings-card { padding: 0 14px; }
+  .settings-card > summary { padding: 14px 0 11px; }
 }

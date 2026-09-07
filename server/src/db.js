@@ -125,6 +125,22 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 CREATE INDEX IF NOT EXISTS idx_profiles_order ON profiles(position, created_at);
 
+-- Who is kept out of a whole section of the library.
+--
+-- Stored as the people shut out rather than the people let in, so that no rows
+-- means everybody, which is what a section switched on for the first time has
+-- to mean. Recording the allowed instead would make an empty table say "nobody
+-- may see this", and turning comics on would show them to no one.
+--
+-- Keyed by section name rather than by a column per section, because the next
+-- one of these is already known about and a table that grows a column every
+-- time is a migration every time.
+CREATE TABLE IF NOT EXISTS section_blocks (
+  section    TEXT NOT NULL,
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  PRIMARY KEY (section, profile_id)
+);
+
 -- User corrections that must survive a rescan: forced TMDB matches, forced
 -- merges/splits, hidden items.
 CREATE TABLE IF NOT EXISTS overrides (
@@ -348,6 +364,26 @@ const MIGRATIONS = [
   // libraries need the columns put on rather than the table rebuilt.
   { table: 'collections', column: 'logo_path', definition: 'TEXT' },
   { table: 'collections', column: 'accent', definition: 'TEXT' },
+  // The colour taken out of a title's poster, so each one can light its own
+  // page rather than every page wearing the same red.
+  { table: 'items', column: 'accent', definition: 'TEXT' },
+  /*
+   * Where a shelf belongs: the films screen, the shows screen, or both.
+   *
+   * Added after collections shipped, so existing shelves need the column put
+   * on rather than the table rebuilt. Empty means "wherever its titles live",
+   * which is what every shelf made before this did.
+   */
+  { table: 'collections', column: 'shown_on', definition: 'TEXT' },
+  /*
+   * The key the scanner groups by, kept beside the one it is stored under.
+   *
+   * An item that matched is stored under its database identity, so the key it
+   * was found by is otherwise lost — and that is the key every user
+   * correction is filed against. Without it, forcing a title wrote a note the
+   * scanner never read, and 'Wrong title?' quietly did nothing.
+   */
+  { table: 'items', column: 'group_key', definition: 'TEXT' },
 ];
 
 function migrate(db) {

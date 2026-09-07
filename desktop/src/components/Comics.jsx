@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Row from './Row.jsx';
+import {
+  useShelfView, ShelfViewToggle, ShelfTile, ShelfLine,
+  useShelfOrder, ShelfOrderPicker, sortShelves, SHELF_ORDERS_BY_NAME,
+} from './ShelfView.jsx';
 import { api, comicCover } from '../api.js';
 
 /**
@@ -11,13 +15,25 @@ import { api, comicCover } from '../api.js';
  * say — somebody who keeps `COMICS/DC/Action Comics 1019-1049` has been clear
  * enough, and rearranging it would only be second-guessing them.
  */
-export function Comics({ onRead, query = '' }) {
+export function Comics({ onRead, query = '', shelfLayouts = null }) {
   const [shelves, setShelves] = useState([]);
   const [reading, setReading] = useState([]);
   const [stats, setStats] = useState(null);
   const [openShelf, setOpenShelf] = useState(null);
   const [openSeries, setOpenSeries] = useState(null);
   const [grid, setGrid] = useState(true);
+  /* The same three layouts as the film and television screens, and the same
+     choice: somebody who likes tiles likes tiles everywhere. */
+  const [shelfView, chooseShelfView, shelfLayoutsOffered] = useShelfView(shelfLayouts);
+  const [shelfOrder, chooseShelfOrder] = useShelfOrder();
+
+  /*
+   * The shelves in the chosen order.
+   *
+   * Only the orders that need a name: a comics shelf is a folder on the drive,
+   * and a folder has no date it was made in any sense worth sorting by.
+   */
+  const ordered = useMemo(() => sortShelves(shelves, shelfOrder), [shelves, shelfOrder]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -190,7 +206,55 @@ export function Comics({ onRead, query = '' }) {
               />
             )}
 
-            {shelves.map((shelf) => (
+            {shelves.length > 1 && (
+              <div className="browse-shelves-head">
+                <span className="browse-shelves-label">Shelves</span>
+                <div className="browse-shelves-tools">
+                  <ShelfOrderPicker
+                    order={shelfOrder}
+                    onChoose={chooseShelfOrder}
+                    offered={SHELF_ORDERS_BY_NAME}
+                  />
+                  <ShelfViewToggle
+                    view={shelfView}
+                    onChoose={chooseShelfView}
+                    offered={shelfLayoutsOffered}
+                    label="Shelf layout"
+                  />
+                </div>
+              </div>
+            )}
+
+            {shelfView === 'grid' && (
+              <div className="shelf-grid">
+                {ordered.map((shelf) => (
+                  <ShelfTile
+                    key={shelf.name}
+                    name={shelf.name}
+                    count={shelf.series.length}
+                    covers={shelf.series
+                      .map((series) => (series.coverIssue ? comicCover(series.coverIssue) : null))
+                      .filter(Boolean)}
+                    onOpen={() => setOpenShelf(shelf.name)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {shelfView === 'list' && (
+              <div className="shelf-lines">
+                {ordered.map((shelf) => (
+                  <ShelfLine
+                    key={shelf.name}
+                    name={shelf.name}
+                    count={shelf.series.length}
+                    onOpen={() => setOpenShelf(shelf.name)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {shelfView === 'rows' && ordered.map((shelf) => (
               <Row
                 key={shelf.name}
                 title={shelf.name}

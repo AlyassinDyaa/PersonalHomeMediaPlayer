@@ -20,7 +20,9 @@ export function Hero({ item, onPlay, onDetails, dots = null }) {
   const logo = artwork(item.logo, 'w500');
 
   return (
-    <div className="hero">
+    // The colour comes with the title: everything inside that reaches for the
+    // accent — the play button, the meta figures — takes this one.
+    <div className="hero tinted" style={item.accent ? { '--accent': item.accent } : undefined}>
       {/*
         * Keyed on the item so React swaps the element rather than mutating it,
         * which lets the new backdrop fade in over the old one instead of
@@ -31,6 +33,8 @@ export function Hero({ item, onPlay, onDetails, dots = null }) {
         className="hero-bg"
         style={backdrop ? { backgroundImage: 'url(' + backdrop + ')' } : undefined}
       />
+
+      <div className="tint-glow" />
 
       <div className="hero-content" key={'content-' + item.id}>
         {logo

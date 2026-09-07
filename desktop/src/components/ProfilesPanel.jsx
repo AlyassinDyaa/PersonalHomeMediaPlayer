@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import ProfileFace from './ProfileFace.jsx';
 import AvatarCropper from './AvatarCropper.jsx';
-import { api, rememberProfile } from '../api.js';
+import { api, rememberProfile } from '../api.js';
+import Confirm from './Confirm.jsx';
 
 /**
  * The colours a profile can wear.
@@ -53,6 +54,15 @@ export function ProfilesPanel({ isOwner }) {
   const [editingSource, setEditingSource] = useState(null);
   /** A PIN change waiting to be confirmed; holds what was typed. */
   const [confirmPin, setConfirmPin] = useState(null);
+  /*
+   * Somebody about to be removed, waiting to be asked about.
+   *
+   * This had no question at all: one press took a person and everything they
+   * had ever watched, with nothing in between and no way back.
+   */
+  const [removing, setRemoving] = useState(null);
+  /** A picture about to be taken off a profile. */
+  const [clearingFace, setClearingFace] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -253,7 +263,7 @@ export function ProfilesPanel({ isOwner }) {
                       type="button"
                       className="btn btn-ghost danger-text"
                       disabled={busy}
-                      onClick={() => remove(profile)}
+                      onClick={() => setRemoving(profile)}
                     >
                       Remove
                     </button>
@@ -328,11 +338,7 @@ export function ProfilesPanel({ isOwner }) {
                     <button
                       type="button"
                       className="btn btn-ghost danger-text"
-                      onClick={async () => {
-                        await api.clearAvatar(draft.id).catch(() => {});
-                        setDraft((current) => ({ ...current, avatarAt: null }));
-                        load();
-                      }}
+                      onClick={() => setClearingFace(true)}
                     >
                       Remove
                     </button>
@@ -491,7 +497,7 @@ export function ProfilesPanel({ isOwner }) {
             </p>
 
             <div className="settings-actions">
-              <button type="button" className="btn btn-ghost" onClick={() => setDraft(null)} disabled={busy}>
+              <button type="button" className="btn btn-secondary" onClick={() => setDraft(null)} disabled={busy}>
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary" disabled={busy || !draft.name.trim()}>
@@ -500,6 +506,31 @@ export function ProfilesPanel({ isOwner }) {
             </div>
           </form>
         </section>
+      )}
+
+      {removing && (
+        <Confirm
+          title={"Remove " + removing.name + "?"}
+          body="Everything they have watched goes with them — what they were part way through, and where they had got to. It cannot be undone."
+          confirmLabel={"Remove " + removing.name}
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => { const who = removing; setRemoving(null); remove(who); }}
+        />
+      )}
+
+      {clearingFace && (
+        <Confirm
+          title="Remove this picture?"
+          body="The profile goes back to its initial on a colour. The picture itself is deleted."
+          confirmLabel="Remove the picture"
+          onCancel={() => setClearingFace(false)}
+          onConfirm={async () => {
+            setClearingFace(false);
+            await api.clearAvatar(draft.id).catch(() => {});
+            setDraft((current) => ({ ...current, avatarAt: null }));
+            load();
+          }}
+        />
       )}
 
       {!isOwner && (

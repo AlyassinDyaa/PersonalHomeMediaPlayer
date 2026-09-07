@@ -26,8 +26,14 @@ html, body {
 /* --------------------------------------------------------------- header --- */
 
 .nav {
-  /* Clear of the camera housing and the rounded corners. */
-  padding-top: env(safe-area-inset-top, 0);
+  /*
+   * Clear of the camera housing and the rounded corners.
+   *
+   * The top comes from the shared token rather than being measured again
+   * here: the height of the bar is worked out from the same value, and two
+   * copies of it would eventually disagree.
+   */
+  padding-top: var(--safe-top);
   padding-left: max(24px, env(safe-area-inset-left, 0));
   padding-right: max(24px, env(safe-area-inset-right, 0));
 }
@@ -255,6 +261,14 @@ html, body {
  * gesture on the page and the scrub fights the scroll, which is what made it
  * feel like it was sticking.
  */
+/* What the preview is measured against: the bar alone, not the whole row. */
+.player-seek-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
 .player-seek {
   flex: 1;
   min-width: 0;
@@ -271,7 +285,7 @@ html, body {
   border-radius: 3px;
   background:
     linear-gradient(to right,
-      var(--accent, #e50914) 0 var(--played, 0%),
+      var(--accent, #7d8aa0) 0 var(--played, 0%),
       rgba(255, 255, 255, 0.28) var(--played, 0%) 100%);
 }
 
@@ -299,7 +313,7 @@ html, body {
 .player-seek::-moz-range-progress {
   height: 6px;
   border-radius: 3px;
-  background: var(--accent, #e50914);
+  background: var(--accent, #7d8aa0);
 }
 .player-seek::-moz-range-thumb {
   width: 18px;
@@ -462,4 +476,159 @@ body:has(.player) { overflow: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
   .player-touch, .touch-key { transition: none; }
+}
+
+/* ---------------------------------------------------- scrub preview --- */
+
+/*
+ * The frame under the finger, above the bar.
+ *
+ * Centred on the position rather than following the thumb exactly: the bar
+ * has a thumb of its own and two pictures chasing each other along the same
+ * line reads as a fault. Pointer events are off so a finger dragging over it
+ * is still dragging the bar underneath.
+ */
+.scrub-preview {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.scrub-preview img {
+  display: block;
+  width: 158px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #16161d;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+.scrub-preview span {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #f4f4f6;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+@media (max-width: 520px) {
+  .scrub-preview img { width: 124px; }
+}
+
+/* ------------------------------------------------------- on a television --- */
+
+/*
+ * The transport, read from a sofa and driven with five buttons.
+ *
+ * The bar was drawn for a thumb on a tablet held at arm's length. On a screen
+ * three metres away the same bar is a row of grey specks: the clock cannot be
+ * read, the keys cannot be told apart, and there is no pointer to aim at them
+ * with anyway. Everything grows, and everything is held in from the edge by
+ * the same margin as the rest of the television layout, because a set that
+ * crops the picture crops the play button with it.
+ */
+body.tv-layout .player-bar {
+  gap: 18px;
+  padding: 60px calc(var(--overscan) + 18px) calc(var(--overscan) + 18px);
+}
+
+body.tv-layout .player-key {
+  min-width: 68px;
+  height: 56px;
+  padding: 0 18px;
+  font-size: 20px;
+  border-radius: 12px;
+}
+
+body.tv-layout .player-time { font-size: 19px; min-width: 78px; }
+
+/* A bar thin enough to miss from across a room is a bar nobody can aim at. */
+body.tv-layout .player-seek { height: 56px; }
+body.tv-layout .player-seek::-webkit-slider-runnable-track { height: 10px; border-radius: 5px; }
+body.tv-layout .player-seek::-webkit-slider-thumb {
+  width: 24px; height: 24px; margin-top: -7px;
+}
+body.tv-layout .player-seek::-moz-range-track,
+body.tv-layout .player-seek::-moz-range-progress { height: 10px; border-radius: 5px; }
+body.tv-layout .player-seek::-moz-range-thumb { width: 24px; height: 24px; }
+
+body.tv-layout .player-title { font-size: 26px; }
+body.tv-layout .player-chrome { padding: calc(var(--overscan) + 14px); }
+body.tv-layout .player-step { min-width: 68px; height: 56px; font-size: 20px; }
+
+/*
+ * The highlight, over the picture.
+ *
+ * The ring used everywhere else is drawn against the page's own background,
+ * which here is whatever frame happens to be behind it — so it needs its own
+ * dark halo to stay visible over a bright scene.
+ */
+body.tv-layout.by-remote .player-bar :focus,
+body.tv-layout.by-remote .player-chrome :focus,
+body.tv-layout.by-remote .player-actions :focus {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.85), 0 0 0 9px var(--accent);
+}
+
+/*
+ * A failure, said once and readably.
+ *
+ * The message used to be whatever the server handed back, unwrapped, laid
+ * across the middle of the picture — on a phone that was a paragraph of
+ * command line with the actual reason in the last two words, over the top of
+ * the transport controls. Now it is a panel: bounded, wrapped, and legible at
+ * arm's length, with the two things worth doing underneath it.
+ */
+.player-note .player-error {
+  max-width: min(34rem, 88vw);
+  margin: 0 auto 4px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(30, 10, 12, 0.72);
+  border: 1px solid rgba(229, 57, 70, 0.4);
+  color: #ff9ba1;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  /* A long path has no spaces to break at; without this it runs off the edge. */
+  overflow-wrap: anywhere;
+  /* Nothing here is worth more than a few lines of a stranger's attention. */
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/*
+ * The bar is driven by the pointer, not by the browser's own slider.
+ *
+ * Safari on iOS only follows a drag that begins on the thumb, so tapping
+ * further along the track did nothing and moving through a film meant
+ * catching an eighteen-pixel circle. The wrapper now reads the pointer
+ * against its own width, and the input underneath is there for the keyboard
+ * and for anything reading the page aloud.
+ */
+.player-seek-wrap {
+  touch-action: none;
+  cursor: pointer;
+  /* A generous band above and below, so a thumb lands on the bar and not on
+     the picture behind it. The bar itself stays where it is drawn. */
+  padding: 6px 0;
+}
+
+.player-seek { pointer-events: none; }
+
+/* Focus still has to be visible: the input is driven from outside now, but it
+   is still the thing a keyboard lands on. */
+.player-seek:focus-visible {
+  outline: 2px solid var(--accent, #7d8aa0);
+  outline-offset: 4px;
+  border-radius: 6px;
 }

@@ -134,7 +134,9 @@ export function ProfilePicker({ profiles, onChosen, onCancel }) {
  */
 /** Kept as a thin name over the shared face, so callers here read the same. */
 function Face({ profile, large = false }) {
-  return <ProfileFace profile={profile} size={large ? 'large' : 'small'} />;
+  // 'picker' rather than 'small': these are the full tiles. "small" is not a
+  // size the face knows, so it fell through to the same tile by accident.
+  return <ProfileFace profile={profile} size={large ? 'large' : 'picker'} />;
 }
 
 export default ProfilePicker;

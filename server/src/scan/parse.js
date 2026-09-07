@@ -176,9 +176,25 @@ export function normalizeSeparators(input) {
  * already been removed from the same string.
  */
 const AMBIGUOUS_TOKENS = new Set([
-  'max', 'dv', 'dc', 'dd', 'ma', 'web', 'bd', 'br', 'dvd', 'multi', 'complete',
+  'max', 'dv', 'dc', 'dd', 'ma', 'web', 'bd', 'br', 'dvd', 'multi',
   'sub', 'subs', 'dual', 'custom', 'retail', 'limited', 'internal', 'extended',
 ]);
+
+/**
+ * Words that are release metadata wherever they end a name.
+ *
+ * "Complete" was treated as ambiguous, which meant it survived unless an
+ * unmistakable token had already been stripped from the same string — and for
+ * a folder like "Fantastic Four The Animated Series Complete 1994 480p WEB-DL"
+ * nothing ever set that flag, so the show was searched for under a name with
+ * "Complete" on the end and matched nothing at all. It had no artwork and its
+ * raw folder name for a title.
+ *
+ * Safe to strip unconditionally because this sweep only ever runs from the end
+ * of the name: a film called "A Complete Unknown" is never reached, since the
+ * sweep stops at "Unknown" long before it.
+ */
+const TRAILING_TOKENS = new Set(['complete']);
 
 /** Content inside brackets/parens that marks the whole group as release noise. */
 const RELEASE_HINT_RE =
@@ -293,10 +309,34 @@ export function findYear(normalized) {
  * as the series title and everything after as the episode title.
  */
 const EPISODE_MATCHERS = [
+  /*
+   * S03x307 — the season, then the season again with the episode after it.
+   *
+   * A shape that looks like a typo and is not: the folder writes the season
+   * once as "S03" and again as the leading digit of "307". Both agree, which
+   * is what makes it safe to read — the repeat is required to match, so an
+   * ordinary "S03x12" is left to the patterns below rather than being
+   * misread here.
+   */
+  {
+    name: 'SxxNNN',
+    re: /\bS(\d{1,2})\s?x\s?(\d)(\d{2})\b/i,
+    build: (m) => (Number(m[1]) === Number(m[2])
+      ? { season: Number(m[1]), episode: Number(m[3]), episodeEnd: null }
+      : null),
+  },
   // S01E01E02 / S01E01-E02 / S01E01
   {
     name: 'SxxExx',
-    re: /\bS(\d{1,2})\s?E(\d{1,3})(?:\s?[-–]\s?E?(\d{1,3})|\s?E(\d{1,3}))?\b/i,
+    /*
+     * The 'x' between them is optional because some rips write it.
+     *
+     * Dora.the.Explorer.S01xE01.The.Big.Red.Chicken.avi is the ordinary
+     * SxxExx shape with an x in the middle, and without allowing for it those
+     * files carried no marker at all — fifty-one episodes of one show were
+     * simply not in the library.
+     */
+    re: /\bS(\d{1,2})\s?x?\s?E(\d{1,3})(?:\s?[-–]\s?E?(\d{1,3})|\s?E(\d{1,3}))?\b/i,
     build: (m) => ({
       season: Number(m[1]),
       episode: Number(m[2]),
@@ -349,8 +389,9 @@ export function parseEpisodeMarker(rawName) {
   for (const matcher of EPISODE_MATCHERS) {
     const m = normalized.match(matcher.re);
     if (!m) continue;
+    // A matcher may look at what it caught and decline it.
     const parsed = matcher.build(m);
-    if (parsed.episode === null || Number.isNaN(parsed.episode)) continue;
+    if (!parsed || parsed.episode === null || Number.isNaN(parsed.episode)) continue;
     return {
       ...parsed,
       pattern: matcher.name,
@@ -470,6 +511,7 @@ export function stripReleaseTokens(input, { allowEmpty = false } = {}) {
     const compact = word.toLowerCase().replace(/[^a-z0-9]/g, '');
     if (!compact) return true; // stray punctuation
     if (/^\d{3,4}[pi]$/.test(compact)) return true;
+    if (TRAILING_TOKENS.has(compact)) return true;
     if (AMBIGUOUS_TOKENS.has(compact)) return strippedUnambiguous;
     return COMPACT_TOKENS.has(compact);
   };
@@ -532,18 +574,33 @@ export function parseTitle(rawName, { isFile = false } = {}) {
  * @param {string} rawName
  * @param {number} expectedSeason Season derived from the folder chain.
  */
-export function parseContextualEpisodeMarker(rawName, expectedSeason) {
+export function parseContextualEpisodeMarker(rawName, expectedSeason, { seasonRange = null } = {}) {
   const normalized = normalizeSeparators(stripExtension(rawName));
   // Bracketed release tags are dropped first so "[dummy]" and friends cannot
   // contribute digits.
   const searchable = stripBracketed(normalized);
 
   for (const match of searchable.matchAll(/\b(\d)(\d{2})\b/g)) {
-    if (Number(match[1]) !== expectedSeason) continue;
+    const said = Number(match[1]);
+    /*
+     * A folder covering several seasons says which one each file belongs to.
+     *
+     * This only ever accepted a three-digit marker whose first digit matched
+     * the one season the folder named — right for "Season 2", wrong for
+     * "S01-S05", where the folder names a range and every file numbered 201,
+     * 305, 412 is telling you its own season. Held to the range the folder
+     * gave, so a stray number outside it is still refused.
+     *
+     * A whole show was sitting behind this: 111 files in one folder, of which
+     * 17 were read and 94 — every season past the first — were dropped.
+     */
+    const inRange = seasonRange
+      && said >= seasonRange[0] && said <= seasonRange[1];
+    if (said !== expectedSeason && !inRange) continue;
     const episode = Number(match[2]);
     if (episode < 1 || episode > 99) continue;
     return {
-      season: expectedSeason,
+      season: said,
       episode,
       episodeEnd: null,
       pattern: 'contextual-combined',
@@ -551,6 +608,71 @@ export function parseContextualEpisodeMarker(rawName, expectedSeason) {
       length: match[0].length,
       normalized: searchable,
     };
+  }
+  /*
+   * A plain number at the very front: "01 Independence Day (HD).m4v".
+   *
+   * How a whole season looks when it came from a disc or a store rather than
+   * from a release group: the season is the folder it sits in, and the file
+   * says only which episode it is. Without this such a file carries no
+   * episode at all and the season is dropped from the library entirely —
+   * which is exactly what happened to one season sitting beside three that
+   * happened to be named in the usual way.
+   *
+   * Only at the very start, only one or two digits, and only when the folder
+   * has already said which season this is. A title that merely contains a
+   * number cannot be mistaken for one.
+   */
+  const leading = searchable.match(/^(\d{1,2})(?=\s|$)/);
+  if (leading) {
+    const episode = Number(leading[1]);
+    if (episode >= 1 && episode <= 99) {
+      return {
+        season: expectedSeason,
+        episode,
+        episodeEnd: null,
+        pattern: 'contextual-leading',
+        index: leading.index,
+        length: leading[0].length,
+        normalized: searchable,
+      };
+    }
+  }
+
+  /*
+   * A number the name itself sets off from the title: "Care Bears Dic 01 -
+   * Camp.avi".
+   *
+   * The other shape a home-made or disc rip takes. The season is again the
+   * folder's business and the file numbers the episode, but here the number
+   * comes after the show's name rather than before it — and the dash the
+   * ripper typed is what says so. Everything left of the number is the series,
+   * everything right of the dash is the episode's title, which is the same
+   * reading a person gives it at a glance.
+   *
+   * The dash is doing real work and is not decoration: it is the difference
+   * between this and any title that merely contains a small number. "Ben 10 -
+   * Secrets" would be misread, so the number must be followed by a spaced dash
+   * *and* have something before it — a bare "10 - Secrets" is already handled
+   * above, and a name that is nothing but a number and a dash is not a series.
+   * Files numbered "00a" and "00b" — the intro and the credits that come with
+   * these rips — carry a letter, so no word boundary falls after the digits and
+   * they stay out of the library, which is right.
+   */
+  const setOff = searchable.match(/(?<=\S\s)\b(\d{1,2})\b\s*[-–]\s+(?=\S)/);
+  if (setOff) {
+    const episode = Number(setOff[1]);
+    if (episode >= 1 && episode <= 99) {
+      return {
+        season: expectedSeason,
+        episode,
+        episodeEnd: null,
+        pattern: 'contextual-set-off',
+        index: setOff.index,
+        length: setOff[0].length,
+        normalized: searchable,
+      };
+    }
   }
   return null;
 }
@@ -560,10 +682,12 @@ export function parseContextualEpisodeMarker(rawName, expectedSeason) {
  * `fallbackSeason` supplies the season when the filename only carries "E01",
  * and additionally unlocks the contextual bare-number parse above.
  */
-export function parseEpisodeFile(rawName, { fallbackSeason = null } = {}) {
+export function parseEpisodeFile(rawName, { fallbackSeason = null, seasonRange = null } = {}) {
   const marker =
     parseEpisodeMarker(rawName) ??
-    (fallbackSeason !== null ? parseContextualEpisodeMarker(rawName, fallbackSeason) : null);
+    (fallbackSeason !== null
+      ? parseContextualEpisodeMarker(rawName, fallbackSeason, { seasonRange })
+      : null);
   if (!marker) return null;
 
   const before = marker.normalized.slice(0, marker.index);

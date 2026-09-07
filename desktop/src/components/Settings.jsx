@@ -2,16 +2,25 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
+import SectionAccess from './SectionAccess.jsx';
 import HealthPanel from './HealthPanel.jsx';
 import RequestsPanel from './RequestsPanel.jsx';
 import ProfilesPanel from './ProfilesPanel.jsx';
 import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
+import { BACKGROUNDS, BACKDROP_COLOURS, backgroundClass } from '../backgrounds.js';
 
 /**
  * Library settings: which folders to scan, and running a scan with live
  * progress. Scan progress arrives over server-sent events so the bar reflects
  * real work rather than an animation.
  */
+/** The collection layouts an owner can offer, and what each is. */
+const SHELF_LAYOUT_CHOICES = [
+  ['rows', 'Rows', 'One rail per collection, with the covers'],
+  ['grid', 'Grid', 'Every collection as a tile with its badge'],
+  ['list', 'List', 'One line each, best for a long list'],
+];
+
 /**
  * The groups the settings are divided into, in the order they are offered.
  *
@@ -24,7 +33,7 @@ import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
  */
 const SETTINGS_TABS = [
   { id: 'library', label: 'Folders', ownerOnly: true, hint: 'Where your movies and shows live, and how they are arranged' },
-  { id: 'collections', label: 'Collections', hint: 'Your own shelves on the home screen' },
+  { id: 'collections', label: 'Collections', ownerOnly: true, hint: 'Your own shelves on the home screen' },
   { id: 'comics', label: 'Comics', ownerOnly: true, hint: 'Where your comics live, and whether the tab is shown' },
   { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
   { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
@@ -33,7 +42,7 @@ const SETTINGS_TABS = [
   { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Scanning, storage, and the state of the library' },
 ];
 
-export function Settings({ onScanned, onSettingsChanged }) {
+export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
   // Which folder the picker is choosing: a library root, or where the
@@ -129,7 +138,17 @@ export function Settings({ onScanned, onSettingsChanged }) {
     // round trip; the response replaces it either way.
     setSettings((previous) => ({ ...previous, [key]: value }));
     try {
-      setSettings(await api.saveSettings({ [key]: value }));
+      const saved = await api.saveSettings({ [key]: value });
+      setSettings(saved);
+      /*
+       * Tell the app, not just this page.
+       *
+       * Some of these change how the whole library looks rather than how it
+       * behaves — the background above is the obvious one — and without this
+       * the choice sat in Settings until the next reload, which reads as the
+       * button not having worked.
+       */
+      onSettingsChanged?.(saved);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -344,8 +363,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
 
         {active === 'library' && (
           <>
-          <section className="settings-card">
-            <h2>Folders</h2>
+          <details className="settings-card" open>
+            <summary><h2>Folders</h2></summary>
             <p className="settings-hint">
               Point at any folder containing movies or TV shows. Sub-folders are searched
               automatically, and nothing needs renaming.
@@ -360,17 +379,17 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
                 <code className="root-path">{root.path}</code>
                 {!root.available && <span className="root-warn">not connected</span>}
-                <button className="btn btn-ghost" onClick={() => removeRoot(root.path)}>Remove</button>
+                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
               </div>
             ))}
 
             <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
               + Add folder
             </button>
-          </section>
+          </details>
 
-          <section className="settings-card">
-            <h2>Name</h2>
+          <details className="settings-card" open>
+            <summary><h2>Name</h2></summary>
             <p className="settings-hint">
               Your name appears in the header, so the library reads as yours.
             </p>
@@ -416,10 +435,150 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 ? 'Saved.'
                 : <>Header will read <strong style={{ color }}>{headerPreview(name)}</strong>.</>}
             </p>
-          </section>
 
-          <section className="settings-card">
-            <h2>How the library is arranged</h2>
+            {/*
+              * What sits behind the library.
+              *
+              * Shown as five small panes rather than a dropdown, because this
+              * is judged by looking at it — a list of the words "Glow",
+              * "Aurora" and "Vignette" tells nobody anything. Each pane is
+              * painted by the same stylesheet that paints the real thing, so
+              * what is on offer is what arrives.
+              */}
+            <div className="bg-choice">
+              <span className="settings-hint" style={{ margin: '0 0 8px' }}>
+                Behind the library
+              </span>
+              <div className="bg-options">
+                {BACKGROUNDS.map(([id, label, hint]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={
+                      (settings.background ?? 'flat') === id
+                        ? 'bg-option selected' : 'bg-option'
+                    }
+                    title={hint}
+                    aria-pressed={(settings.background ?? 'flat') === id}
+                    onClick={() => saveToggle('background', id)}
+                  >
+                    <span
+                      className={'bg-swatch ' + (backgroundClass(id) || 'bg-plain')}
+                      /* The pane shows the colour the room will actually use:
+                         the chosen one, or the library colour standing in for
+                         whatever artwork happens to be on screen. */
+                      style={{ '--bg-tint': settings.backgroundColor || color }}
+                      aria-hidden="true"
+                    />
+                    <span className="bg-option-name">{label}</span>
+                  </button>
+                ))}
+              </div>
+              {/*
+                * The colour every design is drawn from.
+                *
+                * Following the artwork is first and is the default, because it
+                * costs nothing and the room then changes as you move through
+                * the library. A fixed colour is for a household that would
+                * rather it looked the same every time.
+                */}
+              <div className="backdrop-colour">
+                <span className="settings-hint" style={{ margin: 0 }}>Colour</span>
+                <button
+                  type="button"
+                  className={
+                    (settings.backgroundColor ?? '')
+                      ? 'backdrop-follow' : 'backdrop-follow selected'
+                  }
+                  onClick={() => saveToggle('backgroundColor', '')}
+                >
+                  Follow the artwork
+                </button>
+
+                {BACKDROP_COLOURS.filter(([value]) => value).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={value === settings.backgroundColor ? 'swatch selected' : 'swatch'}
+                    style={{ background: value }}
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={value === settings.backgroundColor}
+                    onClick={() => saveToggle('backgroundColor', value)}
+                  />
+                ))}
+
+                {/* Anything not in the row, for a colour of their own. */}
+                <label
+                  className="swatch custom"
+                  title="Custom colour"
+                  style={{ background: settings.backgroundColor || '#0b0b0f' }}
+                >
+                  <input
+                    type="color"
+                    value={settings.backgroundColor || '#7d8aa0'}
+                    onChange={(event) => saveToggle('backgroundColor', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+                Everybody watching sees the same one.{' '}
+                {(settings.backgroundColor ?? '')
+                  ? 'The colour is fixed, so the room looks the same on every screen.'
+                  : 'It takes its colour from whatever is on screen, so it follows the film rather than sitting on top of it.'}
+              </p>
+            </div>
+          </details>
+
+          {/*
+            * Which layouts exist, as opposed to which one somebody is using.
+            *
+            * The choice between rails, tiles and lines is made on the screen
+            * itself and belongs to whoever is looking. What belongs here is
+            * whether that choice is offered at all: a household that only ever
+            * wants rails should not have two buttons inviting a change nobody
+            * wants. Take them all but one away and the buttons disappear.
+            */}
+          <details className="settings-card" open>
+            <summary><h2>How collections are shown</h2></summary>
+            <p className="settings-hint">
+              Collections can be laid out three ways on the Films, TV Shows and
+              Comics screens, and anybody watching picks between whichever of them
+              you leave switched on here.
+            </p>
+
+            {SHELF_LAYOUT_CHOICES.map(([id, name, hint]) => {
+              const chosen = settings.shelfLayouts ?? SHELF_LAYOUT_CHOICES.map(([each]) => each);
+              const on = chosen.includes(id);
+              // Never all three off: something has to draw the collections.
+              const last = on && chosen.length === 1;
+              return (
+                <label className="toggle-row" key={id}>
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={last}
+                    onChange={(event) => {
+                      const next = SHELF_LAYOUT_CHOICES
+                        .map(([each]) => each)
+                        .filter((each) => (each === id ? event.target.checked : chosen.includes(each)));
+                      saveToggle('shelfLayouts', next.length ? next : ['rows']);
+                    }}
+                  />
+                  <span>
+                    <strong>{name}</strong>
+                    <span className="toggle-note">
+                      {last ? hint + ' — the only one left, so it stays' : hint}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </details>
+
+          <details className="settings-card" open>
+            <summary><h2>How the library is arranged</h2></summary>
             <p className="settings-hint">
               Films and series are normally shelved under genre headings. Where a
               library leans heavily one way — a shelf of cartoons that are all
@@ -463,12 +622,45 @@ export function Settings({ onScanned, onSettingsChanged }) {
               The genre chips on those screens still filter whichever way this is
               set, so nothing is put out of reach by turning the headings off.
             </p>
-          </section>
+          </details>
 
           </>
         )}
 
-        {active === 'collections' && <CollectionsPanel onChanged={onSettingsChanged} />}
+        {active === 'collections' && (
+          <>
+            <CollectionsPanel onChanged={onShelvesChanged} isOwner={isOwner} />
+
+            {isOwner && (
+              <details className="settings-card" open>
+                <summary><h2>How the home screen is arranged</h2></summary>
+
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={settings.genreShelves !== false}
+                    onChange={(event) => saveToggle('genreShelves', event.target.checked)}
+                  />
+                  <span>
+                    <strong>Also shelve by genre</strong>
+                    <span className="toggle-note">
+                      {settings.genreShelves !== false
+                        ? 'Action, Animation and the rest, worked out from the metadata'
+                        : 'Off — your own shelves are the arrangement'}
+                    </span>
+                  </span>
+                </label>
+
+                <p className="settings-hint">
+                  Your shelves always come first, above anything the library worked
+                  out for itself. Turn the genre shelves off once you have made
+                  enough of your own, and the home screen becomes exactly what you
+                  arranged and nothing else.
+                </p>
+              </details>
+            )}
+          </>
+        )}
 
         {active === 'profiles' && <ProfilesPanel isOwner={isOwner} />}
 
@@ -476,8 +668,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
 
         {active === 'comics' && (
           <>
-          <section className="settings-card">
-            <h2>Comics</h2>
+          <details className="settings-card" open>
+            <summary><h2>Comics</h2></summary>
 
             <label className="toggle-row">
               <input
@@ -494,6 +686,12 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 </span>
               </span>
             </label>
+
+            {/* Only once it is on: who may see a hidden section is not a
+                question anybody needs answered. */}
+            {settings.showComics !== false && isOwner && (
+              <SectionAccess section="comics" noun="the comics" />
+            )}
 
             <p className="settings-hint">
               Folders of .cbz and .cbr files. The folders themselves are the
@@ -538,15 +736,15 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 {comicScan.removed > 0 && ' ' + comicScan.removed + ' no longer on disk were removed.'}
               </div>
             )}
-          </section>
+          </details>
 
           </>
         )}
 
         {active === 'playback' && (
           <>
-          <section className="settings-card">
-            <h2>Playback</h2>
+          <details className="settings-card" open>
+            <summary><h2>Playback</h2></summary>
             <p className="settings-hint">
               Skip prompts use chapter markers when a file has them. Most releases do
               not, so the timings fall back to a convention and can land in the wrong
@@ -576,15 +774,15 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 <span className="toggle-note">Appears over the closing minutes of an episode</span>
               </span>
             </label>
-          </section>
+          </details>
 
           </>
         )}
 
         {active === 'sharing' && (
           <>
-          <section className="settings-card">
-            <h2>Watch on other devices</h2>
+          <details className="settings-card" open>
+            <summary><h2>Watch on other devices</h2></summary>
             <p className="settings-hint">
               Share the library with phones and tablets on your home network. They
               open it in a browser — nothing to install, and the films stay on this
@@ -662,7 +860,54 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 Sharing is on, but this computer has no network address yet.
               </p>
             )}
-          </section>
+          </details>
+
+          {/*
+            * Televisions are the devices that cannot be asked to install
+            * anything or to type a passcode, so they get their own switch.
+            */}
+          <details className="settings-card" open>
+            <summary><h2>Watch on the television</h2></summary>
+            <p className="settings-hint">
+              A Roku, or any set that plays from a network, has no browser and will
+              not install anything — but every one of them can already find media
+              servers on the network. Switch this on and the library appears inside
+              the television's own player, with your collections as its folders.
+            </p>
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                disabled={!settings.remoteAccess}
+                checked={settings.serveToTelevisions === true}
+                onChange={(event) => saveToggle('serveToTelevisions', event.target.checked)}
+              />
+              <span>
+                <strong>Let televisions find the library</strong>
+                <span className="toggle-note">
+                  {settings.serveToTelevisions
+                    ? 'On this network, in the television’s media player'
+                    : 'Off; televisions cannot see the library'}
+                </span>
+              </span>
+            </label>
+
+            {!settings.remoteAccess && (
+              <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+                Turn sharing on first. A television is another device on the same
+                network, so this is the same decision.
+              </p>
+            )}
+
+            {settings.serveToTelevisions && (
+              <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+                On the television, open its media player — <strong>Roku Media Player</strong>
+                {' '}on a Roku — and the library is listed there. A set has no passcode
+                to offer, so anything on this network can watch: right for a living
+                room, wrong for a shared connection.
+              </p>
+            )}
+          </details>
 
           {/*
             * Signing out matters on the devices that had to sign in.
@@ -672,8 +917,8 @@ export function Settings({ onScanned, onSettingsChanged }) {
             * tablet sees, and that is where somebody wants to hand the iPad to
             * a guest, or stop being signed in on a borrowed one.
             */}
-          <section className="settings-card">
-            <h2>This device</h2>
+          <details className="settings-card" open>
+            <summary><h2>This device</h2></summary>
             <p className="settings-hint">
               Forget the passcode on this device. The library is still shared;
               this browser simply has to sign in again next time.
@@ -689,15 +934,15 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 Sign out
               </button>
             </div>
-          </section>
+          </details>
 
           </>
         )}
 
         {active === 'maintenance' && (
           <>
-          <section className="settings-card">
-            <h2>Scan</h2>
+          <details className="settings-card" open>
+            <summary><h2>Scan</h2></summary>
 
             {scan ? (
               <>
@@ -737,13 +982,13 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 )}
               </div>
             )}
-          </section>
+          </details>
 
           <HealthPanel />
 
           {merges.length > 0 && (
-            <section className="settings-card">
-              <h2>Shows you joined</h2>
+            <details className="settings-card" open>
+              <summary><h2>Shows you joined</h2></summary>
               <p className="settings-hint" style={{ marginTop: 0 }}>
                 These were answered "one show" and have been filed together ever
                 since. Separating one puts it back to two and rescans; no episode
@@ -778,12 +1023,12 @@ export function Settings({ onScanned, onSettingsChanged }) {
                   </div>
                 </div>
               ))}
-            </section>
+            </details>
           )}
 
           {suggestions.length > 0 && (
-            <section className="settings-card">
-              <h2>Is this one show or two?</h2>
+            <details className="settings-card" open>
+              <summary><h2>Is this one show or two?</h2></summary>
               <p className="settings-hint" style={{ marginTop: 0 }}>
                 These titles look related. The scanner will not join them without
                 being told to, because some series genuinely share a name with
@@ -812,11 +1057,11 @@ export function Settings({ onScanned, onSettingsChanged }) {
                   </div>
                 </div>
               ))}
-            </section>
+            </details>
           )}
 
-          <section className="settings-card">
-            <h2>Storage</h2>
+          <details className="settings-card" open>
+            <summary><h2>Storage</h2></summary>
             <p className="settings-hint">
               Where this app keeps its own files — the index of your library and the
               downloaded artwork. Your movies and shows are not moved. Put it on a
@@ -847,10 +1092,10 @@ export function Settings({ onScanned, onSettingsChanged }) {
             {!window.media?.setDataDir && (
               <p className="settings-empty">Available in the desktop app.</p>
             )}
-          </section>
+          </details>
 
-          <section className="settings-card">
-            <h2>Status</h2>
+          <details className="settings-card" open>
+            <summary><h2>Status</h2></summary>
             <div className="status-row">
               <span>Artwork &amp; metadata</span>
               <span className={settings.tmdbConfigured ? 'ok-text' : 'warn-text'}>
@@ -925,7 +1170,7 @@ export function Settings({ onScanned, onSettingsChanged }) {
                 {settings.mpvPath || 'mpv not found'}
               </span>
             </div>
-          </section>
+          </details>
 
           </>
         )}

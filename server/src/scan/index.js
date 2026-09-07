@@ -156,11 +156,44 @@ async function resolveMetadata(item, scanKey) {
 }
 
 /**
+ * Line a season's episodes up with the numbering the metadata uses.
+ *
+ * Some rips number a series straight through: season two is episodes 27 to 52
+ * rather than 1 to 26. Every database numbers each season from one, so nothing
+ * matched — the episodes were there and playable, but with no title, no
+ * description and no picture, which is what "the thumbnails don't show" looks
+ * like from the outside.
+ *
+ * Only applied when the case is unambiguous: not one of the parsed numbers
+ * exists in that season, the count is the same on both sides, and the parsed
+ * numbers form an unbroken run. Anything less certain is left alone, because a
+ * season renumbered wrongly is worse than one with no pictures.
+ *
+ * @returns {number} what to subtract from a parsed number, usually zero
+ */
+function numberingOffset(episodes, tmdbNumbers) {
+  if (!tmdbNumbers?.size || !episodes.length) return 0;
+
+  const numbers = episodes.map((episode) => episode.episode).sort((a, b) => a - b);
+  if (numbers.some((number) => tmdbNumbers.has(number))) return 0;
+  if (numbers.length !== tmdbNumbers.size) return 0;
+
+  const unbroken = numbers.every((number, index) => number === numbers[0] + index);
+  if (!unbroken) return 0;
+
+  const first = Math.min(...tmdbNumbers);
+  const offset = numbers[0] - first;
+  return offset > 0 ? offset : 0;
+}
+
+/**
  * Fetch episode metadata for every season of a show, keyed "season:episode".
  */
 async function resolveEpisodes(tmdbId, seasonNumbers) {
   const byKey = new Map();
   const seasonInfo = new Map();
+  /** Which episode numbers each season really has, for the offset above. */
+  const numbersInSeason = new Map();
 
   await Promise.all(
     seasonNumbers.map(async (number) => {
@@ -172,6 +205,7 @@ async function resolveEpisodes(tmdbId, seasonNumbers) {
         posterPath: season.poster_path ?? null,
         airDate: season.air_date ?? null,
       });
+      numbersInSeason.set(number, new Set((season.episodes ?? []).map((e) => e.episode_number)));
       for (const episode of season.episodes ?? []) {
         byKey.set(number + ':' + episode.episode_number, {
           title: episode.name ?? null,
@@ -184,7 +218,7 @@ async function resolveEpisodes(tmdbId, seasonNumbers) {
     }),
   );
 
-  return { byKey, seasonInfo };
+  return { byKey, seasonInfo, numbersInSeason };
 }
 
 /**
@@ -397,13 +431,14 @@ function persist(enriched, suggestions, scanId, startedAt) {
 
     const upsertItem = db.prepare(`
       INSERT INTO items (
-        id, kind, title, sort_title, year, scan_key, source_folders,
+        id, kind, title, sort_title, year, scan_key, group_key, source_folders,
         tmdb_id, tmdb_score, overview, tagline, poster_path, backdrop_path,
         logo_path, rating, genres, runtime, certification, status,
         confidence, added_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title, sort_title = excluded.sort_title,
+        group_key = excluded.group_key,
         year = excluded.year, source_folders = excluded.source_folders,
         tmdb_id = excluded.tmdb_id, tmdb_score = excluded.tmdb_score,
         overview = excluded.overview, tagline = excluded.tagline,
@@ -473,6 +508,8 @@ function persist(enriched, suggestions, scanId, startedAt) {
         sortTitle(title),
         year,
         identityKey,
+        // What it was found by, which is what a correction is filed against.
+        scanKey,
         JSON.stringify(sourceFolders),
         metadata?.tmdbId ?? null,
         metadata?.score ?? null,
@@ -553,13 +590,27 @@ function persist(enriched, suggestions, scanId, startedAt) {
             info?.airDate ?? null,
           );
 
+          /*
+           * Straight-through numbering, put back to the season's own.
+           *
+           * The number is corrected on the row as well as for the lookup: an
+           * episode listed as 27 of a season with 26 in it is wrong however it
+           * came to be written that way, and the whole point is that this is
+           * episode 1 of season 2.
+           */
+          const offset = numberingOffset(
+            season.episodes,
+            episodeMeta?.numbersInSeason.get(season.number),
+          );
+
           for (const episode of season.episodes) {
-            const meta = episodeMeta?.byKey.get(season.number + ':' + episode.episode);
+            const number = episode.episode - offset;
+            const meta = episodeMeta?.byKey.get(season.number + ':' + number);
             writeVideo(episode.file, {
               seasonId,
               season: season.number,
-              episode: episode.episode,
-              episodeEnd: episode.episodeEnd,
+              episode: number,
+              episodeEnd: episode.episodeEnd === null ? null : episode.episodeEnd - offset,
               // Prefer TMDB's episode title. The filename fallback is validated,
               // because scene names often leave junk fragments behind.
               title: meta?.title ?? cleanEpisodeTitle(episode.title),

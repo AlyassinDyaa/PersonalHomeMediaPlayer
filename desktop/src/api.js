@@ -102,6 +102,39 @@ export function apiBaseUrl() {
   return apiBase;
 }
 
+/**
+ * What this device can actually decode, as a query the server understands.
+ *
+ * The delivery rules were written for Safari, which plays HEVC everywhere, and
+ * were then applied to every device that asked — so a browser without an HEVC
+ * decoder was handed the picture untouched and showed a black screen. About a
+ * third of this library is HEVC, and the browser on a television stick is the
+ * device most likely not to manage it.
+ *
+ * Both spellings are asked about because they are the same codec under two
+ * fourCCs and browsers have been known to admit to one and not the other.
+ * Answering "yes" when unsure is right: the server's default is yes, so an
+ * unsure device changes nothing, and the wrong "no" would re-encode a third of
+ * the library for a machine that never needed it.
+ */
+export function deviceCodecs() {
+  if (typeof window === 'undefined') return '';
+  const supported = (type) => {
+    try {
+      if (window.MediaSource?.isTypeSupported(type)) return true;
+    } catch { /* some engines throw rather than answer */ }
+    try {
+      return Boolean(document.createElement('video').canPlayType(type));
+    } catch {
+      return true;
+    }
+  };
+
+  const hevc = supported('video/mp4; codecs="hvc1.1.6.L93.B0"')
+    || supported('video/mp4; codecs="hev1.1.6.L93.B0"');
+  return hevc ? '' : '&hevc=0';
+}
+
 export const api = {
   /** End this browser's session; the next request is sent back to the login page. */
   logout: () => request('/api/logout', { method: 'POST' }),
@@ -171,10 +204,26 @@ export const api = {
   /** Badges a collection can wear, from the metadata provider's companies. */
   searchLogos: (q) => request('/api/logos/search?q=' + encodeURIComponent(q)),
 
+  /** What a file is — 4K, Dolby Vision, Atmos. Probed on demand. */
+  videoQuality: (id) => request('/api/videos/' + encodeURIComponent(id) + '/quality'),
+
+  // --- who is let into a section ------------------------------------------
+  /** Every profile, and whether it may see this section. Owner only. */
+  sectionAccess: (section) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/access'),
+  /** Set exactly who may see it; the owner always may, listed or not. */
+  setSectionAccess: (section, allowed) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/access', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ allowed }),
+    }),
+
   // --- collections --------------------------------------------------------
   collections: () => request('/api/collections'),
   /** The rails with their titles, for the home screen. */
-  collectionShelves: () => request('/api/collections/shelves'),
+  collectionShelves: (where = null) =>
+    request('/api/collections/shelves' + (where ? '?where=' + encodeURIComponent(where) : '')),
   collectionItems: (id) => request('/api/collections/' + encodeURIComponent(id)),
   createCollection: (body) => request('/api/collections', {
     method: 'POST',
@@ -197,6 +246,15 @@ export const api = {
   removeFromCollection: (id, itemId) => request(
     '/api/collections/' + encodeURIComponent(id) + '/items/' + encodeURIComponent(itemId),
     { method: 'DELETE' },
+  ),
+  /** Take titles off one shelf and put them on another, in one go. */
+  moveBetweenCollections: (fromId, toId, itemIds) => request(
+    '/api/collections/' + encodeURIComponent(fromId) + '/items/move',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: toId, itemIds }),
+    },
   ),
 
   // --- who is watching ----------------------------------------------------
@@ -248,13 +306,14 @@ export const api = {
   }),
 
   /** What this file would take to play in a browser, before trying to. */
-  streamInfo: (videoId) => request('/api/stream/' + videoId + '/info'),
+  streamInfo: (videoId) => request('/api/stream/' + videoId + '/info?d=1' + deviceCodecs()),
 
   /** Begin a stream at a point in the file, and get back its playlist. */
   streamStart: (videoId, startSeconds, audioTrack = 0, maxHeight = 0) => request(
     '/api/stream/' + videoId + '/start?start=' + Math.max(0, Math.floor(startSeconds || 0))
     + '&audio=' + audioTrack
-    + (maxHeight ? '&height=' + maxHeight : ''),
+    + (maxHeight ? '&height=' + maxHeight : '')
+    + deviceCodecs(),
   ),
   // --- comics -------------------------------------------------------------
   comics: () => request('/api/comics'),
@@ -289,6 +348,26 @@ export const api = {
 export function artwork(tmdbPath, size = 'w500') {
   if (!tmdbPath) return null;
   return apiBase + '/artwork/' + size + tmdbPath;
+}
+
+/**
+ * A frame from the episode's own file, for when nobody has a still of it.
+ *
+ * Half the artwork on an old show is simply missing: a series digitised from
+ * discs in 1985 has episode descriptions in the database and no pictures at
+ * all, so a season opened as a grid was a page of grey rectangles with text in
+ * them. The file itself is a perfectly good source of a picture, and the
+ * machinery for pulling one already exists for the seek bar.
+ *
+ * A third of the way in, rather than at the start: past the titles, past the
+ * fade from black, and inside the episode. The server rounds the time to its
+ * own grid and keeps what it makes, so a season browsed twice costs nothing
+ * the second time.
+ */
+export function frameFrom(video) {
+  if (!video?.id) return null;
+  const second = video.duration ? Math.round(video.duration / 3) : 240;
+  return apiBase + '/api/videos/' + encodeURIComponent(video.id) + '/frame?t=' + second;
 }
 
 export function formatRuntime(minutes) {

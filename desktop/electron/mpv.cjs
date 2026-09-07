@@ -174,6 +174,20 @@ class MpvPlayer extends EventEmitter {
       }
     }
 
+    /*
+     * English first, whatever the file says is default.
+     *
+     * A dual-audio release usually ships with the other language flagged as
+     * the default track, and mpv obeys that flag — so a film with a perfectly
+     * good English track starts speaking Turkish, and looks like a bad
+     * download rather than a one-byte flag. One copy was very nearly deleted
+     * over this.
+     *
+     * A preference, not a filter: a file with no English track still plays its
+     * own default, which is right for anything genuinely in another language.
+     */
+    args.push('--alang=eng,en,english');
+
     if (startPosition > 0) args.push('--start=' + Math.floor(startPosition));
     if (title) args.push('--force-media-title=' + title);
     // Used when driving the app from an automated test, so playback does not

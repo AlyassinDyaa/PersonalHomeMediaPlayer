@@ -14,7 +14,7 @@
 import path from 'node:path';
 import {
   parseEpisodeFile, parseTitle, parseSeasonFolder, parseSeasonRange, seriesKey,
-  stripExtension,
+  stripExtension, levenshtein,
 } from './parse.js';
 
 /** A folder is treated as a series once this fraction of its videos parse as episodes. */
@@ -39,13 +39,18 @@ const STRONG_EPISODE_PATTERNS = new Set(['SxxExx', 'NxNN', 'verbose']);
 function seasonFromFolders(chain, topFolder) {
   for (let i = chain.length - 1; i >= 0; i--) {
     const season = parseSeasonFolder(chain[i]);
-    if (season !== null) return season;
+    if (season !== null) return { season, range: null };
   }
   const fromTop = parseSeasonFolder(topFolder);
-  if (fromTop !== null) return fromTop;
+  if (fromTop !== null) return { season: fromTop, range: null };
+  /*
+   * A folder covering several seasons hands the range on rather than only its
+   * first season, so a file numbered 201 can be read as season two instead of
+   * being measured against season one and thrown away.
+   */
   const range = parseSeasonRange(topFolder);
-  if (range) return range[0];
-  return null;
+  if (range) return { season: range[0], range };
+  return { season: null, range: null };
 }
 
 /** Most frequently occurring value, ties broken by first appearance. */
@@ -69,8 +74,9 @@ function mostCommon(values) {
  */
 function classifyFolder(topFolder, videos) {
   const parsed = videos.map((video) => {
-    const fallbackSeason = seasonFromFolders(video.chain, video.topFolder);
-    const episode = parseEpisodeFile(video.name, { fallbackSeason });
+    const { season: fallbackSeason, range: seasonRange } =
+      seasonFromFolders(video.chain, video.topFolder);
+    const episode = parseEpisodeFile(video.name, { fallbackSeason, seasonRange });
     return { video, episode };
   });
 
@@ -145,6 +151,69 @@ function buildSeriesFolders(topFolder, classification) {
   const ordered = [...buckets.values()].sort((a, b) => b.items.length - a.items.length);
   if (ordered.length === 0) return [];
 
+  /*
+   * Files that name no series at all belong to the series the folder's other
+   * files name.
+   *
+   * A season ripped from a streaming service is often numbered and nothing
+   * else — "S03E01 - The Wrath of Shreeky.mkv" — because the folder above it
+   * already said whose season it is. There is no title to the left of the
+   * marker, so such files bucket together under the empty name, and the empty
+   * name matches nothing: the whole season came out as a second show carrying
+   * the release folder's name, unmatched and without artwork, sitting beside
+   * the real one.
+   *
+   * They join the largest bucket that does have a name, provided the two do
+   * not both claim the same episode. Overlapping numbers would mean the
+   * nameless files are a different show that happens to share the folder — the
+   * same test used for near-identical names below, for the same reason.
+   */
+  // Strip season markers out of the folder name before reading a title from it.
+  const folderWithoutSeason = topFolder
+    .replace(/\bS\d{1,2}\s?[-+–]\s?S?\d{1,2}\b/gi, ' ')
+    .replace(/\bS\d{1,2}\b/gi, ' ')
+    .replace(/\bseasons?\s*[\d\s-]+\b/gi, ' ')
+    .replace(/\ball\s+seasons?\b/gi, ' ');
+  const folderParsed = parseTitle(folderWithoutSeason);
+
+  /** What the folder itself claims to be, for comparing with the buckets. */
+  const folderKey = folderParsed.title ? seriesKey(folderParsed.title) : '';
+
+  const nameless = ordered.filter((bucket) => !bucket.key);
+  const named = ordered.filter((bucket) => bucket.key);
+  if (nameless.length && named.length) {
+    const slotsOf = (bucket) => new Set(
+      bucket.items.map((p) => (p.episode.season ?? 1) + ':' + p.episode.episode),
+    );
+    const host = named[0];
+
+    /*
+     * Two rips of the same show in one folder are still one show.
+     *
+     * Overlapping episode numbers usually mean two different shows sharing a
+     * folder, and that is what the test below is for. But when the folder is
+     * itself named after the show the files name — "Dora The Explorer S01-S05
+     * INFERNO" holding files that say "Dora the Explorer" — an overlap means
+     * something else entirely: somebody has two copies of season one, one set
+     * numbered plainly and one named properly. Those are duplicates, and the
+     * merge that follows already keeps the larger file of any pair.
+     *
+     * Without this the folder came out as two shows, one of them the same
+     * season twice over and neither of them matching anything.
+     */
+    const folderIsThisShow = Boolean(folderKey)
+      && (folderKey === host.key || isExtensionOf(host.key, folderKey));
+
+    const taken = slotsOf(host);
+    for (const bucket of nameless) {
+      if (!folderIsThisShow && [...slotsOf(bucket)].some((slot) => taken.has(slot))) continue;
+      for (const slot of slotsOf(bucket)) taken.add(slot);
+      host.items.push(...bucket.items);
+      ordered.splice(ordered.indexOf(bucket), 1);
+    }
+    ordered.sort((a, b) => b.items.length - a.items.length);
+  }
+
   // Fold away tiny buckets: they are almost always one oddly-named file rather
   // than a genuine second show sharing the folder.
   const dominant = ordered[0];
@@ -187,8 +256,28 @@ function buildSeriesFolders(topFolder, classification) {
       const overlaps = [...seasonsOf(b)].some((season) => seasonsA.has(season));
       if (overlaps) continue;
 
-      // Fold into whichever bucket has more episodes; its title is better attested.
-      const [into, from] = a.items.length >= b.items.length ? [a, b] : [b, a];
+      /*
+       * Which of the two names the show keeps.
+       *
+       * When the longer name is the shorter one with whole words added, the
+       * shorter one is a name in its own right and the extra words are the
+       * ripper's: a studio tag ("Care Bears" → "Care Bears Dic"), an
+       * abbreviation ("X-Men" → "X-Men TAS"). Keeping the short name is what
+       * lets the lookup find the show at all, because the studio's tag is not
+       * part of any title a database holds.
+       *
+       * When the shorter name only matches with the spaces taken out, it is
+       * not a name — it is the longer one cut off mid-word, "Ultimate Spider"
+       * against "Ultimate Spiderman". Then the fuller bucket is right, as it
+       * always was.
+       */
+      const wholeWords = longer.key.startsWith(shorter.key + ' ');
+      const [into, from] = wholeWords
+        ? [shorter, longer]
+        : (a.items.length >= b.items.length ? [a, b] : [b, a]);
+      into.otherTitles = [
+        ...new Set([...(into.otherTitles ?? []), ...(from.otherTitles ?? []), from.title].filter(Boolean)),
+      ];
       into.items.push(...from.items);
       kept.splice(kept.indexOf(from), 1);
       break;
@@ -196,12 +285,23 @@ function buildSeriesFolders(topFolder, classification) {
   }
 
   // Strip season markers out of the folder name before reading a title from it.
-  const folderWithoutSeason = topFolder
-    .replace(/\bS\d{1,2}\s?[-+–]\s?S?\d{1,2}\b/gi, ' ')
-    .replace(/\bS\d{1,2}\b/gi, ' ')
-    .replace(/\bseasons?\s*[\d\s-]+\b/gi, ' ')
-    .replace(/\ball\s+seasons?\b/gi, ' ');
-  const folderParsed = parseTitle(folderWithoutSeason);
+
+  /*
+   * The same name without the release group on the end.
+   *
+   * A folder like "Dora The Explorer S01-S05 INFERNO" keeps the group's name,
+   * because nothing separates it from the title — no dash, no brackets, just a
+   * word. Searched for under that name the show matches nothing at all and
+   * ends up with no artwork and the raw folder for a title.
+   *
+   * Not stripped outright, because an all-capitals last word is sometimes the
+   * title ("Batman TAS", "Star Wars ANDOR"). Offered as another name the show
+   * answers to instead, which the lookup tries only if the first one fails.
+   */
+  const withoutGroup = folderParsed.title
+    && /\s[A-Z][A-Z0-9]{2,}$/.test(folderParsed.title)
+    ? folderParsed.title.replace(/\s[A-Z][A-Z0-9]{2,}$/, '').trim()
+    : null;
 
   // When the folder holds several shows its own name describes the collection,
   // not any one series, so it must not contribute a title or a year.
@@ -227,7 +327,12 @@ function buildSeriesFolders(topFolder, classification) {
       root: bucket.items[0].video.root,
       title,
       titleCandidates: [
-        ...new Set([bucket.title, folderDescribesOneShow ? folderParsed.title : null].filter(Boolean)),
+        ...new Set([
+          bucket.title,
+          ...(bucket.otherTitles ?? []),
+          folderDescribesOneShow ? folderParsed.title : null,
+          folderDescribesOneShow ? withoutGroup : null,
+        ].filter(Boolean)),
       ],
       year,
       key: seriesKey(title),
@@ -290,6 +395,63 @@ function buildMovies(topFolder, videos) {
       signals: { multipleInFolder: multiple, hadYear: chosen.year !== null },
     };
   });
+}
+
+/**
+ * One folder on disk holds one show.
+ *
+ * Series names are taken from the file names, which is right for scene
+ * releases — the folder is often a release name and the files spell the show
+ * out. It goes wrong when the files disagree with each other: ten seasons of
+ * The Fairly OddParents sitting in one folder, nine of them named "Fairly Od
+ * Parents" by whoever ripped them and one named correctly, came out as two
+ * different shows. One of them then matched nothing in any database and lost
+ * its artwork, its episode titles and its place in the library.
+ *
+ * Both spellings are kept as names the show answers to, so the metadata lookup
+ * can still find it under whichever one is real — and the season with the most
+ * episodes decides which key the rest fold into, on the grounds that the
+ * majority spelling is the likelier one.
+ *
+ * Deliberately narrow: only within one folder, only names that are nearly the
+ * same, and only names long enough for "nearly the same" to mean anything. A
+ * folder genuinely holding two shows keeps them apart, because two different
+ * shows are not two spellings of each other.
+ */
+
+/** How far apart two names may be and still be the same show. */
+const A_TYPO_OR_TWO = 2;
+
+/** Below this length a couple of characters is a different word, not a typo. */
+const LONG_ENOUGH = 10;
+
+function oneShowPerFolder(folders) {
+  if (folders.length < 2) return folders;
+
+  // The fullest folder leads; the others fold into it if they are close.
+  const byWeight = [...folders].sort((a, b) => b.episodes.length - a.episodes.length);
+  const anchor = byWeight[0];
+  if (anchor.key.length < LONG_ENOUGH) return folders;
+
+  const folded = [];
+  for (const folder of byWeight) {
+    if (folder === anchor) { folded.push(folder); continue; }
+
+    const close = folder.key.length >= LONG_ENOUGH
+      && levenshtein(folder.key, anchor.key) <= A_TYPO_OR_TWO;
+
+    if (!close) { folded.push(folder); continue; }
+
+    // The same show under another spelling: take the anchor's key, and let it
+    // answer to this name too.
+    anchor.titleCandidates = [
+      ...new Set([...(anchor.titleCandidates ?? []), ...(folder.titleCandidates ?? []), folder.title]),
+    ];
+    folder.key = anchor.key;
+    folded.push(folder);
+  }
+
+  return folded;
 }
 
 /**
@@ -495,7 +657,7 @@ export function groupLibrary(
   for (const { topFolder, videos: folderVideos } of byFolder.values()) {
     const classification = classifyFolder(topFolder, folderVideos);
     if (classification.isSeries) {
-      seriesFolders.push(...buildSeriesFolders(topFolder, classification));
+      seriesFolders.push(...oneShowPerFolder(buildSeriesFolders(topFolder, classification)));
     } else {
       movies.push(...buildMovies(topFolder, folderVideos));
     }

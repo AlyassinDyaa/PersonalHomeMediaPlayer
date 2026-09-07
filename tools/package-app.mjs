@@ -23,8 +23,16 @@ const OUT = process.env.PACKAGE_OUT || path.join(ROOT, 'release');
 
 /** Everything the app does not need at runtime. */
 const IGNORE = [
-  // Any previous build output, so one package never folds into the next.
+  /*
+   * Any previous build output, so one package never folds into the next.
+   *
+   * The release folders were covered and the scratch ones were not, which is
+   * a slow disaster rather than an obvious one: each package swallowed every
+   * earlier package beside it, so the same build went 1.1 GB, then 1.5, then
+   * 3.0, and would have kept doubling. Anything starting "build" is output.
+   */
   /^\/release\d*($|\/)/,
+  /^\/build[\w.-]*($|\/)/,
   /^\/data($|\/)/,
   /^\/tools($|\/)/,
   /^\/\.git($|\/)/,

@@ -101,9 +101,18 @@ function sweepOrphans() {
     });
 }
 
-function keyFor(videoId, startSeconds, audioTrack, maxHeight) {
+function keyFor(videoId, startSeconds, audioTrack, maxHeight, device = {}) {
+  /*
+   * What the device can decode is part of what makes two requests the same.
+   *
+   * Without it, a stream already running for a browser that decodes HEVC would
+   * be handed to one that does not — same film, same point, same audio track,
+   * so the same key — and the second device would get a picture it cannot show
+   * and no explanation for it.
+   */
   return videoId + '@' + Math.max(0, Math.floor(startSeconds)) + '#a' + audioTrack
-    + (maxHeight ? '#h' + maxHeight : '');
+    + (maxHeight ? '#h' + maxHeight : '')
+    + (device.hevc === false ? '#noh265' : '');
 }
 
 /** Remove a session's process and its segments. */
@@ -198,7 +207,8 @@ export async function openSession(request) {
   // Only the sizes offered; anything else is treated as no limit at all.
   const asked = Number(request.maxHeight ?? 0) || 0;
   const maxHeight = [480, 720, 1080].includes(asked) ? asked : null;
-  const key = keyFor(videoId, startSeconds, audioTrack, maxHeight);
+  const device = request.device ?? {};
+  const key = keyFor(videoId, startSeconds, audioTrack, maxHeight, device);
 
   const existing = sessions.get(key);
   if (existing && !existing.stopped) {
@@ -258,7 +268,7 @@ export async function openSession(request) {
   }
 
   const probed = await probeFile(filePath);
-  const plan = planDelivery(probed);
+  const plan = planDelivery(probed, device);
 
   const id = key.replace(/[^a-zA-Z0-9@]/g, '') + '-' + Date.now().toString(36);
   const dir = path.join(streamRoot(), id);

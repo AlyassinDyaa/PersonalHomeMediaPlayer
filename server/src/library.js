@@ -92,9 +92,18 @@ export function canonicalGenres(genres) {
   return out;
 }
 
+/*
+ * An empty column reads as the fallback, not as null.
+ *
+ * JSON.parse(null) does not throw — it parses the string "null" and returns
+ * null — so an empty column slipped past the catch and handed null to callers
+ * expecting a list. Every one of them then threw while shaping the row, which
+ * takes out the whole page rather than one field of one title.
+ */
 function parseJsonColumn(value, fallback) {
+  if (value == null) return fallback;
   try {
-    return JSON.parse(value);
+    return JSON.parse(value) ?? fallback;
   } catch {
     return fallback;
   }
@@ -111,6 +120,7 @@ export function shapeItem(row) {
     poster: row.poster_path,
     backdrop: row.backdrop_path,
     logo: row.logo_path,
+    accent: row.accent,
     rating: row.rating,
     genres: canonicalGenres(parseJsonColumn(row.genres, [])),
     runtime: row.runtime,
@@ -286,7 +296,7 @@ export function continueWatching(limit = 20, profile) {
   const rows = getDb().prepare(`
     SELECT v.*, p.position, p.watched, p.updated_at,
            i.title AS item_title, i.kind AS item_kind,
-           i.backdrop_path, i.poster_path, i.logo_path
+           i.backdrop_path, i.poster_path, i.logo_path, i.accent
     FROM progress p
     JOIN videos v ON v.id = p.video_id
     JOIN items i ON i.id = p.item_id
@@ -316,7 +326,7 @@ export function continueWatching(limit = 20, profile) {
   const offered = new Set();
   const findNext = getDb().prepare(`
     SELECT v.*, i.title AS item_title, i.kind AS item_kind,
-           i.backdrop_path, i.poster_path, i.logo_path
+           i.backdrop_path, i.poster_path, i.logo_path, i.accent
     FROM videos v
     JOIN items i ON i.id = v.item_id
     LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
@@ -351,6 +361,7 @@ export function continueWatching(limit = 20, profile) {
         backdrop: row.backdrop_path,
         poster: row.poster_path,
         logo: row.logo_path,
+        accent: row.accent,
       },
       video: shapeVideo(row),
       progressPercent: row.duration ? Math.min(100, (row.position / row.duration) * 100) : 0,

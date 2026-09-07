@@ -13,6 +13,14 @@ import Card from './Card.jsx';
 export function Row({
   title, items, onSelect, wide = false, renderLabel = null, onRemove = null,
   renderImage = null, onSeeAll = null,
+  /* Unfold this rail into a grid where it stands. */
+  onStack = null,
+  /* Numbers the tiles, for a rail whose order is the whole point. */
+  ranked = false,
+  onLongPress = null,
+  /* While gathering titles for a shelf. */
+  picking = false,
+  ticked = null,
 }) {
   const scroller = useRef(null);
   const [canLeft, setCanLeft] = useState(false);
@@ -48,9 +56,17 @@ export function Row({
       <div className="row-header">
         <h2 className="row-title">{title}</h2>
         <span className="row-count">{items.length}</span>
-        {/* A shelf too long for one rail can be opened in full. */}
-        {onSeeAll && (
-          <button className="chip row-see-all" onClick={onSeeAll}>See all</button>
+        {/*
+          * Two ways out of a rail that is longer than the screen: unfold it
+          * where it stands, or open it on its own page. Unfolding is the one
+          * people reach for — it answers "what else is on here" without
+          * leaving the screen and losing the other shelves.
+          */}
+        {(onStack || onSeeAll) && (
+          <div className="row-actions">
+            {onStack && <button className="chip" onClick={onStack}>Show all</button>}
+            {onSeeAll && <button className="chip" onClick={onSeeAll}>Open</button>}
+          </div>
         )}
       </div>
 
@@ -61,20 +77,29 @@ export function Row({
           </button>
         )}
 
-        <div className="row-scroller" ref={scroller} onScroll={updateArrows}>
-          {items.map((entry) => {
+        <div
+          /* Wide cards need more room between them than posters do. */
+          className={wide ? 'row-scroller wide' : 'row-scroller'}
+          ref={scroller}
+          onScroll={updateArrows}
+        >
+          {items.map((entry, index) => {
             const item = entry.item ?? entry;
             return (
               <Card
                 key={entry.video?.id ?? item.id}
                 item={item}
+                picking={picking}
+                ticked={Boolean(ticked?.has(item.id))}
+                rank={ranked ? index + 1 : null}
+                onLongPress={onLongPress ? () => onLongPress(entry) : null}
                 wide={wide}
                 progress={entry.progressPercent ?? null}
                 label={renderLabel ? renderLabel(entry) : null}
                 // Comics keep their covers somewhere else entirely, so a rail
                 // can be told where to find the picture for each tile.
                 image={renderImage ? renderImage(entry) : null}
-                onClick={() => onSelect(entry)}
+                onClick={(event) => onSelect(entry, event)}
                 onRemove={onRemove ? () => onRemove(entry) : null}
                 removeLabel="Remove from Continue Watching"
               />

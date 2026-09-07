@@ -40,6 +40,22 @@ function firstSet(...values) {
   return null;
 }
 
+/** The layouts that exist, in the order they are offered. */
+export const SHELF_LAYOUTS = ['rows', 'grid', 'list'];
+
+/**
+ * Sanitise a list of layouts.
+ *
+ * Anything unrecognised is dropped, and an empty list becomes rails — a
+ * library with no way to show its collections at all is not a setting anybody
+ * meant to choose, whatever the file says.
+ */
+function readLayouts(value) {
+  if (!Array.isArray(value)) return [...SHELF_LAYOUTS];
+  const kept = SHELF_LAYOUTS.filter((name) => value.includes(name));
+  return kept.length ? kept : ['rows'];
+}
+
 function readJson(file) {
   try {
     // Strip a byte-order mark first. These files can be edited by hand, and a
@@ -161,6 +177,52 @@ export const config = {
    * an empty shelf.
    */
   showComics: local.showComics ?? defaults.showComics ?? true,
+  /*
+   * What sits behind the library.
+   *
+   * Flat black is honest and, on a screen showing three rows of covers with
+   * space around them, completely inert — a wall rather than a room. The
+   * alternatives are all slow, dim and made of nothing but the colours the
+   * artwork is already using, so they lift the page without competing with
+   * the thing the page is for.
+   */
+  background: local.background ?? defaults.background ?? 'flat',
+  /*
+   * The colour the backdrop is drawn from.
+   *
+   * Empty means follow the artwork, which is the default: each page already
+   * sets an accent from the poster in front of you, so the room changes as
+   * you move through the library at no cost. A value here freezes it.
+   */
+  backgroundColor: local.backgroundColor ?? defaults.backgroundColor ?? '',
+  /*
+   * Whether televisions on this network may find the library by themselves.
+   *
+   * Off unless asked for. The protocol a set speaks has no notion of who is
+   * asking and no way to add one, so switching this on shares the library with
+   * everything in the house — which is exactly what is wanted for a television
+   * in the living room and exactly what must not happen by default.
+   */
+  serveToTelevisions: local.serveToTelevisions ?? defaults.serveToTelevisions ?? false,
+  /*
+   * Which layouts the collections may be shown in.
+   *
+   * The choice between rails, tiles and lines belongs to whoever is looking,
+   * but which choices exist belongs to whoever looks after the library — a
+   * household that only ever wants rails should not have two buttons offering
+   * to change something nobody wants changed.
+   */
+  shelfLayouts: readLayouts(local.shelfLayouts ?? defaults.shelfLayouts),
+
+  /**
+   * Whether the home screen also arranges titles by genre.
+   *
+   * On by default, because a library with no shelves of its own needs some
+   * arrangement. Once somebody has made their own shelves those say far more
+   * about the library than "Animation" ever did, and this turns the guessed
+   * ones off so the made ones are what the page is.
+   */
+  genreShelves: local.genreShelves ?? defaults.genreShelves ?? true,
 
   /*
    * Whether the Movies and TV Shows screens arrange titles under genre
@@ -178,6 +240,16 @@ export const config = {
   libraryColor: local.libraryColor ?? defaults.libraryColor ?? '',
 
   port: Number(process.env.PORT ?? local.port ?? defaults.port ?? 8787),
+
+  /**
+   * The second port, used only when a certificate has been issued.
+   *
+   * A separate port rather than replacing the first: the certificate covers
+   * one name on the private mesh, so a browser reaching this machine by its
+   * address on the home network would be shown a certificate for a name it
+   * did not ask for and refuse it. The plain port keeps that door open.
+   */
+  securePort: Number(process.env.SECURE_PORT ?? local.securePort ?? defaults.securePort ?? 8443),
 
   /** Path to the mpv binary; resolved at playback time if left null. */
   mpvPath: process.env.MPV_PATH ?? local.mpvPath ?? defaults.mpvPath ?? null,
@@ -278,6 +350,15 @@ export function saveSettings(patch) {
     allowed.libraryRoots = normaliseRoots(patch.libraryRoots);
   }
   if (typeof patch.showComics === 'boolean') allowed.showComics = patch.showComics;
+  if (typeof patch.background === 'string') allowed.background = patch.background.trim().slice(0, 24);
+  if (typeof patch.backgroundColor === 'string') {
+    const wanted = patch.backgroundColor.trim();
+    // A colour or nothing; anything else is not a thing to paint a room with.
+    allowed.backgroundColor = /^#[0-9a-f]{6}$/i.test(wanted) ? wanted.toLowerCase() : '';
+  }
+  if (typeof patch.serveToTelevisions === 'boolean') allowed.serveToTelevisions = patch.serveToTelevisions;
+  if (Array.isArray(patch.shelfLayouts)) allowed.shelfLayouts = readLayouts(patch.shelfLayouts);
+  if (typeof patch.genreShelves === 'boolean') allowed.genreShelves = patch.genreShelves;
   if (Array.isArray(patch.comicRoots)) {
     allowed.comicRoots = normaliseRoots(patch.comicRoots);
   }
@@ -352,6 +433,11 @@ export function settingsView() {
     skipOutroEnabled: config.skipOutroEnabled,
     comicRoots: config.comicRoots,
     showComics: config.showComics,
+    background: config.background,
+    backgroundColor: config.backgroundColor,
+    serveToTelevisions: config.serveToTelevisions,
+    shelfLayouts: config.shelfLayouts,
+    genreShelves: config.genreShelves,
     comicRootsStatus: config.comicRoots.map((root) => ({
       path: root,
       available: fs.existsSync(root),

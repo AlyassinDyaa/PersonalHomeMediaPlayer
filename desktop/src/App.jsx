@@ -8,11 +8,18 @@ import Browse from './components/Browse.jsx';
 import Comics from './components/Comics.jsx';
 import ComicReader from './components/ComicReader.jsx';
 import { shelveByGenre } from './genres.js';
+import { applyBackground } from './backgrounds.js';
 import BrandRail from './components/BrandRail.jsx';
 import ProfileFace from './components/ProfileFace.jsx';
 import Settings from './components/Settings.jsx';
+import SearchScreen from './components/SearchScreen.jsx';
+import Skeleton from './components/Skeleton.jsx';
 import { headerPreview, brandColor } from './branding.js';
+import { rememberArrivals, isRecent } from './recent.js';
 import { useSwipe } from './useSwipe.js';
+import { usePull, bothGestures } from './usePull.js';
+import { useRemote } from './useRemote.js';
+import { flyFrom } from './flight.js';
 
 /** Pluralise a count for UI labels: 1 season, 3 seasons. */
 function plural(count, noun) {
@@ -25,12 +32,19 @@ function cardMeta(item) {
   return [item.year, formatRuntime(item.runtime)].filter(Boolean).join(' · ');
 }
 
+/*
+ * Where you can go, and the mark each place is known by.
+ *
+ * The glyphs are only drawn in the bar along the bottom of a phone, where
+ * there is room for a symbol and a word but not for a word alone at a size
+ * worth tapping.
+ */
 const VIEWS = [
-  { id: 'home', label: 'Home' },
-  { id: 'shows', label: 'TV Shows' },
-  { id: 'movies', label: 'Movies' },
-  { id: 'comics', label: 'Comics' },
-  { id: 'library', label: 'Library' },
+  { id: 'home', label: 'Home', glyph: '◫' },
+  { id: 'shows', label: 'TV Shows', glyph: '▦' },
+  { id: 'movies', label: 'Movies', glyph: '▶' },
+  { id: 'comics', label: 'Comics', glyph: '❐' },
+  { id: 'library', label: 'Library', glyph: '⚙' },
 ];
 
 /**
@@ -57,42 +71,70 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [favourites, setFavourites] = useState([]);
   const [genres, setGenres] = useState([]);
   /** Shelves the user arranged by hand, in Settings. */
-  const [collections, setCollections] = useState([]);
+  const [collections, setCollections] = useState([]);
+  /*
+   * Every shelf, including the empty ones.
+   *
+   * The rails above are only the shelves worth drawing — an empty one is a
+   * gap on the page rather than information. But a shelf just made is empty
+   * by definition, and filling it is the first thing anybody does, so the
+   * list to add to has to be the whole list.
+   */
+  const [allShelves, setAllShelves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [scrolled, setScrolled] = useState(false);
+  /* Far enough down a title's page that the banner is gone from the screen. */
+  const [pastBanner, setPastBanner] = useState(false);
   /** Whether each screen arranges titles by genre; set in Settings. */
   const [grouping, setGrouping] = useState({ movies: true, shows: true });
   /** Whether the Comics tab is offered; set in Settings. */
   const [showComics, setShowComics] = useState(true);
+  /** Which collection layouts the owner offers; null until settings arrive. */
+  const [shelfLayouts, setShelfLayouts] = useState(null);
+  /** Whether the home screen also shelves titles by genre; set in Settings. */
+  const [genreShelves, setGenreShelves] = useState(true);
   /** Who is watching, shown in the bar so it is never a guess. */
   const [me, setMe] = useState(null);
   const [libraryName, setLibraryName] = useState('');
   const [libraryColor, setLibraryColor] = useState('');
+  /* What sits behind the library, chosen by whoever looks after it. */
+  const [background, setBackground] = useState('flat');
+  /* Empty means the backdrop follows whatever artwork is on screen. */
+  const [backgroundColor, setBackgroundColor] = useState('');
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, kept, genreList, settings, shelves] = await Promise.all([
+      const [allItems, continueWatching, kept, genreList, settings, shelves, everyShelf] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
         api.favourites(),
         api.genres(),
         api.settings().catch(() => ({})),
         // A library with no collections is the normal case, not a failure.
-        api.collectionShelves().catch(() => []),
+        api.collectionShelves().catch(() => []),
+        api.collections().catch(() => []),
       ]);
       setLibraryName(settings.libraryName ?? '');
       setLibraryColor(settings.libraryColor ?? '');
+      setBackground(settings.background ?? 'flat');
+      setBackgroundColor(settings.backgroundColor ?? '');
       setGrouping({
         movies: settings.groupMoviesByGenre ?? true,
         shows: settings.groupShowsByGenre ?? true,
       });
       setShowComics(settings.showComics !== false);
+      setShelfLayouts(Array.isArray(settings.shelfLayouts) ? settings.shelfLayouts : null);
+      setGenreShelves(settings.genreShelves !== false);
       setItems(allItems);
+      // What counts as newly arrived depends on the rest of the library, so
+      // it is worked out again whenever the library changes.
+      rememberArrivals(allItems);
       setResume(continueWatching);
       setFavourites(kept);
       setGenres(genreList);
-      setCollections(shelves);
+      setCollections(shelves);
+      setAllShelves(everyShelf);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -170,10 +212,20 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     }
   }, [resume]);
 
-  /** Reflect a settings change in the header without waiting for a reload. */
+  /**
+   * Reflect a settings change in the header without waiting for a reload.
+   *
+   * Tolerates being handed nothing. It is the callback anything in Settings
+   * reaches for when it wants to say "something changed", and one of those
+   * callers had nothing to say — which threw, and put an error across the
+   * Collections page every time a shelf was made.
+   */
   const applyBranding = useCallback((next) => {
+    if (!next) return;
     setLibraryName(next.libraryName ?? '');
     setLibraryColor(next.libraryColor ?? '');
+    setBackground(next.background ?? 'flat');
+    setBackgroundColor(next.backgroundColor ?? '');
   }, []);
 
 
@@ -183,10 +235,30 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     return window.media.onPlayerClosed(() => { reload(); });
   }, [reload]);
 
+  /*
+   * How far down the page is, wherever the page happens to scroll.
+   *
+   * html, body and the root are all given the full height, which makes the
+   * body itself the thing that scrolls rather than the window. So the number
+   * to read is not always window.scrollY — on a browser it is the body — and
+   * the event has to be caught on the way down, because a scroll on an
+   * element does not bubble up to the window at all. Without both of those
+   * the bar never learns it has been scrolled past.
+   */
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20);
-    window.addEventListener('scroll', onScroll);
-    return () => window.removeEventListener('scroll', onScroll);
+    const distance = () => window.scrollY
+      || document.scrollingElement?.scrollTop
+      || document.body.scrollTop
+      || 0;
+
+    const onScroll = () => {
+      const down = distance();
+      setScrolled(down > 20);
+      setPastBanner(down > 260);
+    };
+
+    document.addEventListener('scroll', onScroll, true);
+    return () => document.removeEventListener('scroll', onScroll, true);
   }, []);
 
 
@@ -207,6 +279,22 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     if (!showComics && view === 'comics') setView('home');
   }, [showComics, view]);
 
+  /* Whether the search screen is up. On a phone searching is a destination
+     of its own rather than a field wedged into the bar. */
+  const [searching, setSearching] = useState(false);
+  /* The title whose actions are being offered, from holding a poster down. */
+  const [heldItem, setHeldItem] = useState(null);
+  /* Whether the library is being fetched again by hand. */
+  const [refreshing, setRefreshing] = useState(false);
+  /*
+   * Gathering titles for a shelf, from the screen you are already looking at.
+   *
+   * A set rather than a list: ticking is a question about one title at a time,
+   * asked in whatever order somebody's eye happens to land.
+   */
+  const [gathering, setGathering] = useState(false);
+  const [ticked, setTicked] = useState(() => new Set());
+
   const searchable = view === 'movies' ? 'movie' : view === 'shows' ? 'show' : null;
 
   /** Titles matching the header search, scoped to the tab that is open. */
@@ -219,8 +307,70 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       .sort((a, b) => a.title.localeCompare(b.title));
   }, [items, query, searchable, view]);
 
+  /*
+   * Dress the page whenever the choice or the library changes.
+   *
+   * On the body rather than in the tree, so it survives every screen change
+   * and the player — which covers the lot — is untouched by it. The posters
+   * are only read by the one option that wants them.
+   */
+  useEffect(() => {
+    const wall = items
+      .filter((item) => item.poster)
+      .slice(0, 3)
+      .map((item) => artwork(item.poster, 'w300'));
+    applyBackground(background, { posters: wall, colour: backgroundColor });
+  }, [background, backgroundColor, items]);
+
   const movies = useMemo(() => items.filter((item) => item.kind === 'movie'), [items]);
   const shows = useMemo(() => items.filter((item) => item.kind === 'show'), [items]);
+
+  /**
+   * The shelves belonging to whichever of the two screens is open.
+   *
+   * A shelf shown on both screens is not one mixed shelf drawn twice: on Films
+   * it is its films, on TV Shows it is its shows. A rail of eight films with
+   * two stray series in it is not a shelf of films, and seeing the same two
+   * series again under Films is exactly the doubling the shelves exist to stop.
+   *
+   * A shelf left with nothing for this screen is dropped rather than drawn
+   * empty — a Marvel shelf holding only films has no business heading the
+   * TV Shows page.
+   */
+  const shelvesHere = useMemo(() => {
+    if (view !== 'movies' && view !== 'shows') return [];
+    const wanted = view === 'movies' ? 'movie' : 'show';
+
+    return collections
+      .filter((entry) => {
+        const where = entry.shownOn ?? 'both';
+        return where === 'both' || where === wanted;
+      })
+      .map((entry) => ({
+        ...entry,
+        items: (entry.items ?? []).filter((item) => item.kind === wanted),
+      }))
+      .filter((entry) => entry.items.length > 0);
+  }, [collections, view]);
+
+  /**
+   * The titles left over once the shelves have taken theirs.
+   *
+   * A shelf moves a title rather than copying it: seeing Batman Beyond on the
+   * DC shelf and then again, three rows down, among everything else is the same
+   * library twice over and makes the shelf look decorative. What is left below
+   * is genuinely what has not been filed anywhere.
+   *
+   * Not applied while gathering, when the whole library has to be reachable —
+   * otherwise a title already on one shelf could never be put on another.
+   */
+  const unshelved = useMemo(() => {
+    const all = view === 'movies' ? movies : shows;
+    if (!shelvesHere.length) return all;
+
+    const filed = new Set(shelvesHere.flatMap((shelf) => (shelf.items ?? []).map((item) => item.id)));
+    return filed.size ? all.filter((item) => !filed.has(item.id)) : all;
+  }, [view, movies, shows, shelvesHere]);
 
   /* Declared above the banner, which reads it to decide whether to rotate. */
   const [openCategory, setOpenCategory] = useState(null);
@@ -268,8 +418,26 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   const featured = heroPicks[heroIndex] ?? heroPicks[0] ?? items[0] ?? null;
 
-  const recentlyAdded = useMemo(
-    () => [...items].sort((a, b) => (b.year ?? 0) - (a.year ?? 0)).slice(0, 24),
+  /**
+   * Newest first — but what has just arrived here comes before all of it.
+   *
+   * The shelf is ordered by the year a title came out, which is what makes it
+   * a shelf of new films rather than a shelf of new files. The exception is
+   * the handful that genuinely arrived in the library recently: those go to
+   * the front whatever their year, because a 1994 film added last night is the
+   * thing somebody in this house has not seen yet, and the reason to look at
+   * this shelf at all.
+   *
+   * Which titles count as newly arrived is worked out in recent.js, and is
+   * deliberately nothing when the whole library was scanned at once.
+   */
+  const recentlyReleased = useMemo(
+    () => [...items]
+      .sort((a, b) => {
+        const arrived = (isRecent(b) ? 1 : 0) - (isRecent(a) ? 1 : 0);
+        return arrived || (b.year ?? 0) - (a.year ?? 0);
+      })
+      .slice(0, 24),
     [items],
   );
 
@@ -402,11 +570,58 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       .catch(() => setReadingComic(typeof issue === "string" ? null : issue));
   }, []);
 
-  const openDetail = useCallback((entry) => {
-    const item = entry.item ?? entry;
-    setDetailId(item.id);
+  /**
+   * Back to the top, whichever element is doing the scrolling.
+   *
+   * The body scrolls rather than the window in a browser, so telling only the
+   * window to go back leaves the new page opened halfway down — and the bar
+   * still carrying the last title, because as far as it knows nothing moved.
+   */
+  const toTop = () => {
     window.scrollTo(0, 0);
+    if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+    setScrolled(false);
+    setPastBanner(false);
+  };
+
+  const openDetail = useCallback((entry, event) => {
+    const item = entry.item ?? entry;
+    /*
+     * The picture that was pressed, measured before anything moves.
+     *
+     * Taken from the press itself rather than looked up afterwards: by the
+     * time the new page exists the rail may have been replaced, and a
+     * measurement of something that is no longer there is worse than none.
+     */
+    /*
+     * Found from what was actually pressed rather than from the handler.
+     *
+     * The event's currentTarget is only meaningful while the interface is
+     * still dispatching it, and by the time it has been handed along it can
+     * be nothing at all. What was under the finger stays true.
+     */
+    const pressed = event?.target?.closest?.('.card')?.querySelector?.('.card-poster img')
+      ?? event?.currentTarget?.querySelector?.('.card-poster img');
+    setDetailId(item.id);
+    toTop();
+    flyFrom(pressed);
   }, []);
+
+  /*
+   * Arrows, an OK and a back — the five buttons a television remote has.
+   *
+   * Back means leaving a title if one is open, and otherwise nothing, so the
+   * key is left to the browser rather than swallowed.
+   */
+  useRemote({
+    onBack: () => {
+      if (searching) { setSearching(false); return true; }
+      if (heldItem) { setHeldItem(null); return true; }
+      if (detailId) { setDetailId(null); return true; }
+      return false;
+    },
+  });
 
   /**
    * Swiping left and right moves along the tabs, and swiping right out of a
@@ -419,6 +634,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     if (next) goto(next.id);
   };
 
+  const pull = usePull(reload, { enabled: !detailId });
   const swipe = useSwipe({
     onLeft: () => { if (!detailId) step(1); },
     onRight: () => {
@@ -427,12 +643,57 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     },
   });
 
+  /**
+   * Start the whole page again.
+   *
+   * Deliberately a full reload rather than another fetch of the library. Asking
+   * for the data again leaves everything else as it was — the build that is
+   * running, whatever a screen has got itself into, anything held in memory
+   * since — and the moment somebody presses this is precisely the moment they
+   * have decided that what is in front of them is wrong. A reload is the one
+   * answer that covers all of it, and it is what they would do by hand if
+   * there were an address bar to do it in.
+   */
+  const refresh = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    window.location.reload();
+  };
+
+  const tickTitle = (id) => setTicked((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const stopGathering = () => { setGathering(false); setTicked(new Set()); };
+
+  /**
+   * Put everything ticked on one shelf.
+   *
+   * Sent one after another rather than all at once, so they land in the order
+   * they were ticked in — which is the order somebody meant them to be in.
+   */
+  const addTickedTo = async (collectionId) => {
+    const chosen = [...ticked];
+    stopGathering();
+    try {
+      for (const id of chosen) await api.addToCollection(collectionId, id);
+      await reload();
+    } catch (failure) {
+      setError(failure.message);
+    }
+  };
+
   const goto = (next) => {
+    stopGathering();
+    setOpenCategory(null);
+    setSearching(false);
     setView(next);
     setDetailId(null);
     setQuery('');
     window.location.hash = next;
-    window.scrollTo(0, 0);
+    toTop();
   };
 
   /*
@@ -452,11 +713,35 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     );
   }
 
+  /*
+   * Searching covers the screen while it is open.
+   *
+   * Drawn before anything else and instead of it: a search that shared the
+   * page would have the library scrolling behind the keyboard, and on a phone
+   * the results would be below the fold before they were drawn.
+   */
+  if (searching) {
+    return (
+      <SearchScreen
+        items={items}
+        cardMeta={cardMeta}
+        onOpen={(item) => { setSearching(false); openDetail(item.id); }}
+        onClose={() => setSearching(false)}
+      />
+    );
+  }
+
   if (detailId) {
     return (
       <>
         <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} me={me} scrolled
+             onSearch={() => setSearching(true)}
+             onRefresh={refresh}
+             refreshing={refreshing}
+             section={pastBanner ? items.find((entry) => entry.id === detailId)?.title : null}
              brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
+        <Rail view={view} goto={goto} tabs={tabs} me={me} />
+        <TabBar view={view} goto={goto} tabs={tabs} />
         {/* Keyed so moving between titles replays the entrance rather than
             swapping content in place, which reads as a jump. */}
         <div className="view" key={detailId} {...swipe}>
@@ -475,9 +760,63 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   return (
     <>
       <Nav view={view} goto={goto} query={query} setQuery={setQuery} tabs={tabs} me={me} scrolled={scrolled}
+           onSearch={() => setSearching(true)}
+           onRefresh={refresh}
+           refreshing={refreshing}
+           onGather={
+             me?.isOwner && (view === 'movies' || view === 'shows')
+               ? () => (gathering ? stopGathering() : setGathering(true))
+               : null
+           }
+           gathering={gathering}
            brand={headerPreview(libraryName)} brandColor={brandColor(libraryColor)} />
+      <Rail view={view} goto={goto} tabs={tabs} me={me} />
+      <TabBar view={view} goto={goto} tabs={tabs} />
 
-      <div className="view" key={view + (query.trim() ? ':search' : '')} {...swipe}>
+      {/* What a pull at the top of the page is doing, while it is doing it. */}
+      {(pull.distance > 0 || pull.refreshing) && (
+        <div
+          className={pull.refreshing ? 'pull refreshing' : (pull.ready ? 'pull ready' : 'pull')}
+          style={{ transform: 'translateY(' + (pull.refreshing ? 44 : pull.distance) + 'px)' }}
+        >
+          <span className="pull-mark">{pull.refreshing ? '↻' : (pull.ready ? '↑' : '↓')}</span>
+          {pull.refreshing ? 'Refreshing' : (pull.ready ? 'Release to refresh' : 'Pull to refresh')}
+        </div>
+      )}
+
+      {gathering && (
+        <GatherBar
+          count={ticked.size}
+          shelves={allShelves.filter((entry) => {
+            const where = entry.shownOn ?? 'both';
+            return where === 'both' || where === (view === 'movies' ? 'movie' : 'show');
+          })}
+          allShelves={allShelves}
+          onAdd={addTickedTo}
+          onCancel={stopGathering}
+        />
+      )}
+
+      {heldItem && (
+        <TitleActions
+          entry={heldItem}
+          favourite={favourites.some((entry) => entry.id === (heldItem.item ?? heldItem).id)}
+          onClose={() => setHeldItem(null)}
+          onOpen={() => { setHeldItem(null); openDetail(heldItem); }}
+          onFavourite={async (wanted) => {
+            const item = heldItem.item ?? heldItem;
+            setHeldItem(null);
+            try {
+              await api.setFavourite(item.id, wanted);
+              await reload();
+            } catch (failure) {
+              setError(failure.message);
+            }
+          }}
+        />
+      )}
+
+      <div className="view" key={view + (query.trim() ? ':search' : '')} {...bothGestures(swipe, pull.handlers)}>
 
       {/* Only worth saying on the computer that would be running mpv. A
           browser plays the video itself and has no use for the advice. */}
@@ -488,7 +827,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       )}
       {error && <div className="banner">{error}</div>}
 
-      {loading && <div className="center-note"><div className="spinner" /><p>Loading your library…</p></div>}
+      {loading && <Skeleton />}
 
       {!loading && view === 'home' && query.trim() && (
         <>
@@ -511,12 +850,12 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
             <h1 className="page-title">Welcome</h1>
             <span className="page-sub">Add the folder holding your movies and shows to get started</span>
           </div>
-          <Settings onScanned={reload} onSettingsChanged={applyBranding} />
+          <Settings onScanned={reload} onSettingsChanged={applyBranding} onShelvesChanged={reload} />
         </>
       )}
 
-      {/* One category, opened from a tile. */}
-      {!loading && view === 'home' && openCategory && (
+      {/* One shelf or genre, opened on its own, from wherever it was found. */}
+      {!loading && openCategory && (
         <Browse
           title={openCategory.name}
           items={openCategory.items}
@@ -554,19 +893,20 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
                 </>
               )}
             />
-            <Row title="Your List" items={favourites} onSelect={openDetail}
+            <Row title="Your List" items={favourites} onSelect={openDetail} onLongPress={setHeldItem}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             {/*
-              * The user's own shelves, above everything the library worked out
-              * for itself. Somebody who took the trouble to arrange a shelf
-              * means it more than any genre we inferred.
+              * Shelves are not drawn here.
+              *
+              * They live at the top of Films and TV Shows, where somebody
+              * looking for a run of films actually goes. The home screen was
+              * already a stack of rails; one more per shelf made it longer
+              * without making it clearer.
               */}
-            {collections.filter((entry) => !entry.logo).map((collection) => (
-              <Row key={collection.id} title={collection.name} items={collection.items}
-                   onSelect={openDetail}
-                   renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
-            ))}
-            <Row title="Recently Released" items={recentlyAdded} onSelect={openDetail}
+            <Row title="Top Rated" items={topRated} onSelect={openDetail} ranked
+                 onLongPress={setHeldItem}
+                 renderLabel={(item) => <><strong>{item.title}</strong>{item.rating?.toFixed(1)}</>} />
+            <Row title="Recently Released" items={recentlyReleased} onSelect={openDetail} onLongPress={setHeldItem}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
 
             {/*
@@ -584,15 +924,10 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
               * collections with a logo appear here; the rest keep an ordinary
               * poster rail lower down, so badging one is how you promote it.
               */}
-            <BrandRail title="Collections" categories={badged} onOpen={setOpenCategory} />
-
-            <Row title="TV Shows" items={shows} onSelect={openDetail}
+            <Row title="TV Shows" items={shows} onSelect={openDetail} onLongPress={setHeldItem}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
-            <Row title="Movies" items={movies} onSelect={openDetail}
+            <Row title="Movies" items={movies} onSelect={openDetail} onLongPress={setHeldItem}
                  renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
-            <Row title="Top Rated" items={topRated} onSelect={openDetail}
-                 renderLabel={(item) => <><strong>{item.title}</strong>{item.rating?.toFixed(1)}</>} />
-
             {/*
               * Genre rails, each title on one shelf only.
               *
@@ -602,29 +937,50 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
               * whichever of its genres is rarest in the library, which is both
               * the more telling shelf and the one that stops the repetition.
               */}
-            <BrandRail
-              title="Genres"
-              categories={genreRails.map((rail) => ({
-                id: 'genre-' + rail.name, name: rail.name, items: rail.entries,
-              }))}
-              onOpen={setOpenCategory}
-            />
+            {/*
+              * The collections go last.
+              *
+              * They were near the top, above the shows and films, on the
+              * grounds that they are the arrangement somebody chose. But the
+              * top of the home screen is for what to watch tonight — what is
+              * half-finished, what is new, what is well liked — and a row of
+              * marks is a way of navigating rather than an answer to that.
+              * Down here they are the thing you scroll to when nothing above
+              * has caught you, which is when they are actually wanted.
+              */}
+            <BrandRail title="Collections" categories={badged} onOpen={setOpenCategory} />
+
+            {genreShelves && (
+              <BrandRail
+                title="Genres"
+                categories={genreRails.map((rail) => ({
+                  id: 'genre-' + rail.name, name: rail.name, items: rail.entries,
+                }))}
+                onOpen={setOpenCategory}
+              />
+            )}
           </div>
         </>
       )}
 
       {!loading && view === 'comics' && (
-        <Comics onRead={readComic} query={query} />
+        <Comics onRead={readComic} query={query} shelfLayouts={shelfLayouts} />
       )}
 
       {!loading && view === 'library' && (
-        <Settings onScanned={reload} onSettingsChanged={applyBranding} />
+        <Settings onScanned={reload} onSettingsChanged={applyBranding} onShelvesChanged={reload} />
       )}
 
-      {!loading && (view === 'movies' || view === 'shows') && (
+      {!loading && !openCategory && (view === 'movies' || view === 'shows') && (
         <Browse
+          picking={gathering}
+          ticked={ticked}
+          onTick={tickTitle}
+          shelves={shelvesHere}
+          shelfLayouts={shelfLayouts}
+          onOpenShelf={setOpenCategory}
           title={view === 'movies' ? 'Movies' : 'TV Shows'}
-          items={view === 'movies' ? movies : shows}
+          items={unshelved}
           onSelect={openDetail}
           query={query}
           groupByGenre={view === 'movies' ? grouping.movies : grouping.shows}
@@ -648,7 +1004,224 @@ const SEARCH_PLACEHOLDER = {
   library: 'Search your library',
 };
 
-function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, me }) {
+/**
+ * What has been ticked, and which shelf it is going on.
+ *
+ * Along the bottom, where it does not cover the titles being chosen, and only
+ * while something is being gathered. Every shelf that belongs on this screen is
+ * offered by name: choosing one is the last press of the whole business, and
+ * making somebody find a menu for it would undo the point of ticking covers.
+ */
+function GatherBar({ count, shelves, allShelves, onAdd, onCancel }) {
+  const nothingYet = count === 0;
+
+  return (
+    <div className="gather">
+      <span className="gather-count">
+        {nothingYet ? 'Tap the titles you want' : count + (count === 1 ? ' title' : ' titles')}
+      </span>
+
+      <div className="gather-shelves">
+        {shelves.map((shelf) => (
+          <button
+            key={shelf.id}
+            type="button"
+            className="btn btn-primary"
+            disabled={nothingYet}
+            onClick={() => onAdd(shelf.id)}
+          >
+            Add to {shelf.name}
+          </button>
+        ))}
+
+        {shelves.length === 0 && (
+          <span className="gather-note">
+            {allShelves.length === 0
+              ? 'No shelves yet — make one in Library › Collections.'
+              : 'No shelf belongs on this screen. Change one under Library › Collections.'}
+          </span>
+        )}
+      </div>
+
+      <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+
+/**
+ * What can be done with a title, without opening it.
+ *
+ * Reached by holding a poster down, or by right-clicking one — the gesture a
+ * phone uses for "tell me more about this" and the one a desktop uses for the
+ * same. It comes up from the bottom edge, where the hand already is, rather
+ * than in the middle of the screen where nothing else is.
+ */
+function TitleActions({ entry, favourite, onClose, onOpen, onFavourite }) {
+  const item = entry.item ?? entry;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal actions" onClick={(event) => event.stopPropagation()}>
+        <div className="actions-head">
+          <strong>{item.title}</strong>
+          <span>{item.year}</span>
+        </div>
+
+        <button type="button" className="actions-row" onClick={onOpen}>
+          <span className="actions-mark" aria-hidden="true">▤</span>
+          More info
+        </button>
+
+        <button type="button" className="actions-row" onClick={() => onFavourite(!favourite)}>
+          <span className="actions-mark" aria-hidden="true">{favourite ? '✓' : '♡'}</span>
+          {favourite ? 'Remove from your list' : 'Add to your list'}
+        </button>
+
+        <button type="button" className="actions-row quiet" onClick={onClose}>
+          <span className="actions-mark" aria-hidden="true">✕</span>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The destinations, along the bottom, where a thumb is.
+ *
+ * Only drawn on a phone — the stylesheet hides it on anything wider, where the
+ * same destinations are a row of words across the top. A menu behind a button
+ * hid every choice behind a tap and put them at the far end of the screen from
+ * the hand holding it; this is the arrangement every other app on the phone
+ * already uses, which is most of why it is the right one.
+ */
+/**
+ * The sections, drawn.
+ *
+ * Stroked rather than filled, at one weight, so they read as a set — and so a
+ * section that is not the current one can simply be a dimmer colour rather
+ * than a different picture.
+ */
+const SECTION_ICONS = {
+  home: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5.5 9.5V20h13V9.5" />
+    </svg>
+  ),
+  shows: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2.5" y="6.5" width="19" height="12.5" rx="2" />
+      <path d="M8 3.2 12 6.5l4-3.3" />
+    </svg>
+  ),
+  movies: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+      <path d="M2.5 9h19M7 4.5v4.5M17 4.5v4.5" />
+      <path d="M10.5 12.5v4l4-2z" />
+    </svg>
+  ),
+  comics: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 6.5C10.5 5 8.5 4.3 5 4.3v13c3.5 0 5.5.7 7 2.2 1.5-1.5 3.5-2.2 7-2.2v-13c-3.5 0-5.5.7-7 2.2z" />
+      <path d="M12 6.5v13" />
+    </svg>
+  ),
+  library: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4 5.3 5.3" />
+    </svg>
+  ),
+};
+
+/**
+ * The sections, down the left edge.
+ *
+ * A row of words across the top costs a strip of every screen and gets no
+ * wider as the window does. Down the side it costs a sliver, the artwork keeps
+ * the full height of the window, and there is somewhere obvious to put more
+ * sections as they arrive.
+ *
+ * Icons at rest, words when you approach it: narrow enough to ignore, and
+ * legible the moment somebody is actually looking for a section. Keyboard
+ * focus opens it too, because a person tabbing through has the same question
+ * as a person hovering and no pointer to ask it with.
+ *
+ * Only on a window wide enough to spare the sliver. A phone keeps the bar
+ * along the bottom, where a thumb already is — a rail there would be a column
+ * of targets at the far edge of the reach.
+ */
+function Rail({ view, goto, tabs, me }) {
+  return (
+    <nav className="rail" aria-label="Sections">
+      {me && (
+        <button
+          type="button"
+          className={view === 'library' ? 'rail-me on' : 'rail-me'}
+          title={me.name + ' — your library'}
+          aria-current={view === 'library' ? 'page' : undefined}
+          onClick={() => goto('library')}
+        >
+          <ProfileFace profile={me} size="list" />
+          <span className="rail-label">{me.name}</span>
+        </button>
+      )}
+
+      {/*
+        * The sections, less the one the name already goes to.
+        *
+        * Library sat at the bottom as a sixth icon while the profile at the top
+        * led to the same screen — the same destination twice, in one column.
+        */}
+      <div className="rail-items">
+        {tabs.filter((entry) => entry.id !== 'library').map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            className={view === entry.id ? 'rail-item on' : 'rail-item'}
+            aria-current={view === entry.id ? 'page' : undefined}
+            title={entry.label}
+            onClick={() => goto(entry.id)}
+          >
+            <span className="rail-glyph" aria-hidden="true">
+              {SECTION_ICONS[entry.id] ?? entry.glyph}
+            </span>
+            {/* Read aloud, not drawn: the sidebar stays narrow and a screen
+                reader still hears which section this is. */}
+            <span className="rail-label">{entry.label}</span>
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+function TabBar({ view, goto, tabs }) {
+  return (
+    <nav className="tabbar">
+      {tabs.map((entry) => (
+        <button
+          key={entry.id}
+          type="button"
+          className={view === entry.id ? 'tabbar-tab on' : 'tabbar-tab'}
+          aria-current={view === entry.id}
+          onClick={() => goto(entry.id)}
+        >
+          <span className="tabbar-glyph" aria-hidden="true">{entry.glyph}</span>
+          {entry.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function Nav({
+  view, goto, query, setQuery, scrolled, brand, brandColor, tabs, me, onSearch,
+  section = null, onRefresh = null, refreshing = false,
+  onGather = null, gathering = false,
+}) {
   /*
    * On a phone the sections live behind a button.
    *
@@ -657,22 +1230,8 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, m
    * choices the bar exists to offer. A menu shows all of them at a size worth
    * tapping, and gives the search box the width it needs.
    */
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // Going somewhere closes the menu; leaving it open over the new page would
-  // mean two taps to read anything.
-  const visit = (id) => { setMenuOpen(false); goto(id); };
-
   return (
     <nav className={scrolled ? 'nav scrolled' : 'nav'}>
-      <button
-        className="nav-burger"
-        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        {menuOpen ? '✕' : '☰'}
-      </button>
 
       {/*
         * Whose library this is, rather than what it is called.
@@ -694,8 +1253,17 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, m
           </button>
         )
         : <div className="nav-brand" title={brand} style={{ color: brandColor }}>{brand}</div>}
-      {/* On a phone the bar names the section, since the links are hidden. */}
-      <div className="nav-section">{tabs.find((entry) => entry.id === view)?.label}</div>
+      {/*
+        * What you are looking at.
+        *
+        * Ordinarily the section, which on a phone is the only thing saying
+        * where you are. On a title's page, once its banner has scrolled off
+        * the top, the title itself — so the answer to "what is this" is always
+        * on screen rather than only at the moment you arrive.
+        */}
+      <div className={section ? 'nav-section titled' : 'nav-section'}>
+        {section ?? tabs.find((entry) => entry.id === view)?.label}
+      </div>
       <div className="nav-links">
         {tabs.map((entry) => (
           <button
@@ -708,24 +1276,17 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, m
         ))}
       </div>
 
-      {menuOpen && (
-        <>
-          {/* Tapping the page behind it is the ordinary way out of a menu. */}
-          <div className="nav-menu-backdrop" onClick={() => setMenuOpen(false)} />
-          <div className="nav-menu">
-            {tabs.map((entry) => (
-              <button
-                key={entry.id}
-                className={view === entry.id ? 'nav-menu-link active' : 'nav-menu-link'}
-                onClick={() => visit(entry.id)}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
       <div className="nav-spacer" />
+
+      {/*
+        * Two ways to the same search, for two shapes of screen.
+        *
+        * A window wide enough to hold a field keeps the field, because typing
+        * where the results already are is faster than opening anything. A
+        * phone gets a button instead: there is no width for a field that also
+        * has to share the bar with a face and the name of the section, and one
+        * that showed "Search TV sh" was worse than no field at all.
+        */}
       {view !== 'library' && (
       <div className="search-box">
         <span style={{ opacity: 0.5 }}>⌕</span>
@@ -739,6 +1300,36 @@ function Nav({ view, goto, query, setQuery, scrolled, brand, brandColor, tabs, m
           <button className="clear-btn" onClick={() => setQuery('')} aria-label="Clear search">×</button>
         )}
       </div>
+      )}
+
+      <button className="nav-search" aria-label="Search" onClick={() => onSearch?.()}>⌕</button>
+
+      {/*
+        * Gather titles for a shelf.
+        *
+        * Only the owner, and only where there are titles to gather from. It is
+        * beside the refresh button because both are things done *to* the screen
+        * rather than places to go.
+        */}
+      {onGather && (
+        <button
+          className={gathering ? 'nav-gather on' : 'nav-gather'}
+          aria-label={gathering ? 'Stop choosing titles' : 'Choose titles for a shelf'}
+          title={gathering ? 'Stop choosing' : 'Choose titles for a shelf'}
+          aria-pressed={gathering}
+          onClick={() => onGather()}
+        >{gathering ? '✕' : '+'}</button>
+      )}
+
+      {/* Fetch the library again. Turns while it is doing so. */}
+      {onRefresh && (
+        <button
+          className={refreshing ? 'nav-refresh turning' : 'nav-refresh'}
+          aria-label="Refresh the library"
+          title="Refresh the library"
+          disabled={refreshing}
+          onClick={() => onRefresh()}
+        >↻</button>
       )}
     </nav>
   );

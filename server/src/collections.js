@@ -99,7 +99,11 @@ export function listCollections() {
     folderPath: row.folder_path,
     logo: row.logo_path ?? null,
     accent: row.accent ?? null,
+    shownOn: WHERE_SHELVES_GO.has(row.shown_on) ? row.shown_on : 'both',
     position: row.position,
+    // When it was made, so a screen can offer to order them by age as well as
+    // by name or by the arrangement somebody chose.
+    createdAt: row.created_at ?? null,
     count: row.folder_path
       ? idsUnderFolder(row.folder_path).length
       : db.prepare('SELECT COUNT(*) n FROM collection_items WHERE collection_id = ?').get(row.id).n,
@@ -113,13 +117,25 @@ export function listCollections() {
  * screen rather than information, and a folder collection is empty whenever
  * its drive is elsewhere.
  */
-export function collectionShelves() {
+export function collectionShelves(where = null) {
   return listCollections()
+    .filter((collection) => !where || collection.shownOn === where || collection.shownOn === 'both')
     .map((collection) => ({ ...collection, items: collectionItems(collection.id) ?? [] }))
     .filter((collection) => collection.items.length > 0);
 }
 
-export function createCollection({ name, folderPath = null }) {
+/**
+ * Where a shelf appears.
+ *
+ * "Films" and "Shows" put it at the top of that screen, which is where somebody
+ * looking for a run of films goes. "Both" puts it on each, for a shelf that
+ * genuinely holds a mix. Nothing goes on the home screen: that page is already
+ * a stack of rails and adding one per shelf made it longer without making it
+ * clearer.
+ */
+export const WHERE_SHELVES_GO = new Set(['movie', 'show', 'both']);
+
+export function createCollection({ name, folderPath = null, shownOn = 'both' }) {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) throw new Error('A collection needs a name.');
 
@@ -128,9 +144,16 @@ export function createCollection({ name, folderPath = null }) {
   const next = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS n FROM collections').get().n;
 
   db.prepare(`
-    INSERT INTO collections (id, name, folder_path, position, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(id, trimmed, folderPath ? String(folderPath).trim() || null : null, next, now());
+    INSERT INTO collections (id, name, folder_path, position, created_at, shown_on)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    trimmed,
+    folderPath ? String(folderPath).trim() || null : null,
+    next,
+    now(),
+    WHERE_SHELVES_GO.has(shownOn) ? shownOn : 'both',
+  );
 
   return listCollections().find((collection) => collection.id === id);
 }
@@ -159,6 +182,9 @@ export function updateCollection(id, patch = {}) {
   if ('accent' in patch) {
     const accent = /^#[0-9a-f]{6}$/i.test(String(patch.accent ?? '')) ? patch.accent : null;
     db.prepare('UPDATE collections SET accent = ? WHERE id = ?').run(accent, id);
+  }
+  if ('shownOn' in patch && WHERE_SHELVES_GO.has(patch.shownOn)) {
+    db.prepare('UPDATE collections SET shown_on = ? WHERE id = ?').run(patch.shownOn, id);
   }
 
   return listCollections().find((collection) => collection.id === id);
@@ -194,10 +220,38 @@ export function addToCollection(id, itemId) {
     'SELECT COALESCE(MAX(position), -1) + 1 AS n FROM collection_items WHERE collection_id = ?',
   ).get(id).n;
 
-  db.prepare(`
-    INSERT OR IGNORE INTO collection_items (collection_id, item_id, position, added_at)
-    VALUES (?, ?, ?, ?)
-  `).run(id, itemId, next, now());
+  db.exec('BEGIN');
+  try {
+    db.prepare(`
+      INSERT OR IGNORE INTO collection_items (collection_id, item_id, position, added_at)
+      VALUES (?, ?, ?, ?)
+    `).run(id, itemId, next, now());
+
+    /*
+     * A title lives on one shelf.
+     *
+     * The shelves are the library's arrangement rather than a set of tags, and
+     * a title on a shelf is taken out of the main grid — so a title on two
+     * shelves is a title listed twice with nothing to say which one it really
+     * belongs to. Filing it somewhere is therefore filing it, not copying it:
+     * putting a film on Sci Fi takes it off Marvel, the way moving a book to
+     * another shelf does.
+     *
+     * Folder shelves are left alone. What is on one of those is decided by the
+     * folder at every scan, so taking a title off would achieve nothing except
+     * to have it back by the morning.
+     */
+    db.prepare(`
+      DELETE FROM collection_items
+      WHERE item_id = ?
+        AND collection_id <> ?
+        AND collection_id IN (SELECT id FROM collections WHERE folder_path IS NULL)
+    `).run(itemId, id);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 
   return { id, itemId };
 }
@@ -207,6 +261,67 @@ export function removeFromCollection(id, itemId) {
   if (!db.prepare('SELECT id FROM collections WHERE id = ?').get(id)) return null;
   db.prepare('DELETE FROM collection_items WHERE collection_id = ? AND item_id = ?').run(id, itemId);
   return { id, itemId };
+}
+
+/**
+ * Move titles from one shelf to another.
+ *
+ * Two calls would do it — take off one, put on the other — and that is what
+ * this replaces. Between those two calls a title belongs to neither shelf, and
+ * since a shelved title is hidden from the main grid, a failure in the gap
+ * leaves it filed nowhere and visible nowhere: findable only by searching for
+ * a name you would have to already know. One transaction cannot end there.
+ *
+ * Titles the target shelf already holds are simply taken off the old one,
+ * which is what a move means when the destination is already the answer.
+ *
+ * @param {string} fromId
+ * @param {string} toId
+ * @param {string[]} itemIds
+ * @returns {{moved: number, from: string, to: string}|null}
+ */
+export function moveTitles(fromId, toId, itemIds) {
+  const db = getDb();
+  const from = db.prepare('SELECT * FROM collections WHERE id = ?').get(fromId);
+  const to = db.prepare('SELECT * FROM collections WHERE id = ?').get(toId);
+  if (!from || !to) return null;
+  if (fromId === toId) throw new Error('That is the shelf it is already on.');
+  if (from.folder_path) throw new Error('This collection follows a folder, so nothing can be taken off it by hand.');
+  if (to.folder_path) throw new Error('That collection follows a folder, so titles cannot be put on it by hand.');
+
+  const wanted = [...new Set((itemIds ?? []).filter(Boolean))];
+  if (!wanted.length) return { moved: 0, from: fromId, to: toId };
+
+  const onShelf = db.prepare('SELECT 1 FROM collection_items WHERE collection_id = ? AND item_id = ?');
+  const exists = db.prepare('SELECT id FROM items WHERE id = ?');
+  const put = db.prepare(`
+    INSERT OR IGNORE INTO collection_items (collection_id, item_id, position, added_at)
+    VALUES (?, ?, ?, ?)
+  `);
+  const take = db.prepare('DELETE FROM collection_items WHERE collection_id = ? AND item_id = ?');
+
+  let moved = 0;
+  db.exec('BEGIN');
+  try {
+    let next = db.prepare(
+      'SELECT COALESCE(MAX(position), -1) + 1 AS n FROM collection_items WHERE collection_id = ?',
+    ).get(toId).n;
+
+    for (const itemId of wanted) {
+      if (!exists.get(itemId)) continue;
+      if (!onShelf.get(fromId, itemId)) continue;
+      put.run(toId, itemId, next, now());
+      take.run(fromId, itemId);
+      next += 1;
+      moved += 1;
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { moved, from: fromId, to: toId };
 }
 
 /** Move a collection up or down the running order. */

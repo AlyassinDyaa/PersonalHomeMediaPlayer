@@ -160,6 +160,28 @@ export function requireAuth(req, res, next) {
   }
 
   /*
+   * A television has no way to sign in, so it is not asked to.
+   *
+   * The protocol a set speaks has no field for a passcode and no screen to
+   * type one on — that is true of every media server on the market, not a
+   * shortcut taken here. What guards these addresses instead is the network
+   * itself: the media-server routes answer only to private addresses, and they
+   * exist at all only when the owner has switched televisions on. Sending a
+   * set to the login page would leave it staring at a page it cannot read.
+   */
+  /*
+   * Taken from whichever of the two Express fills in. `path` is the tidy one
+   * and is what this used, which read as undefined anywhere the request was
+   * not a real Express one — and `undefined.startsWith` threw, turning a
+   * missing passcode into a crash.
+   */
+  const asked = req.path ?? (req.url ?? '').split('?')[0];
+  if (asked === '/dlna' || asked.startsWith('/dlna/')) {
+    next();
+    return;
+  }
+
+  /*
    * A browser asking for a page is always sent to the login screen, including
    * when sharing is switched off — that screen explains it is switched off and
    * where to turn it on. Refusing the navigation with JSON instead, as this

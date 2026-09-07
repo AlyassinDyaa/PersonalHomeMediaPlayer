@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { api, apiBaseUrl, displayTitle } from '../api.js';
 
 /** How often the position is sent back, so the computer stays in step. */
@@ -18,12 +19,36 @@ function formatTime(seconds) {
 const CHROME_HIDE_MS = 4000;
 
 /**
+ * Whether this browser opens a playlist by itself.
+ *
+ * Safari does, which is why there was no player library here at all: the video
+ * element was handed a playlist and left to do its job, and AirPlay,
+ * picture-in-picture, the lock-screen controls and the subtitle menu all came
+ * free with it. Everything built on Chromium does not — including the browser
+ * on a Fire TV stick, where a playlist set as the source simply never started
+ * and the screen sat on "Repackaging for this device" forever.
+ *
+ * Asking the video element is the obvious test and it is a trap: Chromium
+ * answers "maybe" to the HLS type and then plays nothing at all, which is
+ * exactly the wrong answer to build on — measured here, not assumed. So the
+ * question asked is which engine this is. WebKit means Safari on a Mac, an
+ * iPhone or an iPad, where the native path is genuinely better and is the one
+ * already in use; everything else gets hls.js.
+ */
+function playsPlaylistsItself() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent ?? '';
+  const chromium = /chrome|chromium|crios|edg\/|android/i.test(ua);
+  const webkit = /safari/i.test(ua) || /apple/i.test(navigator.vendor ?? '');
+  return webkit && !chromium;
+}
+
+/**
  * Full-screen playback in a browser.
  *
- * Safari plays HLS natively, so there is no player library here — the video
- * element is given a playlist and left to do its job, which also means AirPlay,
- * picture-in-picture, the lock-screen controls and the subtitle menu all work
- * without help.
+ * Safari plays HLS natively and is given the playlist directly; every other
+ * browser is handed the same playlist through hls.js, which is the only
+ * difference between them here.
  *
  * The playlist describes the whole film rather than the part produced so far,
  * so the clock reads the real position, the scrubber covers the real length,
@@ -36,6 +61,8 @@ const CHROME_HIDE_MS = 4000;
  */
 export function Player({ video, item, onClose }) {
   const videoRef = useRef(null);
+  /** The hls.js engine, when this browser needs one. */
+  const hlsRef = useRef(null);
   const boxRef = useRef(null);
   const [current, setCurrent] = useState(video);
   const [status, setStatus] = useState('preparing');
@@ -43,6 +70,16 @@ export function Player({ video, item, onClose }) {
   const [error, setError] = useState(null);
   const [tracks, setTracks] = useState({ audio: [], subtitles: [] });
   const [audioTrack, setAudioTrack] = useState(0);
+  /*
+   * The track somebody chose by hand, if they have.
+   *
+   * Kept apart from audioTrack because the two answer different questions:
+   * which track is playing, and whether that was anybody's decision. Only
+   * the second may stop the English default being applied.
+   */
+  const chosenAudioRef = useRef(null);
+  /** The bar itself, so a press can be measured against its width. */
+  const seekWrapRef = useRef(null);
   const [chrome, setChrome] = useState(true);
   const [paused, setPaused] = useState(false);
   /** Position within the whole film, in seconds. */
@@ -50,6 +87,31 @@ export function Player({ video, item, onClose }) {
   /** How long the film is, from the file itself rather than the stream. */
   const [length, setLength] = useState(video.duration ?? 0);
   const [scrubbing, setScrubbing] = useState(false);
+  /*
+   * The frame under the finger, and where along the bar to draw it.
+   *
+   * Kept apart from the position being scrubbed to, because the picture
+   * arrives a moment later than the finger moves: showing the last frame that
+   * did arrive is better than a blank while the next one is fetched.
+   */
+  const [preview, setPreview] = useState(null);
+
+  /**
+   * Fetch the frame for wherever the finger is, at ten second resolution.
+   *
+   * The server rounds to the same grid, so this asks for a few dozen distinct
+   * addresses across a whole film rather than one per pixel, and the browser
+   * has most of them already by the second pass along the bar.
+   */
+  const askForFrame = useCallback((second) => {
+    const video = currentRef.current;
+    if (!video || !Number.isFinite(second)) return;
+    const at = Math.max(0, Math.round(second / 10) * 10);
+    setPreview((shown) => (shown?.at === at ? shown : {
+      at,
+      src: apiBaseUrl() + '/api/videos/' + encodeURIComponent(video.id) + '/frame?t=' + at,
+    }));
+  }, []);
   const [scrubTo, setScrubTo] = useState(0);
   const [subtitleTrack, setSubtitleTrack] = useState(-1);
   const [full, setFull] = useState(false);
@@ -60,6 +122,8 @@ export function Player({ video, item, onClose }) {
     try { return Number(localStorage.getItem('library.quality')) || 0; } catch { return 0; }
   });
   const [floatError, setFloatError] = useState(false);
+  /** Whether a television has announced itself to this device. */
+  const [airplay, setAirplay] = useState(false);
 
   const lastSentRef = useRef(0);
   /**
@@ -81,6 +145,66 @@ export function Player({ video, item, onClose }) {
   /** Set below; held in a ref so declaration order cannot bite again. */
   const producedSecondsRef = useRef(async () => 0);
   currentRef.current = current;
+
+  /**
+   * Point the video element at something, whatever kind of thing it is.
+   *
+   * A plain file is a source and nothing more. A playlist is a source on
+   * Safari and a job for hls.js everywhere else, and either way any previous
+   * job has to be torn down first — otherwise the old one keeps feeding the
+   * same element and the picture belongs to the last thing watched.
+   */
+  const attach = useCallback((url, { playlist = false } = {}) => {
+    const element = videoRef.current;
+    if (!element) return;
+
+    if (hlsRef.current) { hlsRef.current.destroy(); hlsRef.current = null; }
+
+    if (playlist && !playsPlaylistsItself() && Hls.isSupported()) {
+      const engine = new Hls({
+        // The stream is produced from the point being watched and grows as it
+        // goes, so the end of it moving is normal rather than an error.
+        lowLatencyMode: false,
+        backBufferLength: 60,
+      });
+      hlsRef.current = engine;
+      engine.on(Hls.Events.ERROR, (_event, data) => {
+        if (!data.fatal) return;
+        // Both fatal kinds are worth one attempt: the network one is usually
+        // a segment that has not been written yet, the media one a boundary
+        // the decoder tripped over.
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) engine.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) engine.recoverMediaError();
+        else { engine.destroy(); hlsRef.current = null; setError('This stream stopped.'); }
+      });
+      engine.loadSource(url);
+      engine.attachMedia(element);
+      return;
+    }
+
+    element.src = url;
+    element.load();
+  }, []);
+
+  /*
+   * Watch for a television appearing.
+   *
+   * Safari fires this whenever the set of things it could play to changes, so
+   * the button appears when the phone comes within reach of the television and
+   * goes away again when it does not. Every other browser never fires it, and
+   * the button simply never exists — which is right, because on a laptop there
+   * is nothing for it to do.
+   */
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element) return undefined;
+    const onTargets = (event) => setAirplay(event.availability === 'available');
+    element.addEventListener('webkitplaybacktargetavailabilitychanged', onTargets);
+    return () => element.removeEventListener('webkitplaybacktargetavailabilitychanged', onTargets);
+  }, []);
+
+  // Nothing should be left running once the player is closed.
+  useEffect(() => () => { hlsRef.current?.destroy(); hlsRef.current = null; }, []);
 
   /** Show the controls, and take them away again after a while. */
   const wakeChrome = useCallback(() => {
@@ -119,6 +243,16 @@ export function Player({ video, item, onClose }) {
 
   /** Point the video element at a video, optionally on a different sound track. */
   const load = useCallback(async (target, wantedAudio, startAt) => {
+    /*
+     * A different film is a fresh decision about language.
+     *
+     * Choosing a track by hand holds for the film it was chosen on — through
+     * seeks, reloads and quality changes, all of which come back through here
+     * with the same target. Moving to another film, or the next episode, lets
+     * the English preference apply again.
+     */
+    if (target?.id !== currentRef.current?.id) chosenAudioRef.current = null;
+
     setStatus('preparing');
     setError(null);
     // Said before anything is awaited: reading a large file on a busy drive can
@@ -137,6 +271,19 @@ export function Player({ video, item, onClose }) {
       });
 
       /*
+       * Start on the English track when the file has one.
+       *
+       * Only when nobody has chosen yet: once somebody picks a track by hand
+       * that choice is theirs and follows them through seeks and reloads, so
+       * this must not reach in and overrule it.
+       */
+      const preferred = info.preferredAudio ?? 0;
+      if (chosenAudioRef.current === null && preferred !== wantedAudio) {
+        wantedAudio = preferred;
+        setAudioTrack(preferred);
+      }
+
+      /*
        * A repacked copy beats every streaming path.
        *
        * It is the same picture in a container the browser understands, served
@@ -148,14 +295,14 @@ export function Player({ video, item, onClose }) {
         offsetRef.current = 0;
         playlistRef.current = null;
         setDetail('Playing the prepared copy');
-        videoRef.current.src = apiBaseUrl() + '/api/stream/' + target.id + '/prepared';
+        attach(apiBaseUrl() + '/api/stream/' + target.id + '/prepared');
       } else if (info.mode === 'direct') {
         // Already in a shape the browser understands: hand the file over and
         // let it seek natively, which is better than anything we can arrange.
         offsetRef.current = 0;
         setDetail('Playing the original file');
         playlistRef.current = null;
-        videoRef.current.src = apiBaseUrl() + '/api/stream/' + target.id + '/direct';
+        attach(apiBaseUrl() + '/api/stream/' + target.id + '/direct');
       } else {
         /*
          * One stream produced from the point being watched.
@@ -177,10 +324,11 @@ export function Player({ video, item, onClose }) {
         // The stream starts there, so there is nothing left to seek to.
         resumeToRef.current = 0;
         playlistRef.current = apiBaseUrl() + session.playlistUrl;
-        videoRef.current.src = playlistRef.current;
+        attach(playlistRef.current, { playlist: true });
       }
 
-      videoRef.current.load();
+      // No load() here: attach() has already done it for a plain file, and
+      // calling it after hls.js has taken the element tears its source down.
       await videoRef.current.play().catch(() => {
         // Autoplay can be refused until the viewer touches something; the
         // controls are visible, so this is not an error worth showing.
@@ -195,7 +343,7 @@ export function Player({ video, item, onClose }) {
       setError(failure.message);
       setStatus('failed');
     }
-  }, [wakeChrome]);
+  }, [wakeChrome, attach]);
 
   // Start where the film was left, wherever it was left.
   useEffect(() => {
@@ -507,6 +655,20 @@ export function Player({ video, item, onClose }) {
     };
   }, [scrubbing, scrubTo, seekTo]);
 
+  /**
+   * Where along the film a pointer is, measured against the bar itself.
+   *
+   * Returns null rather than a guess when the length is not known yet or the
+   * bar has no width — pressing a bar that means nothing should do nothing,
+   * not jump to the beginning.
+   */
+  const positionFromPointer = useCallback((clientX) => {
+    const rect = seekWrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || !(length > 0)) return null;
+    const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return fraction * length;
+  }, [length]);
+
   const togglePlay = useCallback(() => {
     const element = videoRef.current;
     if (!element) return;
@@ -514,6 +676,81 @@ export function Player({ video, item, onClose }) {
     else element.pause();
     wakeChrome();
   }, [wakeChrome]);
+
+  /**
+   * Driving playback from a television remote.
+   *
+   * The five buttons a stick has, and the media keys some of them add. Two
+   * states, because that is how a person uses one: with the controls away the
+   * arrows are the film — left and right go back and forward through it — and
+   * with the controls up they are the controls, moving between the buttons.
+   * Anything else means holding a remote with an obvious meaning for a key and
+   * nothing happening.
+   *
+   * Taken in the capture phase and stopped there, so the page-wide arrow
+   * handling that moves focus around the library does not also fire and drag
+   * the highlight off behind the picture.
+   */
+  useEffect(() => {
+    const NUDGE = 10;
+    const STRIDE = 30;
+
+    const onKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const take = () => { event.preventDefault(); event.stopPropagation(); };
+
+      switch (event.key) {
+        // Back leaves the film, wherever the controls are.
+        case 'Escape':
+        case 'GoBack':
+        case 'BrowserBack':
+          take(); onClose(); return;
+
+        case 'MediaPlayPause':
+        case 'MediaPlay':
+        case 'MediaPause':
+          take(); togglePlay(); return;
+
+        case 'MediaStop':
+          take(); onClose(); return;
+
+        case 'MediaFastForward':
+          take(); seekTo(filmTime() + STRIDE); wakeChrome(); return;
+        case 'MediaRewind':
+          take(); seekTo(filmTime() - STRIDE); wakeChrome(); return;
+
+        case 'MediaTrackNext':
+          take(); if (next) goTo(next); return;
+        case 'MediaTrackPrevious':
+          take(); if (previous) goTo(previous); return;
+
+        default:
+          break;
+      }
+
+      // From here on the controls decide. While they are up the arrows belong
+      // to them, and a press on a focused button is the browser's business.
+      if (chrome) {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown'
+          || event.key === 'ArrowLeft' || event.key === 'ArrowRight') wakeChrome();
+        return;
+      }
+
+      switch (event.key) {
+        case 'ArrowLeft': take(); seekTo(filmTime() - NUDGE); wakeChrome(); return;
+        case 'ArrowRight': take(); seekTo(filmTime() + NUDGE); wakeChrome(); return;
+        case 'ArrowUp':
+        case 'ArrowDown': take(); wakeChrome(); return;
+        case 'Enter':
+        case ' ':
+        case 'Spacebar': take(); togglePlay(); return;
+        default:
+      }
+    };
+
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [chrome, onClose, togglePlay, seekTo, filmTime, wakeChrome, goTo, next, previous]);
 
   /** Turn a subtitle track on, or all of them off. */
   const chooseSubtitles = useCallback((index) => {
@@ -604,6 +841,8 @@ export function Player({ video, item, onClose }) {
   /** Switch sound track: the picture is the same, so only the source changes. */
   const chooseAudio = useCallback((index) => {
     const at = videoRef.current?.currentTime ?? 0;
+    // Chosen by hand, so the English default stops applying from here on.
+    chosenAudioRef.current = index;
     setAudioTrack(index);
     load(currentRef.current, index, Math.floor(at));
   }, [load]);
@@ -673,6 +912,29 @@ export function Player({ video, item, onClose }) {
         <span className="player-title">{title}</span>
 
         <div className="player-actions">
+          {/*
+            * Send the picture to the television, and keep the phone as the remote.
+            *
+            * Not the same thing as mirroring the screen: mirroring sends a
+            * photograph of the phone, at the phone's resolution, with the phone
+            * unable to do anything else. This hands the television the film
+            * itself, so it arrives at full quality and the phone goes back to
+            * being what it is good at — a screen you can read, with the
+            * library's own artwork on it.
+            *
+            * Only shown once something to send it to has actually announced
+            * itself, because a button that does nothing on a laptop is worse
+            * than no button at all.
+            */}
+          {airplay && (
+            <button
+              className="player-step"
+              onClick={() => videoRef.current?.webkitShowPlaybackTargetPicker?.()}
+              title="Play this on the television"
+            >
+              Play on TV
+            </button>
+          )}
           {canFloat && !floatError && (
             <button
               className="player-step"
@@ -726,6 +988,8 @@ export function Player({ video, item, onClose }) {
         className="player-video"
         autoPlay
         playsInline
+        /* Lets Safari offer this film to a television. */
+        x-webkit-airplay="allow"
         preload="auto"
         onLoadedMetadata={onLoadedMetadata}
         onSeeking={onSeeking}
@@ -827,6 +1091,60 @@ export function Player({ video, item, onClose }) {
         </button>
 
         <span className="player-time">{formatTime(scrubbing ? scrubTo : at)}</span>
+
+        {/*
+          * The frame under the finger.
+          *
+          * Held inside the bar's own width and nudged away from either end, so
+          * dragging to the very start or the very end does not push it off the
+          * screen — which is where it would be needed most, since the ends are
+          * where people scrub to.
+          */}
+        {/*
+          * The whole bar is the target, not just the little round handle.
+          *
+          * A native range input is driven by the browser, and Safari on iOS
+          * only follows a drag that *begins* on the thumb — tapping further
+          * along the track does nothing at all. So on an iPhone the only way
+          * to move through a film was to find an eighteen-pixel circle and
+          * drag it, which is why it felt broken rather than merely fiddly.
+          *
+          * Reading the pointer against the bar's own width sidesteps the
+          * browser's opinion entirely and behaves the same everywhere: press
+          * anywhere to go there, drag to move, release to seek. The input is
+          * still underneath, still focusable, so a keyboard and a screen
+          * reader work exactly as before.
+          */}
+        <div
+          className="player-seek-wrap"
+          ref={seekWrapRef}
+          onPointerDown={(event) => {
+            const wanted = positionFromPointer(event.clientX);
+            if (wanted === null) return;
+            event.currentTarget.setPointerCapture?.(event.pointerId);
+            wakeChrome();
+            setScrubbing(true);
+            setScrubTo(wanted);
+            askForFrame(wanted);
+          }}
+          onPointerMove={(event) => {
+            if (!scrubbing) return;
+            const wanted = positionFromPointer(event.clientX);
+            if (wanted === null) return;
+            setScrubTo(wanted);
+            askForFrame(wanted);
+          }}
+        >
+        {scrubbing && preview && length > 0 && (
+          <div
+            className="scrub-preview"
+            style={{ left: Math.min(92, Math.max(8, (scrubTo / length) * 100)) + '%' }}
+          >
+            <img src={preview.src} alt="" draggable={false} />
+            <span>{formatTime(scrubTo)}</span>
+          </div>
+        )}
+
         <input
           className="player-seek"
           type="range"
@@ -836,11 +1154,17 @@ export function Player({ video, item, onClose }) {
           value={Math.floor(scrubbing ? scrubTo : at)}
           /* Paints the part already played; see the stylesheet. */
           style={{ '--played': (length > 0 ? ((scrubbing ? scrubTo : at) / length) * 100 : 0) + '%' }}
-          onPointerDown={() => { setScrubTo(at); setScrubbing(true); }}
-          onChange={(event) => { setScrubbing(true); setScrubTo(Number(event.target.value)); }}
+          onPointerDown={() => { setScrubTo(at); setScrubbing(true); askForFrame(at); }}
+          onChange={(event) => {
+            const wanted = Number(event.target.value);
+            setScrubbing(true);
+            setScrubTo(wanted);
+            askForFrame(wanted);
+          }}
           onKeyUp={() => { if (scrubbing) { setScrubbing(false); seekTo(scrubTo); } }}
           aria-label="Position"
         />
+        </div>
         <span className="player-time">{formatTime(length)}</span>
 
         {/*

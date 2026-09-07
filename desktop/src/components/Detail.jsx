@@ -1,6 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, artwork, formatRuntime, formatDuration, formatSize } from '../api.js';
+import { api, artwork, frameFrom, formatRuntime, formatDuration, formatSize } from '../api.js';
 import Row from './Row.jsx';
+import Skeleton from './Skeleton.jsx';
+
+/** A plus, and a tick once it is on the list. */
+function PlusGlyph({ on }) {
+  return on
+    ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 13l4 4L19 7" /></svg>
+    : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+/** A magnifier, for saying the title is wrong. */
+function FindGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="6" />
+      <path d="M20 20l-4.5-4.5" />
+    </svg>
+  );
+}
+
+/** The panels beneath the banner, in the order they are offered. */
+/*
+ * The panels beneath the banner.
+ *
+ * What else is like this is deliberately not one of them. It belongs at the
+ * bottom of the page, where somebody who has finished reading the episodes
+ * arrives at it by scrolling — putting it behind a tab meant it was only ever
+ * seen by people who already knew it was there.
+ */
+const PANELS = [
+  ['episodes', 'Episodes'],
+  ['about', 'Details'],
+];
 
 /** Remembered between visits, so the chosen episode layout sticks. */
 const VIEW_KEY = 'episodeView';
@@ -23,6 +55,12 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
   const [favourite, setFavourite] = useState(false);
   /** Open only while the automatic match is being corrected. */
   const [fixing, setFixing] = useState(false);
+  /** Whether the synopsis has been asked for in full. */
+  const [expanded, setExpanded] = useState(false);
+  /** What the file is — 4K, Dolby Vision, Atmos — once it has been asked. */
+  const [quality, setQuality] = useState(null);
+  /** Which panel is on show beneath the banner. */
+  const [tab, setTab] = useState('episodes');
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +73,9 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
         setItem(loaded);
         setFavourite(Boolean(loaded.favourite));
         setFixing(false);
+        setExpanded(false);
+        setQuality(null);
+        setTab(loaded.kind === 'show' ? 'episodes' : 'about');
         // Open on the season containing the next unwatched episode.
         setSeason(loaded.nextUp?.season ?? loaded.seasons?.[0]?.number ?? null);
       })
@@ -42,6 +83,26 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
 
     return () => { cancelled = true; };
   }, [itemId]);
+
+  /*
+   * What the file actually is, asked for once the title is on screen.
+   *
+   * After the page has drawn rather than before: these are badges, and making
+   * the whole page wait on a probe would trade something everybody needs for
+   * something almost nobody is waiting for. A failure leaves them absent,
+   * which is the honest answer and looks like nothing at all.
+   */
+  useEffect(() => {
+    const file = item?.video ?? item?.nextUp ?? item?.seasons?.[0]?.episodes?.[0];
+    if (!file?.id) return undefined;
+
+    let cancelled = false;
+    api.videoQuality(file.id)
+      .then((found) => { if (!cancelled) setQuality(found); })
+      .catch(() => { /* badges are decoration; their absence is not an error */ });
+
+    return () => { cancelled = true; };
+  }, [item]);
 
   const chooseView = (next) => {
     setEpisodeView(next);
@@ -80,7 +141,7 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
     return <div className="center-note"><p>Could not load this title.</p><p>{error}</p></div>;
   }
   if (!item) {
-    return <div className="center-note"><div className="spinner" /></div>;
+    return <Skeleton detail />;
   }
 
   const backdrop = artwork(item.backdrop, 'w1280');
@@ -88,46 +149,95 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
   const activeSeason = item.seasons?.find((s) => s.number === season);
 
   return (
-    <div>
+    // The whole page takes the title's colour, not only its banner: the season
+    // tabs, the play button and the episode numbers all belong to this title.
+    <div style={item.accent ? { '--accent': item.accent } : undefined}>
       <button className="back-btn" onClick={onBack}>← Back</button>
 
-      <div className="detail-hero">
+      <div className="detail-hero tinted">
         <div className="hero-bg" style={backdrop ? { backgroundImage: 'url(' + backdrop + ')' } : undefined} />
+        <div className="tint-glow" />
         <div className="hero-content">
           {logo
             ? <img className="hero-logo" src={logo} alt={item.title} />
             : <h1 className="hero-title">{item.title}</h1>}
 
-          <div className="hero-meta">
-            {item.year && <span>{item.year}</span>}
+          {/*
+            * What this is, in one line of small marks.
+            *
+            * The rating, how long it runs, the year, and then what the file
+            * actually is — 4K, Dolby Vision, Atmos. The last of those is not in
+            * the library and is fetched when the page opens, so the line is
+            * built to grow rather than to jump: the badges simply appear.
+            */}
+          <div className="hero-badges">
             {item.certification && <span className="badge">{item.certification}</span>}
             {item.kind === 'movie'
-              ? item.runtime > 0 && <span className="dot">{formatRuntime(item.runtime)}</span>
-              : <span className="dot">{item.seasonCount} season{item.seasonCount === 1 ? '' : 's'}, {item.episodeCount} episodes</span>}
-            {item.rating > 0 && <span className="dot">{item.rating.toFixed(1)}</span>}
+              ? item.runtime > 0 && <span className="hero-fact">{formatRuntime(item.runtime)}</span>
+              : (
+                <span className="hero-fact">
+                  {item.seasonCount} season{item.seasonCount === 1 ? '' : 's'}
+                </span>
+              )}
+            {item.year && <span className="hero-fact">{item.year}</span>}
+            {item.rating > 0 && <span className="hero-fact">★ {item.rating.toFixed(1)}</span>}
+
+            {quality?.resolution && <span className="badge tech">{quality.resolution}</span>}
+            {quality?.dynamicRange && <span className="badge tech">{quality.dynamicRange}</span>}
+            {quality?.sound && <span className="badge tech">{quality.sound}</span>}
           </div>
 
-          {item.genres?.length > 0 && (
-            <div className="hero-meta">{item.genres.join(' · ')}</div>
+          {/*
+            * The description, cut off until asked for.
+            *
+            * A long synopsis pushed the play button below the fold on a phone,
+            * which put the one thing everybody came for underneath the one
+            * thing almost nobody reads twice.
+            */}
+          {item.overview && (
+            <p className={expanded ? 'hero-overview open' : 'hero-overview'}>
+              {item.overview}
+              {!expanded && item.overview.length > 180 && (
+                <button
+                  type="button"
+                  className="hero-more"
+                  onClick={() => setExpanded(true)}
+                >More</button>
+              )}
+            </p>
           )}
 
-          {item.overview && <p className="hero-overview">{item.overview}</p>}
+          {item.genres?.length > 0 && (
+            <div className="hero-genres">{item.genres.join('   ')}</div>
+          )}
 
           <div className="hero-actions">
             {item.kind === 'movie' && item.video && (
               <button className="btn btn-primary" onClick={() => onPlay(item.video, item)}>
-                {item.video.position > 0 ? '▶ Resume' : '▶ Play'}
+                {item.video.position > 0 ? '↻ Resume' : '▶ Play'}
               </button>
             )}
             {item.kind === 'show' && item.nextUp && (
               <button className="btn btn-primary" onClick={() => onPlay(item.nextUp, item)}>
-                ▶ Play S{item.nextUp.season} E{item.nextUp.episode}
+                {item.nextUp.position > 0 ? '↻ ' : '▶ '}
+                Watch S{item.nextUp.season} E{item.nextUp.episode}
               </button>
             )}
 
+            {/*
+              * The rest as icons.
+              *
+              * Three wide buttons of equal weight made the row read as three
+              * equal choices, when one of them is the reason the page was
+              * opened. These keep their names for anything reading the page
+              * aloud, and say them on hover for everybody else.
+              */}
             <button
-              className={favourite ? 'btn btn-secondary is-favourite' : 'btn btn-secondary'}
+              type="button"
+              className={favourite ? 'icon-btn on' : 'icon-btn'}
               aria-pressed={favourite}
+              title={favourite ? 'In your list' : 'Add to your list'}
+              aria-label={favourite ? 'In your list' : 'Add to your list'}
               onClick={async () => {
                 const wanted = !favourite;
                 // Shown before it is saved: this is a toggle, and a toggle that
@@ -141,11 +251,17 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                 }
               }}
             >
-              {favourite ? '♥ In your list' : '♡ Add to your list'}
+              <PlusGlyph on={favourite} />
             </button>
 
-            <button className="btn btn-ghost" onClick={() => setFixing(true)}>
-              Wrong title?
+            <button
+              type="button"
+              className="icon-btn"
+              title="Wrong title?"
+              aria-label="This is the wrong title"
+              onClick={() => setFixing(true)}
+            >
+              <FindGlyph />
             </button>
           </div>
         </div>
@@ -159,8 +275,31 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
         />
       )}
 
+      {/*
+        * One row of destinations, rather than everything stacked.
+        *
+        * The episodes, what else is like this, and the facts about the file
+        * were three sections down one long page, so reaching the last of them
+        * meant scrolling past the other two every time. Only the panels that
+        * have something in them are offered.
+        */}
+      <div className="detail-tabs" role="tablist">
+        {PANELS.filter(([id]) => (
+          id === 'episodes' ? item.kind === 'show' && item.seasons?.length > 0 : true
+        )).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={tab === id ? 'detail-tab on' : 'detail-tab'}
+            onClick={() => setTab(id)}
+          >{label}</button>
+        ))}
+      </div>
+
       <div className="detail-body">
-        {item.kind === 'show' && item.seasons?.length > 0 && (
+        {tab === 'episodes' && item.kind === 'show' && item.seasons?.length > 0 && (
           <>
             <div className="section-head">
               <div className="season-tabs">
@@ -219,8 +358,15 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
           </>
         )}
 
-        <AboutPanel item={item} />
+        {tab === 'about' && <AboutPanel item={item} />}
 
+        {/*
+          * What else is like this, under everything else.
+          *
+          * Always shown rather than switched to: this is the row people find
+          * at the end of a page, the way every library they already use puts
+          * it there.
+          */}
         {alike.length >= 3 && onSelect && (
           <div className="detail-rail">
             <Row
@@ -257,15 +403,41 @@ function episodeNote(episode) {
     || formatSize(episode.size);
 }
 
+/**
+ * The picture for one episode, from whichever source has one.
+ *
+ * The database's still first, then a frame lifted from the file. Each is tried
+ * in turn as the one before it fails to load, so a still that is listed but
+ * cannot be fetched falls through to the file rather than leaving a hole — and
+ * when neither works there is a name to read instead of nothing.
+ */
+function EpisodeStill({ episode, size, children = null }) {
+  const [tried, setTried] = useState(0);
+  const sources = [artwork(episode.still, size), frameFrom(episode)].filter(Boolean);
+  const src = sources[tried] ?? null;
+
+  if (!src) return children;
+  return (
+    <img
+      /* A new source has to be a new element, or the browser keeps the error. */
+      key={src}
+      src={src}
+      alt=""
+      loading="lazy"
+      draggable={false}
+      onError={() => setTried((count) => count + 1)}
+    />
+  );
+}
+
 function EpisodeRow({ episode, onPlay }) {
-  const still = artwork(episode.still, 'w300');
   const percent = watchedPercent(episode);
 
   return (
     <div className="episode" onClick={onPlay}>
       <div className="episode-number">{episode.episode}</div>
       <div className="episode-still">
-        {still && <img src={still} alt="" loading="lazy" />}
+        <EpisodeStill episode={episode} size="w300" />
         {percent > 0 && (
           <div className="card-progress"><span style={{ width: percent + '%' }} /></div>
         )}
@@ -288,16 +460,15 @@ function EpisodeRow({ episode, onPlay }) {
 
 /** The same episode as a large tile, for browsing a season by its artwork. */
 function EpisodeTile({ episode, onPlay }) {
-  const still = artwork(episode.still, 'w500');
   const percent = watchedPercent(episode);
 
   return (
     <div className="episode-tile" onClick={onPlay} role="button" tabIndex={0}
          onKeyDown={(event) => { if (event.key === 'Enter') onPlay(); }}>
       <div className="episode-tile-still">
-        {still
-          ? <img src={still} alt="" loading="lazy" draggable={false} />
-          : <div className="card-fallback">{episode.title || 'Episode ' + episode.episode}</div>}
+        <EpisodeStill episode={episode} size="w500">
+          <div className="card-fallback">{episode.title || 'Episode ' + episode.episode}</div>
+        </EpisodeStill>
         <span className="episode-tile-badge">{episode.episode}</span>
         <span className="episode-tile-play">▶</span>
         {percent > 0 && (
@@ -433,7 +604,7 @@ function MatchFixer({ item, onClose, onError }) {
     <div className="match-fixer">
       <div className="match-head">
         <h2>Which one is this?</h2>
-        <button className="btn btn-ghost" onClick={onClose}>Close</button>
+        <button className="btn btn-secondary" onClick={onClose}>Close</button>
       </div>
 
       {saved ? (

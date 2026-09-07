@@ -1,7 +1,7 @@
 /* Transparent playback controls drawn over the mpv window. */
 
 :root {
-  --accent: #e50914;
+  --accent: #7d8aa0;
   --control: #ffffff;
   --control-dim: rgba(255, 255, 255, 0.72);
 }
@@ -269,7 +269,7 @@ button { font: inherit; color: inherit; border: none; background: none; cursor: 
 .track-item:hover { background: rgba(255, 255, 255, 0.1); }
 
 .track-item.active {
-  background: rgba(229, 9, 20, 0.22);
+  background: rgba(125, 138, 160, 0.26);
   color: #fff;
   font-weight: 600;
 }

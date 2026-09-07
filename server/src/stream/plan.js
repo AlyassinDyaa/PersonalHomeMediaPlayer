@@ -29,9 +29,20 @@ const PLAYABLE_AUDIO = new Set(['aac']);
 const PLAYABLE_CONTAINER = /(^|,)(mov|mp4|m4a|3gp|3g2|mj2)(,|$)/;
 
 /** 10-bit H.264 is not hardware-decodable on Apple devices; HEVC 10-bit is. */
-function videoNeedsEncoding(video) {
+function videoNeedsEncoding(video, { hevc = true } = {}) {
   if (!video) return true;
   if (!PLAYABLE_VIDEO.has(video.codec_name)) return true;
+  /*
+   * HEVC only where the device asking for it can decode HEVC.
+   *
+   * This list was written for Safari, which always can, and the rule was then
+   * applied to every device — so a browser without an HEVC decoder was handed
+   * the picture untouched and showed nothing at all. About a third of this
+   * library is HEVC, so on such a device a third of it was a black screen with
+   * no error to explain it. The device now says what it can do and is told
+   * apart from the ones that can.
+   */
+  if (video.codec_name === 'hevc' && !hevc) return true;
   const tenBit = /10le|10be/.test(video.pix_fmt ?? '');
   if (tenBit && video.codec_name === 'h264') return true;
   return false;
@@ -46,18 +57,21 @@ function audioNeedsEncoding(audio) {
  * Decide how to deliver a file.
  *
  * @param {{format?: object, streams?: Array}} probed ffprobe output
+ * @param {{hevc?: boolean}} [device] what the device asking can decode. Defaults
+ *   to everything Safari can, which is what every caller assumed before there
+ *   was a way to say otherwise.
  * @returns {{mode: 'direct'|'remux'|'encode', video: 'copy'|'encode',
  *   audio: 'copy'|'encode', reason: string}}
  *   direct — hand the file over as it is
  *   remux  — repackage without touching the picture
  *   encode — the picture has to be re-encoded, which is the expensive one
  */
-export function planDelivery(probed) {
+export function planDelivery(probed, device = {}) {
   const streams = probed?.streams ?? [];
   const video = streams.find((s) => s.codec_type === 'video' && s.disposition?.attached_pic !== 1);
   const audio = streams.find((s) => s.codec_type === 'audio');
 
-  const encodeVideo = videoNeedsEncoding(video);
+  const encodeVideo = videoNeedsEncoding(video, device);
   const encodeAudio = audioNeedsEncoding(audio);
   const container = probed?.format?.format_name ?? '';
 

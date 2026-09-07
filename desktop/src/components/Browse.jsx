@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Card from './Card.jsx';
 import Row from './Row.jsx';
+import { artwork } from '../api.js';
+import {
+  useShelfView, ShelfViewToggle, ShelfTile, ShelfLine,
+  useShelfOrder, ShelfOrderPicker, sortShelves,
+} from './ShelfView.jsx';
 import { shelveByGenre } from '../genres.js';
 
 /**
@@ -14,8 +19,42 @@ export function Browse({
   title, items, onSelect, renderLabel, query = '', groupByGenre = true,
   /* Shown beside the title when this screen was opened from somewhere. */
   onBack = null,
+  /* The owner's own shelves that belong on this screen, above everything. */
+  shelves = [],
+  /* While gathering titles for a shelf: what is ticked, and how to tick. */
+  picking = false,
+  ticked = null,
+  onTick = null,
+  /* Opening one shelf on its own, as a page rather than a rail. */
+  onOpenShelf = null,
+  /* Which layouts the owner has left switched on. */
+  shelfLayouts = null,
 }) {
   const [genre, setGenre] = useState(null);
+  /* Rails, tiles or lines — remembered, and shared with the other screens. */
+  const [shelfView, chooseShelfView, shelfLayoutsOffered] = useShelfView(shelfLayouts);
+  const [shelfOrder, chooseShelfOrder] = useShelfOrder();
+
+  /*
+   * The shelves in whichever order was asked for.
+   *
+   * Sorted once here rather than in each of the three layouts below, so the
+   * rails, the tiles and the lines cannot drift apart — the order is a
+   * property of the screen, not of how it happens to be drawn.
+   */
+  const ordered = useMemo(() => sortShelves(shelves, shelfOrder), [shelves, shelfOrder]);
+  /*
+   * Shelves unfolded into a grid where they stand.
+   *
+   * Per shelf rather than a mode for the screen: somebody wants everything on
+   * one shelf and a rail for the rest, which is the whole reason for asking.
+   */
+  const [stacked, setStacked] = useState(() => new Set());
+  const unfold = (id) => setStacked((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   /*
    * Starts from the preference in Settings, and can still be flipped here for
    * a moment without changing it — the chip is a glance, the setting is how
@@ -84,7 +123,7 @@ export function Browse({
       <div className="page-header">
         {onBack && (
           <button type="button" className="btn btn-secondary btn-back" onClick={onBack}>
-            ← Home
+            ← Back
           </button>
         )}
         <h1 className="page-title">{title}</h1>
@@ -95,6 +134,118 @@ export function Browse({
         </span>
         {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
       </div>
+
+      {/*
+        * The shelves somebody arranged, before anything the library worked out.
+        *
+        * They sit above the genre controls rather than below the grid, because
+        * a shelf is the answer to "what do we have" and the grid is the answer
+        * to "show me everything" — and the first question is the one people
+        * arrive with. Hidden while searching or filtering, when the screen is
+        * answering a narrower question than the shelves can.
+        */}
+      {shelves.length > 0 && !trimmed && !genre && !unwatchedOnly && (
+        <div className="browse-shelves">
+          {/*
+            * Which layout, offered only where there is enough to lay out.
+            * With one shelf the three buttons are furniture around a single
+            * rail, and the question is not worth asking.
+            */}
+          {shelves.length > 1 && !picking && (
+            <div className="browse-shelves-head">
+              <span className="browse-shelves-label">Collections</span>
+              <div className="browse-shelves-tools">
+                <ShelfOrderPicker order={shelfOrder} onChoose={chooseShelfOrder} />
+                <ShelfViewToggle
+                  view={shelfView}
+                  onChoose={chooseShelfView}
+                  offered={shelfLayoutsOffered}
+                />
+              </div>
+            </div>
+          )}
+
+          {/*
+            * Rails while picking, whatever was chosen.
+            *
+            * Gathering titles for a shelf means ticking covers, and a tile or
+            * a line has no covers to tick — the choice would silently take the
+            * ability to do the thing being done.
+            */}
+          {(shelfView === 'rows' || picking) && ordered.map((shelf) => (
+            stacked.has(shelf.id) && !picking ? (
+              <section className="row shelf-stack" key={shelf.id}>
+                <div className="row-header">
+                  <h2 className="row-title">{shelf.name}</h2>
+                  <span className="row-count">{(shelf.items ?? []).length}</span>
+                  <div className="row-actions">
+                    <button className="chip" onClick={() => unfold(shelf.id)}>Show less</button>
+                    {onOpenShelf && (
+                      <button className="chip" onClick={() => onOpenShelf(shelf)}>Open</button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid">
+                  {(shelf.items ?? []).map((entry) => {
+                    const item = entry.item ?? entry;
+                    return (
+                      <Card
+                        key={item.id}
+                        item={item}
+                        label={renderLabel ? renderLabel(entry) : null}
+                        onClick={(event) => onSelect(entry, event)}
+                      />
+                    );
+                  })}
+                </div>
+              </section>
+            ) : (
+              <Row
+                key={shelf.id}
+                title={shelf.name}
+                items={shelf.items}
+                picking={picking}
+                ticked={ticked}
+                onSelect={picking ? ((entry) => onTick?.((entry.item ?? entry).id)) : onSelect}
+                onStack={picking ? null : () => unfold(shelf.id)}
+                onSeeAll={onOpenShelf ? () => onOpenShelf(shelf) : null}
+                renderLabel={renderLabel}
+              />
+            )
+          ))}
+
+          {shelfView === 'grid' && !picking && (
+            <div className="shelf-grid">
+              {ordered.map((shelf) => (
+                <ShelfTile
+                  key={shelf.id}
+                  name={shelf.name}
+                  count={(shelf.items ?? []).length}
+                  badge={shelf.logo ? artwork(shelf.logo, 'w300') : null}
+                  covers={(shelf.items ?? [])
+                    .map((entry) => artwork((entry.item ?? entry).poster, 'w200'))
+                    .filter(Boolean)}
+                  onOpen={() => onOpenShelf?.(shelf)}
+                />
+              ))}
+            </div>
+          )}
+
+          {shelfView === 'list' && !picking && (
+            <div className="shelf-lines">
+              {ordered.map((shelf) => (
+                <ShelfLine
+                  key={shelf.id}
+                  name={shelf.name}
+                  count={(shelf.items ?? []).length}
+                  badge={shelf.logo ? artwork(shelf.logo, 'w300') : null}
+                  onOpen={() => onOpenShelf?.(shelf)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/*
         * The same choice twice, for two widths.
@@ -175,7 +326,14 @@ export function Browse({
         <div className="grid">
           {sorted
             .map((item) => (
-              <Card key={item.id} item={item} onClick={() => onSelect(item)} label={renderLabel(item)} />
+              <Card
+                key={item.id}
+                item={item}
+                picking={picking}
+                ticked={Boolean(ticked?.has(item.id))}
+                onClick={() => (picking ? onTick?.(item.id) : onSelect(item))}
+                label={renderLabel(item)}
+              />
             ))}
         </div>
       )}
@@ -187,7 +345,9 @@ export function Browse({
               key={row.name}
               title={row.name}
               items={row.entries}
-              onSelect={onSelect}
+              picking={picking}
+              ticked={ticked}
+              onSelect={picking ? ((entry) => onTick?.((entry.item ?? entry).id)) : onSelect}
               renderLabel={renderLabel}
             />
           ))}

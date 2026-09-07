@@ -151,4 +151,47 @@ check('only the first video and audio stream are taken', () => {
   assert.ok(args.includes('0:a:0?'), 'the audio is optional, so a silent file still plays');
 });
 
+/*
+ * What the device asking can decode.
+ *
+ * These rules were written for Safari, which plays HEVC everywhere, and were
+ * then applied to every device — so a browser without an HEVC decoder was
+ * handed the picture untouched and showed a black screen with no error to
+ * explain it. About a third of a real library is HEVC, so that is a third of
+ * it, and the browser on a television stick is the one most likely to be
+ * asking.
+ */
+
+check('HEVC is copied for a device that can decode it', () => {
+  const plan = planDelivery(
+    probe('matroska,webm', { codec_name: 'hevc', pix_fmt: 'yuv420p10le' }, { codec_name: 'aac' }),
+    { hevc: true },
+  );
+  assert.strictEqual(plan.video, 'copy');
+});
+
+check('HEVC is re-encoded for a device that cannot', () => {
+  const plan = planDelivery(
+    probe('matroska,webm', { codec_name: 'hevc', pix_fmt: 'yuv420p10le' }, { codec_name: 'aac' }),
+    { hevc: false },
+  );
+  assert.strictEqual(plan.mode, 'encode');
+  assert.strictEqual(plan.video, 'encode');
+});
+
+check('saying nothing means everything, as every older client assumed', () => {
+  const plan = planDelivery(
+    probe('matroska,webm', { codec_name: 'hevc', pix_fmt: 'yuv420p10le' }, { codec_name: 'aac' }),
+  );
+  assert.strictEqual(plan.video, 'copy');
+});
+
+check('H.264 is untouched by any of this', () => {
+  const plan = planDelivery(
+    probe('mov,mp4,m4a,3gp,3g2,mj2', { codec_name: 'h264', pix_fmt: 'yuv420p' }, { codec_name: 'aac' }),
+    { hevc: false },
+  );
+  assert.strictEqual(plan.mode, 'direct');
+});
+
 console.log('\npassed ' + passed + ' of ' + total);

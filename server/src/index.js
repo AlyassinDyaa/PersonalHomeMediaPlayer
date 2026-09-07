@@ -11,6 +11,8 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import https from 'node:https';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { config, ensureDataDirs, hasTmdb, saveSettings, settingsView, listDirectories } from './config.js';
 import { getDb } from './db.js';
@@ -19,10 +21,18 @@ import {
 } from './scan/index.js';
 import * as library from './library.js';
 import * as collections from './collections.js';
+// Which profiles are let into a whole area of the library, such as Comics.
+import { SECTIONS, blockedFrom, maySee, setAllowed } from './sections.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
+import { ensureAccents } from './meta/accent.js';
+import { frameAt, snap } from './stream/thumbs.js';
 import { tmdbGet, searchTitles } from './meta/tmdb.js';
 import { startAutoScan } from './scan/autoscan.js';
+// Being found by the televisions in the house, which have no browser.
+import { serveToTelevisions } from './dlna/index.js';
+// A mark for every shelf, so a wall of collections is not a wall of words.
+import { badgeCollections } from './meta/badges.js';
 import { segmentPlan, buildPlaylist, ensureSegment, clearAllSegments } from './stream/vod.js';
 import * as comics from './comics/library.js';
 import { scanComics } from './comics/scan.js';
@@ -40,15 +50,53 @@ import { saveAvatar, clearAvatar, avatarFile } from './avatars.js';
 import { libraryHealth } from './health.js';
 import * as requests from './requests.js';
 import { openSession, touchSession, clearStreamCache, closeAllSessions } from './stream/sessions.js';
-import { ffmpegAvailable, probeFile, ffmpegPaths } from './stream/ffmpeg.js';
+import { ffmpegAvailable, probeFile, probeQuality, ffmpegPaths } from './stream/ffmpeg.js';
 import { planDelivery } from './stream/plan.js';
+
+/**
+ * What the device asking says it can decode.
+ *
+ * Absent means yes, because every client before this one could: an old copy of
+ * the interface must not have a third of the library re-encoded for it.
+ */
+function deviceCan(req) {
+  return { hevc: req.query.hevc !== '0' };
+}
 import {
   canPrepare, prepare, preparedPath, preparedState, preparedStats,
 } from './stream/prepared.js';
 import { webAppDir, loginPage } from './webapp.js';
+import { loadCertificate, watchCertificate } from './certificate.js';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+
+/*
+ * An access log, off unless asked for.
+ *
+ * When somebody far away says the library will not load there is otherwise
+ * nothing to look at: the server keeps no record of what was asked for or
+ * what it answered, so the only account of the failure is theirs, over a
+ * chat, in whatever words they have for it. One line per request settles in
+ * seconds what a conversation cannot settle at all — whether they arrived,
+ * what they asked for, and what they were told.
+ *
+ * Set MEDIA_ACCESS_LOG=1 to turn it on. Off by default because it names every
+ * address that reaches the library, which is not something to write down
+ * without a reason.
+ */
+if (process.env.MEDIA_ACCESS_LOG === '1') {
+  app.use((req, res, next) => {
+    const started = Date.now();
+    res.on('finish', () => {
+      console.log('[access] ' + (req.socket?.remoteAddress ?? '?')
+        + ' ' + req.method + ' ' + req.originalUrl
+        + ' -> ' + res.statusCode + ' ' + (Date.now() - started) + 'ms');
+    });
+    next();
+  });
+  console.log('Access logging is on.');
+}
 
 /*
  * Let the development renderer talk to this server.
@@ -228,7 +276,10 @@ app.post('/api/login/profile', (req, res) => {
   const blockedFor = loginBlockedFor(address);
   if (blockedFor > 0) {
     res.status(429).json({
-      error: 'Too many tries. Wait ' + Math.ceil(blockedFor / 1000) + ' seconds.',
+      // Already seconds. Dividing again reported every lockout as one second,
+      // which reads as nothing being wrong and invites the retry that cannot
+      // work — the worst possible thing to tell somebody locked out.
+      error: 'Too many tries. Wait ' + blockedFor + ' seconds.',
     });
     return;
   }
@@ -303,10 +354,56 @@ function requireOwner(req, res, next) {
   res.status(403).json({ error: 'Only the owner of this library can change that' });
 }
 
+/**
+ * Keep a profile out of a section it was not given.
+ *
+ * The tab is already hidden for anybody without it, but a hidden tab is a
+ * courtesy rather than a rule: the addresses behind it are guessable and the
+ * whole point of the setting is that somebody was deliberately not given this.
+ * Answered as "not found" rather than "not allowed", because whether a section
+ * exists at all is not this profile's business.
+ */
+function requireSection(section) {
+  return (req, res, next) => {
+    if (maySee(section, req.profile?.id)) {
+      next();
+      return;
+    }
+    res.status(404).json({ error: 'Not found' });
+  };
+}
+
+/**
+ * The name of the script this build serves.
+ *
+ * Every build names its script after its contents, so this is a version
+ * number that nobody has to remember to increment. A browser holding an older
+ * one can see that it is older simply by comparing the two names.
+ *
+ * Looked up afresh every minute rather than remembered for the life of the
+ * process, because the files can be replaced under a server that is still
+ * running — which is exactly the moment this has to be right.
+ */
+let knownBuild = { name: null, at: 0 };
+
+function currentBuild() {
+  if (Date.now() - knownBuild.at < 60_000) return knownBuild.name;
+  let name = null;
+  try {
+    name = fs.readdirSync(path.join(webAppDir(), 'assets'))
+      .find((file) => file.startsWith('index-') && file.endsWith('.js')) ?? null;
+  } catch {
+    // No browser build here; nothing to compare against, which is fine.
+  }
+  knownBuild = { name, at: Date.now() };
+  return name;
+}
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     tmdb: hasTmdb(),
+    build: currentBuild(),
     // Where the films live is the owner's business alone.
     ...(req.profile?.isOwner ? { roots: config.libraryRoots } : {}),
   });
@@ -508,6 +605,50 @@ app.get('/api/videos/:id', (req, res) => {
   res.json(video);
 });
 
+/**
+ * One frame from a film, for the preview above the seek bar.
+ *
+ * Answered with a redirect to the grid position actually served rather than
+ * the exact second asked for, so a browser caches a few dozen addresses for a
+ * whole film instead of one per pixel dragged. A frame that cannot be made —
+ * no ffmpeg, an unreadable file, a time past the end — is simply absent, and
+ * the bar goes back to being a bar.
+ */
+app.get('/api/videos/:id/frame', async (req, res) => {
+  const video = library.getVideo(req.params.id, req.profile);
+  if (!video) return res.status(404).json({ error: 'not found' });
+
+  const at = snap(req.query.t);
+  const file = await frameAt(video.id, video.path, at);
+  if (!file) return res.status(404).json({ error: 'no frame there' });
+
+  // The frame for a given second never changes, so it can be kept for good.
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(file, (error) => { if (error && !res.headersSent) res.status(404).end(); });
+});
+
+/**
+ * What a file actually is: 4K, Dolby Vision, Atmos and the rest.
+ *
+ * Asked for by the detail page and nothing else, so it is probed here rather
+ * than stored: recording it would mean a column per fact and a pass over every
+ * file in the library to fill them, and the answer is one process launch that
+ * is then remembered.
+ *
+ * Never fails. These are badges on a page that reads perfectly well without
+ * them, so a file that has gone missing gives an empty answer rather than an
+ * error somebody has to look at.
+ */
+app.get('/api/videos/:id/quality', async (req, res) => {
+  const video = library.getVideo(req.params.id, req.profile);
+  if (!video) return res.status(404).json({ error: 'not found' });
+
+  const quality = await probeQuality(video.path);
+  // It cannot change while the file is what it is.
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.json(quality);
+});
+
 app.get('/api/continue', (req, res) => {
   res.json(library.continueWatching(Number(req.query.limit) || 20, req.profile));
 });
@@ -525,8 +666,15 @@ app.get('/api/collections', (req, res) => {
 });
 
 /** The rails themselves, titles included, for the home screen. */
+/*
+ * The shelves for one screen.
+ *
+ * ?where=movie or ?where=show narrows it to the shelves that belong there; a
+ * shelf marked "both" belongs to either. Without the parameter every shelf
+ * comes back, which is what the settings screen wants.
+ */
 app.get('/api/collections/shelves', (req, res) => {
-  res.json(collections.collectionShelves());
+  res.json(collections.collectionShelves(req.query.where ?? null));
 });
 
 app.get('/api/collections/:id', (req, res) => {
@@ -535,18 +683,27 @@ app.get('/api/collections/:id', (req, res) => {
   res.json(items);
 });
 
-app.post('/api/collections', (req, res) => {
+/*
+ * Shelves belong to the library, not to whoever is looking at it.
+ *
+ * Everyone reads them, because they are how the library is arranged and a
+ * shelf only one person could see would not be an arrangement at all. Only
+ * the owner writes them, for the same reason: what one person put on a
+ * shelf is what the rest of the house is meant to find there.
+ */
+app.post('/api/collections', requireOwner, (req, res) => {
   try {
     res.json(collections.createCollection({
       name: req.body?.name,
       folderPath: req.body?.folderPath ?? null,
+      shownOn: req.body?.shownOn,
     }));
   } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
-app.patch('/api/collections/:id', (req, res) => {
+app.patch('/api/collections/:id', requireOwner, (req, res) => {
   try {
     if (req.body?.move) {
       const moved = collections.moveCollection(req.params.id, req.body.move);
@@ -561,14 +718,14 @@ app.patch('/api/collections/:id', (req, res) => {
   }
 });
 
-app.delete('/api/collections/:id', (req, res) => {
+app.delete('/api/collections/:id', requireOwner, (req, res) => {
   if (!collections.deleteCollection(req.params.id)) {
     return res.status(404).json({ error: 'collection not found' });
   }
   res.json({ removed: true });
 });
 
-app.post('/api/collections/:id/items', (req, res) => {
+app.post('/api/collections/:id/items', requireOwner, (req, res) => {
   try {
     const added = collections.addToCollection(req.params.id, req.body?.itemId);
     if (!added) return res.status(404).json({ error: 'collection or item not found' });
@@ -578,7 +735,27 @@ app.post('/api/collections/:id/items', (req, res) => {
   }
 });
 
-app.delete('/api/collections/:id/items/:itemId', (req, res) => {
+/**
+ * Move titles from this shelf to another one.
+ *
+ * One request rather than a remove and an add, because a shelved title is
+ * hidden from the main grid — so a title caught between the two calls is on no
+ * shelf and in no grid, and effectively lost.
+ */
+app.post('/api/collections/:id/items/move', requireOwner, (req, res) => {
+  const { to, itemIds } = req.body ?? {};
+  if (!to) return res.status(400).json({ error: 'Say which collection to move them to' });
+
+  try {
+    const moved = collections.moveTitles(req.params.id, to, itemIds ?? []);
+    if (!moved) return res.status(404).json({ error: 'collection not found' });
+    res.json(moved);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete('/api/collections/:id/items/:itemId', requireOwner, (req, res) => {
   const removed = collections.removeFromCollection(req.params.id, req.params.itemId);
   if (!removed) return res.status(404).json({ error: 'collection not found' });
   res.json(removed);
@@ -628,6 +805,7 @@ app.delete('/api/merges/:alias', requireOwner, async (req, res) => {
     res.status(500).json({ error: 'separated, but the rescan failed: ' + error.message });
   } finally {
     scanning = false;
+    colourNewTitles();
   }
 });
 
@@ -692,10 +870,27 @@ app.get('/api/tmdb/search', async (req, res) => {
 /** Force an item to a specific TMDB id; survives rescans. */
 app.post('/api/items/:id/match', requireOwner, (req, res) => {
   const { tmdbId } = req.body ?? {};
-  const row = getDb().prepare('SELECT scan_key FROM items WHERE id = ?').get(req.params.id);
+  const row = getDb()
+    .prepare('SELECT scan_key, group_key FROM items WHERE id = ?')
+    .get(req.params.id);
   if (!row) return res.status(404).json({ error: 'not found' });
-  setOverride('tmdb', row.scan_key, tmdbId);
-  res.json({ ok: true, scanKey: row.scan_key, tmdbId, note: 'applied on next scan' });
+
+  /*
+   * Filed against the key the scanner looks things up by.
+   *
+   * Not the one the item is stored under: once a title has matched, it is
+   * stored under its database identity, and the scanner has never heard of
+   * that when it comes to ask whether anybody has corrected this title. The
+   * note went into a drawer nothing opens, so every correction was accepted
+   * and then silently ignored.
+   *
+   * scan_key stands in for rows written before the grouping key was kept,
+   * which is right for the case it covers: an item that never matched is
+   * stored under its grouping key already.
+   */
+  const key = row.group_key ?? row.scan_key;
+  setOverride('tmdb', key, tmdbId);
+  res.json({ ok: true, scanKey: key, tmdbId, note: 'applied on next scan' });
 });
 
 /**
@@ -747,9 +942,26 @@ app.post('/api/suggestions/:id/resolve', requireOwner, (req, res) => {
 function settingsWithNetwork() {
   const view = settingsView();
   const address = lanAddress();
+
+  /*
+   * The secure name in preference to the address, when there is one.
+   *
+   * Both work, but they are not equivalent: a browser will only install the
+   * offline notice, and only remember a passcode, on a page it trusts. The
+   * certificate is for the name and not for the address, so handing out the
+   * address would hand out the half that cannot be trusted.
+   */
+  const secure = loadCertificate();
   return {
     ...view,
-    networkUrl: config.remoteAccess && address
+    networkUrl: config.remoteAccess && (secure?.name || address)
+      ? (secure?.name
+        ? 'https://' + secure.name + (config.securePort === 443 ? '' : ':' + config.securePort)
+        : 'http://' + address + ':' + config.port)
+      : null,
+    /* Kept separately so the plain address stays available to anyone on the
+       home network, where the certificate does not apply. */
+    localUrl: config.remoteAccess && address
       ? 'http://' + address + ':' + config.port
       : null,
     // Whether a browser could be served at all, so the interface can explain
@@ -791,13 +1003,22 @@ app.get('/api/logos/search', async (req, res) => {
  * profile should not be able to learn that the films sit on G:\Entertainment,
  * let alone point the library somewhere else.
  */
-function viewerSettings(full) {
+function viewerSettings(full, profile = null) {
   return {
     libraryName: full.libraryName,
     libraryColor: full.libraryColor,
     skipIntroEnabled: full.skipIntroEnabled,
     skipOutroEnabled: full.skipOutroEnabled,
-    showComics: full.showComics,
+    // On for the library, and on for this reader in particular. Both have to
+    // hold, or the tab is there for somebody who was deliberately not given it.
+    showComics: full.showComics && maySee('comics', profile?.id),
+    // How the library looks belongs to the library, so everybody watching sees
+    // the same room rather than the owner alone.
+    background: full.background,
+    backgroundColor: full.backgroundColor,
+    // Not the owner's business alone: every screen has to know which layouts
+    // to offer, so this travels with the rest of how the library looks.
+    shelfLayouts: full.shelfLayouts,
     groupMoviesByGenre: full.groupMoviesByGenre,
     groupShowsByGenre: full.groupShowsByGenre,
     streamingReady: full.streamingReady,
@@ -869,7 +1090,57 @@ app.delete('/api/requests/:id', (req, res) => {
 app.get('/api/settings', (req, res) => {
   const full = settingsWithNetwork();
   const owner = Boolean(req.profile?.isOwner);
-  res.json({ ...(owner ? full : viewerSettings(full)), isOwner: owner });
+  res.json({ ...(owner ? full : viewerSettings(full, req.profile)), isOwner: owner });
+});
+
+/**
+ * Who may see one section of the library.
+ *
+ * The owner's question, so only the owner is answered. Sent as the profiles
+ * allowed rather than the profiles blocked, which is how it is asked and how
+ * it is shown; sections.js keeps it the other way round for its own reasons.
+ */
+app.get('/api/sections/:section/access', requireOwner, (req, res) => {
+  const { section } = req.params;
+  if (!SECTIONS.has(section)) return res.status(404).json({ error: 'No such section' });
+
+  const blocked = new Set(blockedFrom(section));
+  res.json({
+    section,
+    profiles: listProfiles().map((profile) => ({
+      id: profile.id,
+      name: profile.name,
+      kind: profile.kind,
+      isOwner: profile.isOwner,
+      colour: profile.colour,
+      avatarAt: profile.avatarAt,
+      // The owner always may, and cannot be un-ticked.
+      allowed: profile.isOwner || !blocked.has(profile.id),
+    })),
+  });
+});
+
+app.put('/api/sections/:section/access', requireOwner, (req, res) => {
+  const { section } = req.params;
+  if (!SECTIONS.has(section)) return res.status(404).json({ error: 'No such section' });
+
+  const allowed = req.body?.allowed;
+  if (!Array.isArray(allowed)) {
+    return res.status(400).json({ error: 'Say who may see it, as a list of profile ids' });
+  }
+
+  try {
+    setAllowed(section, allowed);
+    const blocked = new Set(blockedFrom(section));
+    res.json({
+      section,
+      allowed: listProfiles()
+        .filter((profile) => profile.isOwner || !blocked.has(profile.id))
+        .map((profile) => profile.id),
+    });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.put('/api/settings', requireOwner, (req, res) => {
@@ -968,7 +1239,7 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
 
   try {
     const probed = await probeFile(video.path);
-    const plan = planDelivery(probed);
+    const plan = planDelivery(probed, deviceCan(req));
     const streams = probed?.streams ?? [];
 
     /** A stream's own name for itself, falling back to something readable. */
@@ -1001,16 +1272,46 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
       });
     }
 
+    /*
+     * The repacked copy is only an answer for a device that can play it.
+     *
+     * It keeps the picture exactly as it was, HEVC included, because that is
+     * the whole saving. So it is the right file for most devices and the wrong
+     * one for a browser with no HEVC decoder — which would be handed it, play
+     * nothing, and never reach the streaming path that would have re-encoded
+     * it. Hidden from those devices rather than deleted: it is still correct
+     * for every other screen in the house.
+     */
+    const sourceVideo = streams.find(
+      (stream) => stream.codec_type === 'video' && stream.disposition?.attached_pic !== 1,
+    );
+    const preparedPlayable = !(sourceVideo?.codec_name === 'hevc' && req.query.hevc === '0');
+
     res.json({
       ...plan,
-      prepared,
+      prepared: preparedPlayable ? prepared : 'unusable',
       duration,
       position: video.position ?? 0,
       audioTracks: ofType('audio').map((stream, i) => ({
         index: i,
         label: describe(stream, i, 'Audio'),
         codec: stream.codec_name,
+        language: stream.tags?.language ?? null,
       })),
+      /*
+       * Which track to start on, rather than simply the first one.
+       *
+       * Dual-audio releases put the languages in whatever order suits the
+       * packager, so "the first track" is a coin toss — one copy of Spider-Man
+       * 3 holds English and Turkish, and picking blind is how a film ends up
+       * playing in a language nobody in the house speaks.
+       *
+       * Only ever a starting point: the picker still lists every track, and a
+       * file with no English track keeps its own first one, which is correct
+       * for anything genuinely made in another language.
+       */
+      preferredAudio: Math.max(0, ofType('audio')
+        .findIndex((stream) => /^en(g|glish)?$/i.test(stream.tags?.language ?? ''))),
       subtitleTracks: ofType('subtitle')
         // Only text subtitles convert to something a browser can display;
         // picture-based ones (PGS, VobSub) would need rendering, not converting.
@@ -1082,7 +1383,7 @@ app.get('/api/stream/:videoId/seg/:audio/:index.ts', async (req, res) => {
       filePath: video.path,
       plan,
       index,
-      delivery: planDelivery(probed),
+      delivery: planDelivery(probed, deviceCan(req)),
       audioTrack,
     });
     res.type('video/mp2t');
@@ -1143,6 +1444,7 @@ app.get('/api/stream/:videoId/start', async (req, res) => {
       startSeconds,
       audioTrack: Math.max(0, Number(req.query.audio ?? 0) || 0),
       maxHeight: Number(req.query.height ?? 0) || 0,
+      device: deviceCan(req),
     });
     res.json({
       id: session.id,
@@ -1235,6 +1537,18 @@ app.get('/artwork/:size/:file', async (req, res) => {
   const cacheDir = path.join(config.artworkDir, size);
   const cachePath = path.join(cacheDir, file);
 
+  /*
+   * Artwork never changes under a given name.
+   *
+   * The filename comes from TMDB and identifies one particular image, so a
+   * poster fetched today is the same poster next year. Saying so matters far
+   * more than it looks: without it Express asks the browser to check back
+   * every time, and a home screen of a hundred posters becomes a hundred
+   * round trips before anything is drawn. Across a room that is invisible.
+   * Across an ocean, at a tenth of a second each, it is the whole delay.
+   */
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+
   if (fs.existsSync(cachePath)) {
     return res.sendFile(cachePath);
   }
@@ -1266,6 +1580,7 @@ let scanning = false;
 let comicScanning = false;
 /** Stops the library watcher; set once the server is listening. */
 let stopAutoScan = null;
+let stopTelevisions = null;
 
 /**
  * Scan because the library changed on disk, not because anyone asked.
@@ -1274,6 +1589,18 @@ let stopAutoScan = null;
  * used, so it must not interrupt anything. If a scan is already running there
  * is nothing to do — that scan will see the new files anyway.
  */
+/*
+ * Give any title that has arrived since last time its colour.
+ *
+ * Never awaited. A hundred posters take a few seconds, and whatever asked for
+ * the scan should not be held open for it — a title without a colour yet draws
+ * in the neutral one and picks up its own on the next look round.
+ */
+function colourNewTitles() {
+  ensureAccents({ onLog: (message) => console.log('[colour] ' + message) })
+    .catch((error) => console.warn('[colour] ' + error.message));
+}
+
 async function rescanAfterChange() {
   if (scanning) return;
   scanning = true;
@@ -1285,6 +1612,7 @@ async function rescanAfterChange() {
     console.warn('automatic scan failed: ' + error.message);
   } finally {
     scanning = false;
+    colourNewTitles();
   }
 }
 
@@ -1293,7 +1621,7 @@ async function rescanAfterChange() {
 // ---------------------------------------------------------------------------
 
 /** The shelves, what is on them, and anything part-read. */
-app.get('/api/comics', (req, res) => {
+app.get('/api/comics', requireSection('comics'), (req, res) => {
   res.json({
     shelves: comics.listShelves(req.profile.id),
     reading: comics.continueReading(20, req.profile.id),
@@ -1301,13 +1629,13 @@ app.get('/api/comics', (req, res) => {
   });
 });
 
-app.get('/api/comics/series/:id', (req, res) => {
+app.get('/api/comics/series/:id', requireSection('comics'), (req, res) => {
   const series = comics.getSeries(req.params.id, req.profile.id);
   if (!series) return res.status(404).json({ error: 'No such series' });
   res.json(series);
 });
 
-app.get('/api/comics/issue/:id', (req, res) => {
+app.get('/api/comics/issue/:id', requireSection('comics'), (req, res) => {
   const issue = comics.getIssue(req.params.id, req.profile.id);
   if (!issue) return res.status(404).json({ error: 'No such comic' });
   res.json(issue);
@@ -1320,7 +1648,7 @@ app.get('/api/comics/issue/:id', (req, res) => {
  * after that is an ordinary file. Asked for explicitly rather than done on
  * the first page request, so the reader can say what it is waiting for.
  */
-app.post('/api/comics/issue/:id/open', async (req, res) => {
+app.post('/api/comics/issue/:id/open', requireSection('comics'), async (req, res) => {
   try {
     res.json(await comics.beginIssue(req.params.id));
   } catch (error) {
@@ -1328,7 +1656,7 @@ app.post('/api/comics/issue/:id/open', async (req, res) => {
   }
 });
 
-app.get('/api/comics/issue/:id/page/:index', async (req, res) => {
+app.get('/api/comics/issue/:id/page/:index', requireSection('comics'), async (req, res) => {
   const index = Number(req.params.index);
   if (!Number.isInteger(index) || index < 0) return res.status(400).json({ error: 'bad page' });
 
@@ -1362,7 +1690,7 @@ app.get('/api/comics/issue/:id/page/:index', async (req, res) => {
  * shelf draw with titles where the pictures are not ready, and they appear on
  * the next visit — by which time the work has finished in the background.
  */
-app.get('/api/comics/issue/:id/cover', async (req, res) => {
+app.get('/api/comics/issue/:id/cover', requireSection('comics'), async (req, res) => {
   const ready = comics.coverReady(req.params.id);
   if (ready) {
     res.type('image/jpeg');
@@ -1395,7 +1723,7 @@ app.get('/api/comics/issue/:id/cover', async (req, res) => {
   }
 });
 
-app.post('/api/comics/progress', (req, res) => {
+app.post('/api/comics/progress', requireSection('comics'), (req, res) => {
   const saved = comics.saveProgress({
     issueId: req.body?.issueId,
     page: Number(req.body?.page) || 0,
@@ -1454,6 +1782,7 @@ app.get('/api/scan/stream', requireOwner, async (req, res) => {
     send('error', { message: error.message });
   } finally {
     scanning = false;
+    colourNewTitles();
     res.end();
   }
 });
@@ -1467,6 +1796,7 @@ app.post('/api/scan', requireOwner, async (req, res) => {
     res.status(500).json({ error: error.message });
   } finally {
     scanning = false;
+    colourNewTitles();
   }
 });
 
@@ -1478,6 +1808,109 @@ app.post('/api/scan', requireOwner, async (req, res) => {
  * files, so a stale copy pins a tablet to the previous build — which is exactly
  * what happened after the first rebuild.
  */
+/**
+ * The build's own files, compressed, kept once.
+ *
+ * These are the only large text the server sends, and they are the difference
+ * between a library that opens abroad and one that does not: the script alone
+ * is a quarter of a megabyte uncompressed and under eighty kilobytes gzipped.
+ * Over a lossy link that ratio is not a nicety — it is three times fewer
+ * packets to lose, on the one transfer that has to arrive completely before
+ * anything at all appears on screen.
+ *
+ * Held in memory rather than recompressed per request. The names carry a hash
+ * of the contents, so a name that has been compressed once can never need
+ * compressing differently, and a build only has two of them.
+ */
+const compressed = new Map();
+const COMPRESSIBLE = /\.(js|mjs|css|map|json|svg)$/i;
+
+app.get(/^\/assets\/[\w.-]+$/, (req, res, next) => {
+  if (!COMPRESSIBLE.test(req.path)) return next();
+  // Range requests want the bytes as they are on disk; let the static
+  // handler answer those rather than sending part of a different encoding.
+  if (req.headers.range) return next();
+  if (!/\bgzip\b/.test(req.headers['accept-encoding'] ?? '')) return next();
+
+  const file = path.join(webAppDir(), 'assets', path.basename(req.path));
+  if (!fs.existsSync(file)) return next();
+
+  let body = compressed.get(req.path);
+  if (!body) {
+    try {
+      body = zlib.gzipSync(fs.readFileSync(file), { level: 9 });
+      compressed.set(req.path, body);
+    } catch {
+      // Compression is an improvement, never a requirement.
+      return next();
+    }
+  }
+
+  res.setHeader('Content-Type', req.path.endsWith('.css') ? 'text/css; charset=utf-8'
+    : req.path.endsWith('.svg') ? 'image/svg+xml'
+    : req.path.endsWith('.json') || req.path.endsWith('.map') ? 'application/json; charset=utf-8'
+    : 'text/javascript; charset=utf-8');
+  res.setHeader('Content-Encoding', 'gzip');
+  res.setHeader('Content-Length', body.length);
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.end(body);
+});
+
+/**
+ * A build asset that is gone, answered with the one that replaced it.
+ *
+ * Every build names its script and stylesheet after their contents, so a
+ * new build leaves the old names pointing at nothing. That is fine for a
+ * browser that fetches the entry page again — it is told not to cache it —
+ * and ruinous for one that does not. A phone that kept the old entry page,
+ * or was showing it when the build changed underneath it, asks for a script
+ * that no longer exists, gets nothing, and draws nothing: a black screen,
+ * with no way to recover except clearing a cache somebody has to be told
+ * how to clear, over a phone call, while the film they wanted is waiting.
+ *
+ * There is only ever one script and one stylesheet, so the file being asked
+ * for by an old name is unambiguously the one being served under the new
+ * one. Sending it is not a guess; it is the same answer, correctly typed,
+ * and the page comes up. It is sent uncacheable so the wrong name is not
+ * learnt as a lasting one.
+ */
+app.get(/^\/assets\/index-[\w.-]+\.(?:js|css)$/, (req, res, next) => {
+  const directory = path.join(webAppDir(), 'assets');
+  if (fs.existsSync(path.join(directory, path.basename(req.path)))) return next();
+
+  const extension = path.extname(req.path);
+  let current;
+  try {
+    current = fs.readdirSync(directory)
+      .find((name) => name.startsWith('index-') && name.endsWith(extension));
+  } catch {
+    return next();
+  }
+  if (!current) return next();
+
+  console.log('serving ' + current + ' for the older ' + path.basename(req.path));
+  res.setHeader('Cache-Control', 'no-store');
+  res.sendFile(path.join(directory, current), (error) => {
+    if (error && !res.headersSent) next();
+  });
+});
+
+/*
+ * The television routes go on before the web interface.
+ *
+ * Everything below this line ends in the single-page fallback, which answers
+ * any address it does not recognise with the page itself — so a television
+ * asking for the server description was handed the interface and gave up.
+ * Registered here, those addresses are found first.
+ */
+if (config.serveToTelevisions) {
+  stopTelevisions = serveToTelevisions(app, {
+    port: config.port,
+    onLog: (message) => console.log('[televisions] ' + message),
+  });
+}
+
 app.use(express.static(webAppDir(), {
   index: 'index.html',
   setHeaders: (res, filePath) => {
@@ -1489,8 +1922,36 @@ app.use(express.static(webAppDir(), {
   },
 }));
 
-// Anything else that is not an API call is the single-page app being deep-linked.
+/**
+ * Files the entry page names, as opposed to places inside the app.
+ *
+ * A deep link looks like /movie/1234 and has no extension; a build asset looks
+ * like /assets/index-A1b2C3.js and does. The distinction has to be made,
+ * because answering the second kind with the entry page is worse than
+ * answering it with nothing at all.
+ */
+const LOOKS_LIKE_A_FILE = /^\/assets\/|\.(js|mjs|css|map|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|json|webmanifest|txt)$/i;
+
+/*
+ * Anything else that is not an API call is the single-page app being
+ * deep-linked — but only if it could be a page.
+ *
+ * A request for a build asset that is not here must fail as a missing file.
+ * Sending the entry page instead returns HTML, with a 200 and an HTML content
+ * type, to a browser that asked for a script: it refuses to run it, nothing
+ * starts, and the result is a white screen with no error anywhere to explain
+ * it. That is exactly what a tablet holding a cached entry page from an
+ * earlier build would see, on every visit, until its cache was cleared by
+ * hand — and the asset names change with every build, so it would happen
+ * again on the next one. A 404 is honest, and the entry page is sent with
+ * no-cache precisely so the next reload can recover on its own.
+ */
 app.get(/^\/(?!api\/|artwork\/).*/, (req, res, next) => {
+  if (LOOKS_LIKE_A_FILE.test(req.path)) {
+    next();
+    return;
+  }
+
   const index = path.join(webAppDir(), 'index.html');
   if (!fs.existsSync(index)) {
     next();
@@ -1542,20 +2003,71 @@ export function startServer(port = config.port) {
       }
       // Only once the server is up, so a library that changes during startup
       // cannot trigger a scan before anything can report it.
+      colourNewTitles();
+
+      /*
+       * Shelves without a badge are given one, once.
+       *
+       * After the server is listening, and never awaited: it talks to the
+       * metadata provider, and a library must not wait on the network to open.
+       */
+      badgeCollections((message) => console.log('[badges] ' + message))
+        .catch((error) => console.log('[badges] ' + error.message));
+
       stopAutoScan = startAutoScan({
         roots: config.libraryRoots,
         onQuiet: rescanAfterChange,
         onLog: (message) => console.log('[library] ' + message),
       });
+      startSecureServer(host, server);
+
       resolve(server);
     });
 
     server.on('close', () => {
       stopAutoScan?.();
+      // Tell the televisions to forget us, rather than leaving them to time out.
+      stopTelevisions?.stop();
       stopAutoScan = null;
       closeAllSessions();
     });
   });
+}
+
+/**
+ * The same library again, over a connection a browser will trust.
+ *
+ * Added alongside the plain server rather than replacing it. The
+ * certificate covers one name on the private mesh, so every device reaching
+ * this machine by its address at home — and the desktop app on this machine
+ * itself — still needs the plain port. Nothing is lost by keeping both, and
+ * a mistake here must not be able to take the library off the air.
+ */
+function startSecureServer(host, plain) {
+  const certificate = loadCertificate();
+  if (!certificate) return null;
+
+  try {
+    const secure = https.createServer({ cert: certificate.cert, key: certificate.key }, app);
+
+    secure.on('error', (error) => {
+      // Most likely the port is taken. Say so and carry on unencrypted.
+      console.warn('The secure server could not start: ' + error.message);
+    });
+
+    secure.listen(config.securePort, host, () => {
+      const name = certificate.name ?? lanAddress() ?? 'this machine';
+      console.log('Also listening securely at https://' + name + ':' + config.securePort);
+    });
+
+    // Renewed in place from here on, so nobody has to remember to.
+    const stopWatching = watchCertificate(secure);
+    plain.on('close', () => { stopWatching(); secure.close(); });
+    return secure;
+  } catch (error) {
+    console.warn('The certificate could not be used: ' + error.message);
+    return null;
+  }
 }
 
 export { app };

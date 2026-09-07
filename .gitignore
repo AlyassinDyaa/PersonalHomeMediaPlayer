@@ -34,3 +34,7 @@ release/
 release*/
 vendor/
 dist-web/
+
+# Packaged output from tools/deploy-to.mjs and one-off packaging runs.
+# Each is a few hundred megabytes of built application, rebuilt on demand.
+build-*/
