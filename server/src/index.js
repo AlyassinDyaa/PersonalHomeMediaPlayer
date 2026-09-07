@@ -220,8 +220,46 @@ app.get([
    */
   res.setHeader(
     'Cache-Control',
-    req.path === '/sw.js' ? 'no-cache' : 'public, max-age=86400',
+    // Never stored at all, rather than merely revalidated: this is the file
+    // that decides what everything else may cache, so a stale one is the only
+    // kind that cannot be corrected by a later update.
+    req.path === '/sw.js' ? 'no-store' : 'public, max-age=86400',
   );
+
+  /*
+   * The worker carries the name of the build it belongs to.
+   *
+   * Its cache is named from that, and the name has to change when the bundle
+   * does. Written as a constant somebody remembers to raise, it sat at v1 for
+   * the life of the project — so nothing a phone had cached was ever
+   * discarded, and a device could end up holding one build's script against
+   * another build's page. That draws nothing and explains nothing.
+   *
+   * Taken from the built script's own filename, which already carries a hash
+   * of its contents: there is no second number to keep in step, and it cannot
+   * drift from what is actually being served.
+   */
+  if (req.path === '/sw.js') {
+    let stamp = 'v1';
+    try {
+      const bundle = fs.readdirSync(path.join(webAppDir(), 'assets'))
+        .find((name) => name.startsWith('index-') && name.endsWith('.js'));
+      if (bundle) stamp = bundle.replace(/^index-|\.js$/g, '');
+    } catch {
+      // A missing assets folder is a broken build, not a reason to fail here.
+    }
+
+    try {
+      res.type('text/javascript').send(
+        fs.readFileSync(file, 'utf8').replace('__BUILD__', stamp),
+      );
+      return;
+    } catch {
+      // Fall through and send it as it is; an unstamped worker still works,
+      // it simply keeps the cache it already had.
+    }
+  }
+
   res.sendFile(file);
 });
 

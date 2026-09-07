@@ -17,7 +17,16 @@
  * the tablet next.
  */
 
-const VERSION = 'v1';
+/*
+ * Replaced by the server with the name of the bundle it is currently serving.
+ *
+ * It has to change whenever the build does. Left as a constant somebody
+ * remembers to bump, it stayed at v1 for the life of the project, so no phone
+ * ever discarded anything it had cached — and a device carrying one build's
+ * script alongside another build's page shows a blank screen with nothing in
+ * the console to say why.
+ */
+const VERSION = '__BUILD__';
 const SHELL = 'library-shell-' + VERSION;
 
 /** Kept so there is something to show when nothing can be reached. */
@@ -115,7 +124,18 @@ self.addEventListener('fetch', (event) => {
       const cached = await cache.match(request);
       const network = fetch(request)
         .then((response) => {
-          if (response.ok) cache.put(request, response.clone());
+          /*
+           * Anything the server marks no-store is not learnt.
+           *
+           * The library answers a request for an old asset name with the file
+           * currently being served, so a page that has gone stale can still
+           * start — and says no-store, because that answer is only true until
+           * the next build. A cache is code here, not the browser's, so that
+           * header does nothing unless it is read. Not reading it is how a
+           * wrong name became a lasting one.
+           */
+          const keep = !(response.headers.get('Cache-Control') ?? '').includes('no-store');
+          if (response.ok && keep) cache.put(request, response.clone());
           return response;
         })
         .catch(() => null);
