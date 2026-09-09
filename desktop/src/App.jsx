@@ -981,6 +981,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
           onOpenShelf={setOpenCategory}
           title={view === 'movies' ? 'Movies' : 'TV Shows'}
           items={unshelved}
+          everything={view === 'movies' ? movies : shows}
           onSelect={openDetail}
           query={query}
           groupByGenre={view === 'movies' ? grouping.movies : grouping.shows}

@@ -17,6 +17,16 @@ import { shelveByGenre } from '../genres.js';
  */
 export function Browse({
   title, items, onSelect, renderLabel, query = '', groupByGenre = true,
+  /*
+   * Everything on this screen, shelved or not.
+   *
+   * `items` is what is left once the shelves have taken theirs, which is the
+   * right thing to draw underneath them and the wrong thing to search. A title
+   * filed onto the DC shelf is still in the library, and somebody typing its
+   * name is asking the library, not the leftovers. Given this, a search reads
+   * from it instead.
+   */
+  everything = null,
   /* Shown beside the title when this screen was opened from somewhere. */
   onBack = null,
   /* The owner's own shelves that belong on this screen, above everything. */
@@ -70,15 +80,18 @@ export function Browse({
 
   const trimmed = query.trim().toLowerCase();
 
+  /* Searching asks the whole screen; browsing asks what the shelves left. */
+  const pool = trimmed && everything ? everything : items;
+
   const filtered = useMemo(() => {
-    let result = items;
+    let result = pool;
     if (genre) result = result.filter((item) => item.genres?.includes(genre));
     if (trimmed) result = result.filter((item) => item.title.toLowerCase().includes(trimmed));
     // A library of whole seasons is mostly things already seen, so "what is
     // left" is a more useful question here than any ordering of everything.
     if (unwatchedOnly) result = result.filter((item) => (item.unwatchedCount ?? 0) > 0);
     return result;
-  }, [items, genre, trimmed, unwatchedOnly]);
+  }, [pool, genre, trimmed, unwatchedOnly]);
 
   /** Comparators for the sort control; the server can order too, but not without a round trip. */
   const sorted = useMemo(() => {
@@ -105,7 +118,7 @@ export function Browse({
   /** Every genre present, for the filter chips. */
   const genres = useMemo(() => {
     const counts = new Map();
-    for (const item of items) {
+    for (const item of pool) {
       for (const name of item.genres ?? []) {
         counts.set(name, (counts.get(name) ?? 0) + 1);
       }
@@ -113,7 +126,7 @@ export function Browse({
     return [...counts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [items]);
+  }, [pool]);
 
   // A flat grid suits an already-narrow set better than a row does.
   const showGrid = flat || Boolean(trimmed) || Boolean(genre);
@@ -128,9 +141,9 @@ export function Browse({
         )}
         <h1 className="page-title">{title}</h1>
         <span className="page-sub">
-          {filtered.length === items.length
-            ? items.length + ' titles'
-            : filtered.length + ' of ' + items.length + ' titles'}
+          {filtered.length === pool.length
+            ? pool.length + ' titles'
+            : filtered.length + ' of ' + pool.length + ' titles'}
         </span>
         {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
       </div>
