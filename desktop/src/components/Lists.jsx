@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Card from './Card.jsx';
 import { comicCover } from '../api.js';
 
@@ -35,10 +35,56 @@ export function Lists({
   onTakeUp = null,
 }) {
   const [which, setWhich] = useState('favourites');
+  /*
+   * Films, series and comics keep one list between them and are told apart
+   * here rather than filed apart.
+   *
+   * A separate list per kind would mean three empty pages for somebody who
+   * only keeps films, and would ask them to remember which list a title went
+   * on. One list with a way to narrow it asks nothing and answers both.
+   */
+  const [kind, setKind] = useState('all');
+  const [order, setOrder] = useState('added');
 
-  const count = which === 'favourites' ? favourites.length
-    : which === 'backlog' ? backlog.length
-    : watchlist.items.length + watchlist.comics.length;
+  /* Newest first is how each list arrives; by name is the other way anybody
+     looks for something they know they put here. */
+  const arrange = useMemo(() => (rows, name) => (
+    order === 'title'
+      ? [...rows].sort((a, b) => name(a).localeCompare(name(b)))
+      : rows
+  ), [order]);
+
+  const ofKind = useMemo(() => (rows, get) => (
+    kind === 'all' ? rows : rows.filter((row) => get(row) === kind)
+  ), [kind]);
+
+  /* What each tab is showing, once narrowed and ordered. */
+  const shownFavourites = arrange(ofKind(favourites, (item) => item.kind), (item) => item.title);
+  const shownWatch = arrange(ofKind(watchlist.items, (item) => item.kind), (item) => item.title);
+  const shownComics = kind === 'all' || kind === 'comic' ? watchlist.comics : [];
+  const shownBacklog = arrange(ofKind(backlog, (entry) => entry.item.kind), (entry) => entry.item.title);
+
+  const count = which === 'favourites' ? shownFavourites.length
+    : which === 'backlog' ? shownBacklog.length
+    : shownWatch.length + shownComics.length;
+
+  /*
+   * How many of each kind are on the list being looked at.
+   *
+   * Shown on the chips, and a chip for a kind this list holds none of is not
+   * drawn at all — a "Comics 0" on a list of films is a dead end offered as a
+   * choice.
+   */
+  const pool = which === 'favourites' ? favourites
+    : which === 'backlog' ? backlog.map((entry) => entry.item)
+      : [...watchlist.items, ...watchlist.comics.map(() => ({ kind: 'comic' }))];
+  const tally = {
+    all: pool.length,
+    movie: pool.filter((item) => item.kind === 'movie').length,
+    show: pool.filter((item) => item.kind === 'show').length,
+    comic: pool.filter((item) => item.kind === 'comic').length,
+  };
+  const KINDS = [['all', 'All'], ['movie', 'Movies'], ['show', 'TV Shows'], ['comic', 'Comics']];
 
   return (
     <>
@@ -65,15 +111,43 @@ export function Lists({
         </div>
       </div>
 
+      {/* Narrowing, and ordering: the two things asked of a list long enough
+          to need looking through. */}
+      {tally.all > 0 && (
+        <div className="lists-filters">
+          {KINDS.filter(([id]) => id === 'all' || tally[id] > 0).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              className={kind === id ? 'chip active' : 'chip'}
+              aria-pressed={kind === id}
+              onClick={() => setKind(id)}
+            >
+              {label} <span className="chip-count">{tally[id]}</span>
+            </button>
+          ))}
+
+          <span style={{ flex: 1 }} />
+
+          <label className="chip chip-select">
+            Sort
+            <select value={order} onChange={(event) => setOrder(event.target.value)}>
+              <option value="added">Recently added</option>
+              <option value="title">A–Z</option>
+            </select>
+          </label>
+        </div>
+      )}
+
       {which === 'favourites' && (
-        favourites.length === 0 ? (
+        shownFavourites.length === 0 ? (
           <Empty
-            title="Nothing here yet"
+            title={favourites.length ? 'Nothing of that kind' : 'Nothing here yet'}
             body="Press the ♡ on a film or series, or hold a cover down and choose Add to favourites."
           />
         ) : (
           <div className="grid">
-            {favourites.map((item) => (
+            {shownFavourites.map((item) => (
               <Card
                 key={item.id}
                 item={item}
@@ -89,14 +163,14 @@ export function Lists({
       )}
 
       {which === 'backlog' && (
-        backlog.length === 0 ? (
+        shownBacklog.length === 0 ? (
           <Empty
-            title="Nothing set aside"
+            title={backlog.length ? 'Nothing of that kind' : 'Nothing set aside'}
             body="Hold down anything on Continue Watching and choose Set aside for later. It keeps your place and stops the home screen asking about it."
           />
         ) : (
           <div className="grid">
-            {backlog.map((entry) => (
+            {shownBacklog.map((entry) => (
               <Card
                 key={entry.item.id}
                 item={entry.item}
@@ -130,7 +204,7 @@ export function Lists({
           />
         ) : (
           <div className="grid">
-            {watchlist.items.map((item) => (
+            {shownWatch.map((item) => (
               <Card
                 key={'item:' + item.id}
                 item={item}
@@ -141,7 +215,7 @@ export function Lists({
                 removeLabel="Remove from watch later"
               />
             ))}
-            {watchlist.comics.map((series) => (
+            {shownComics.map((series) => (
               <Card
                 key={'comic:' + series.id}
                 item={{ id: series.id, title: series.title }}

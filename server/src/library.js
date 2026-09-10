@@ -55,6 +55,22 @@ function certificationFilter(profile, alias = 'i') {
  * closed the tab in the last few seconds.
  */
 const WATCHED_THRESHOLD = 0.995;
+
+/**
+ * Far enough through to count as seen, when counting rather than resuming.
+ *
+ * These are two different questions and they want two different answers. The
+ * threshold above decides whether to stop offering to resume something, and is
+ * deliberately almost the whole way: taking an episode off Continue Watching
+ * at 93% decides on somebody's behalf that they are done with it.
+ *
+ * "How many of these have you seen" is not that question. An episode left at
+ * 98% — the credits skipped, the next one started — has been seen by any
+ * ordinary meaning, and counting it as outstanding made a season somebody had
+ * worked through read as barely begun. Only the flag was ever consulted, and
+ * the flag is set by reaching the actual end, which almost nobody does.
+ */
+const SEEN_FRACTION = 0.9;
 /** Ignore trivial positions so accidentally opening something does not pin it to the home row. */
 const RESUME_MIN_SECONDS = 30;
 
@@ -183,7 +199,20 @@ export function listItems({ kind = null, sort = 'title', profile } = {}) {
            (SELECT 1 FROM favorites f WHERE f.item_id = i.id AND f.profile_id = ?) AS favourite,
            (SELECT COUNT(*) FROM videos v
               LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
-             WHERE v.item_id = i.id AND COALESCE(p.watched, 0) = 0) AS unwatched_count,
+             WHERE v.item_id = i.id
+               AND COALESCE(p.watched, 0) = 0
+               /*
+                * Every term defaulted, because an episode nobody has opened
+                * has no duration recorded either — and a NULL anywhere in
+                * here makes the whole condition NULL rather than false, which
+                * drops the row from the count instead of keeping it. That is
+                * the wrong way round: what has never been played is exactly
+                * what is left to watch.
+                */
+               AND NOT (COALESCE(p.position, 0) > 0
+                        AND COALESCE(p.duration, v.duration, 0) > 0
+                        AND COALESCE(p.position, 0)
+                            >= COALESCE(p.duration, v.duration, 0) * ${SEEN_FRACTION})) AS unwatched_count,
            (SELECT 1 FROM watchlist w
              WHERE w.kind = 'item' AND w.target_id = i.id AND w.profile_id = ?) AS watchlist
     FROM items i

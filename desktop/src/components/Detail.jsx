@@ -9,13 +9,29 @@ import Skeleton from './Skeleton.jsx';
  * Clickable, because having just shown somebody where they stopped, the next
  * thing they want is to go there.
  */
+/*
+ * Far enough through to count as seen.
+ *
+ * The blocks were drawn from the position and the number beside them from the
+ * watched flag, so a season of episodes left at 98% — the credits skipped, the
+ * next one started — showed six blocks lit and said two. They are the same
+ * question and they now get the same answer. The server counts what is left
+ * the same way.
+ */
+const SEEN_FRACTION = 0.9;
+
+function seen(episode) {
+  if (episode.watched) return true;
+  return episode.duration > 0 && episode.position / episode.duration >= SEEN_FRACTION;
+}
+
 function SeasonProgress({ seasons, current, onPick }) {
   if (!seasons?.length) return null;
 
   return (
     <div className="glance">
       {seasons.map((entry) => {
-        const done = entry.episodes.filter((episode) => episode.watched).length;
+        const done = entry.episodes.filter(seen).length;
         return (
           <button
             key={entry.number}
@@ -27,13 +43,14 @@ function SeasonProgress({ seasons, current, onPick }) {
             <span className="glance-label">S{entry.number}</span>
             <span className="glance-blocks">
               {entry.episodes.map((episode) => {
-                const part = !episode.watched && episode.position > 0 && episode.duration
+                const finished = seen(episode);
+                const part = !finished && episode.position > 0 && episode.duration
                   ? Math.min(100, (episode.position / episode.duration) * 100)
                   : 0;
                 return (
                   <span
                     key={episode.id}
-                    className={episode.watched ? 'glance-block done' : 'glance-block'}
+                    className={finished ? 'glance-block done' : 'glance-block'}
                   >
                     {part > 0 && <i style={{ width: part + '%' }} />}
                   </span>

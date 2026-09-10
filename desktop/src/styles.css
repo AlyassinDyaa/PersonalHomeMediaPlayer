@@ -6878,3 +6878,23 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   .mosaic-tile:hover { transform: none; }
   .mosaic-name { bottom: calc(var(--tabbar-height, 64px) + 12px); }
 }
+
+/* --------------------------------------------------- narrowing a list --- */
+
+/*
+ * Films, series and comics share one list and are told apart here.
+ *
+ * A chip for a kind the list holds none of is not drawn: "Comics 0" on a
+ * shelf of films is a dead end offered as a choice.
+ */
+.lists-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0 42px 20px;
+}
+
+@media (max-width: 760px) {
+  .lists-filters { padding: 0 16px 16px; }
+}
