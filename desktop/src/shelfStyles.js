@@ -21,6 +21,7 @@ export const SHELF_STYLES = [
   ['prints', 'Prints', 'White-bordered prints, pinned up a little askew'],
   ['tiles', 'Tiles', 'Each cover on its own soft tile'],
   ['neon', 'Neon', 'Each cover outlined in the glow of its own colours'],
+  ['spines', 'Spines', 'Covers stood on end, the way a shelf of discs looks'],
 ];
 
 /** What the row sits on, in the order offered. */
@@ -74,6 +75,21 @@ export function shelfRowClass(id) {
  * On the body, like the backdrop, so it holds across every screen and the
  * player — which covers everything — never sees it.
  */
+/** How large the covers are drawn, in the order offered. */
+export const CARD_SIZES = [
+  ['small', 'Small', 'More of the library at once'],
+  ['medium', 'Medium', 'As it was'],
+  ['large', 'Large', 'Fewer covers, seen properly'],
+];
+
+/** Put the chosen size on the page; medium is the plain one. */
+export function applyCardSize(id) {
+  if (typeof document === 'undefined') return;
+  const body = document.body;
+  for (const [name] of CARD_SIZES) body.classList.remove('cards-' + name);
+  if (id && id !== 'medium') body.classList.add('cards-' + id);
+}
+
 export function applyShelfStyle(cover, row = 'none', colour = '', strength = 50) {
   if (typeof document === 'undefined') return;
   const body = document.body;

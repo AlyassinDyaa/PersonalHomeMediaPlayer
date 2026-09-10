@@ -7,10 +7,11 @@ import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
 import Comics from './components/Comics.jsx';
 import Lists from './components/Lists.jsx';
+import Mosaic from './components/Mosaic.jsx';
 import ComicReader from './components/ComicReader.jsx';
 import { shelveByGenre } from './genres.js';
 import { applyBackground } from './backgrounds.js';
-import { applyShelfStyle } from './shelfStyles.js';
+import { applyShelfStyle, applyCardSize } from './shelfStyles.js';
 import { applyRailStyle } from './railStyles.js';
 import { leaveProfile } from './leave.js';
 import Confirm from './components/Confirm.jsx';
@@ -32,6 +33,23 @@ function plural(count, noun) {
 }
 
 /** Secondary line under a poster: seasons for a show, year and length for a film. */
+/**
+ * How much of something is left, in minutes.
+ *
+ * Nothing when it has barely been started, because "58 min left" of a
+ * sixty-minute film says only that it has not been watched, and the row it
+ * sits on already says that.
+ */
+function timeLeft(entry) {
+  const total = entry.video?.duration ?? 0;
+  const at = entry.video?.position ?? 0;
+  if (!total || at <= 0) return null;
+  const left = Math.round((total - at) / 60);
+  if (left <= 0) return 'Nearly done';
+  if (left > 180) return null;
+  return left + ' min left';
+}
+
 function cardMeta(item) {
   if (item.kind === 'show') return plural(item.seasonCount, 'season');
   return [item.year, formatRuntime(item.runtime)].filter(Boolean).join(' · ');
@@ -122,6 +140,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   /* What the sidebar is made of. */
   const [railStyle, setRailStyle] = useState('glass');
   const [railOpacity, setRailOpacity] = useState(45);
+  const [cardSize, setCardSize] = useState('medium');
   const [backgroundStrength, setBackgroundStrength] = useState(100);
 
   const reload = useCallback(async () => {
@@ -148,6 +167,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       setShelfStrength(settings.shelfStrength ?? 50);
       setRailStyle(settings.railStyle ?? 'glass');
       setRailOpacity(settings.railOpacity ?? 45);
+      setCardSize(settings.cardSize ?? 'medium');
       setBackgroundStrength(settings.backgroundStrength ?? 100);
       setGrouping({
         movies: settings.groupMoviesByGenre ?? true,
@@ -264,6 +284,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     setShelfStrength(next.shelfStrength ?? 50);
     setRailStyle(next.railStyle ?? 'glass');
     setRailOpacity(next.railOpacity ?? 45);
+    setCardSize(next.cardSize ?? 'medium');
     setBackgroundStrength(next.backgroundStrength ?? 100);
   }, []);
 
@@ -367,6 +388,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   useEffect(() => { applyRailStyle(railStyle, railOpacity); }, [railStyle, railOpacity]);
 
+  useEffect(() => { applyCardSize(cardSize); }, [cardSize]);
+
   const movies = useMemo(() => items.filter((item) => item.kind === 'movie'), [items]);
   const shows = useMemo(() => items.filter((item) => item.kind === 'show'), [items]);
 
@@ -419,6 +442,9 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   /* Declared above the banner, which reads it to decide whether to rotate. */
   const [openCategory, setOpenCategory] = useState(null);
+  /* The whole library at once, as artwork. Its own screen rather than a tab,
+     because it answers a different question from any of them. */
+  const [wall, setWall] = useState(false);
 
   /*
    * The handful of titles the banner rotates through.
@@ -945,8 +971,16 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         </>
       )}
 
+      {!loading && wall && (
+        <Mosaic
+          items={view === 'movies' ? movies : view === 'shows' ? shows : items}
+          onSelect={(item, event) => { setWall(false); openDetail(item, event); }}
+          onBack={() => setWall(false)}
+        />
+      )}
+
       {/* One shelf or genre, opened on its own, from wherever it was found. */}
-      {!loading && openCategory && (
+      {!loading && !wall && openCategory && (
         <Browse
           title={openCategory.name}
           items={openCategory.items}
@@ -981,7 +1015,18 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
               renderLabel={(entry) => (
                 <>
                   <strong>{entry.item.title}</strong>
-                  {entry.video.episode ? episodeLabel(entry.video) : 'Resume'}
+                  {/*
+                    * What is left, not what is done.
+                    *
+                    * A bar says how far in you are; the question actually
+                    * being asked of this row is whether there is time for it
+                    * before bed. Both are shown — the bar is still drawn on
+                    * the picture — but the words are the useful half.
+                    */}
+                  {[
+                    entry.video.episode ? episodeLabel(entry.video) : null,
+                    timeLeft(entry),
+                  ].filter(Boolean).join(' · ') || 'Resume'}
                 </>
               )}
             />
@@ -1091,7 +1136,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         <Settings onScanned={reload} onSettingsChanged={applyBranding} onShelvesChanged={reload} />
       )}
 
-      {!loading && !openCategory && (view === 'movies' || view === 'shows') && (
+      {!loading && !wall && !openCategory && (view === 'movies' || view === 'shows') && (
         <Browse
           picking={gathering}
           ticked={ticked}
@@ -1100,6 +1145,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
           shelfLayouts={shelfLayouts}
           onOpenShelf={setOpenCategory}
           title={view === 'movies' ? 'Movies' : 'TV Shows'}
+          onSeeEverything={() => setWall(true)}
           items={unshelved}
           everything={view === 'movies' ? movies : shows}
           onSelect={openDetail}

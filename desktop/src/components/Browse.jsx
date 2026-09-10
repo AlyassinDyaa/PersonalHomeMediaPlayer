@@ -39,6 +39,8 @@ export function Browse({
   onOpenShelf = null,
   /* Which layouts the owner has left switched on. */
   shelfLayouts = null,
+  /* Show the whole thing as a wall of artwork instead. */
+  onSeeEverything = null,
 }) {
   const [genre, setGenre] = useState(null);
   /* Rails, tiles or lines — remembered, and shared with the other screens. */
@@ -146,6 +148,11 @@ export function Browse({
             : filtered.length + ' of ' + pool.length + ' titles'}
         </span>
         {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
+        {onSeeEverything && !trimmed && (
+          <button type="button" className="chip see-everything" onClick={onSeeEverything}>
+            See everything
+          </button>
+        )}
       </div>
 
       {/*

@@ -44,7 +44,9 @@ function firstSet(...values) {
 export const SHELF_LAYOUTS = ['rows', 'grid', 'list'];
 
 /** The ways a cover can be drawn, and what a row can stand on; the page holds the drawings. */
-export const SHELF_STYLES = ['plain', 'glass', 'prints', 'tiles', 'neon'];
+export const SHELF_STYLES = ['plain', 'glass', 'prints', 'tiles', 'neon', 'spines'];
+/** How much of a screen one cover takes. */
+export const CARD_SIZES = ['small', 'medium', 'large'];
 export const SHELF_ROWS = ['none', 'ledge', 'spotlight', 'panel', 'band', 'underglow'];
 /** What the sidebar is made of. */
 export const RAIL_STYLES = ['solid', 'glass', 'clear'];
@@ -217,6 +219,8 @@ export const config = {
   shelfStrength: local.shelfStrength ?? defaults.shelfStrength ?? 50,
   /* What the sidebar is made of: a solid strip, glass, or nothing. */
   railStyle: local.railStyle ?? defaults.railStyle ?? 'glass',
+  /* How large the covers are drawn, everywhere they are drawn. */
+  cardSize: local.cardSize ?? defaults.cardSize ?? 'medium',
   /* How opaque the sidebar's strip is, as a percentage. */
   railOpacity: local.railOpacity ?? defaults.railOpacity ?? 45,
   /* How strongly the backdrop is drawn, as a percentage of its design. */
@@ -407,6 +411,10 @@ export function saveSettings(patch) {
     const wanted = patch.railStyle.trim();
     allowed.railStyle = RAIL_STYLES.includes(wanted) ? wanted : 'glass';
   }
+  if (typeof patch.cardSize === 'string') {
+    const wanted = patch.cardSize.trim();
+    allowed.cardSize = CARD_SIZES.includes(wanted) ? wanted : 'medium';
+  }
   if (typeof patch.railOpacity === 'number' && Number.isFinite(patch.railOpacity)) {
     allowed.railOpacity = Math.min(100, Math.max(0, Math.round(patch.railOpacity)));
   }
@@ -505,6 +513,7 @@ export function settingsView() {
     shelfColor: config.shelfColor,
     shelfStrength: config.shelfStrength,
     railStyle: config.railStyle,
+    cardSize: config.cardSize,
     railOpacity: config.railOpacity,
     backgroundStrength: config.backgroundStrength,
     serveToTelevisions: config.serveToTelevisions,

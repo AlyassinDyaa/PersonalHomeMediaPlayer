@@ -45,6 +45,9 @@ export function Card({
       className={[
         'card',
         wide ? 'wide' : '',
+        /* Everything in it seen. Dimmed rather than hidden: a library is for
+           rewatching too, and this only answers "what is left". */
+        item.unwatchedCount === 0 ? 'seen' : '',
         picking ? 'picking' : '',
         picking && ticked ? 'ticked' : '',
       ].filter(Boolean).join(' ')}
@@ -71,9 +74,20 @@ export function Card({
         * picture already the right shape covers the card exactly and the fill
         * never shows, so this costs nothing in the ordinary case.
         */}
+      {/*
+        * The poster's own colour stands in while the poster loads.
+        *
+        * A screen of grey rectangles is what the library looked like on every
+        * cold start, and over a mesh address that is a real part of using it.
+        * Each title already carries a colour taken from its artwork, so the
+        * wait can be the right colour rather than no colour.
+        */}
       <div
         className="card-poster"
-        style={src ? { backgroundImage: 'url("' + src + '")' } : undefined}
+        style={{
+          ...(src ? { backgroundImage: 'url("' + src + '")' } : null),
+          ...(item.accent ? { '--loading': item.accent } : null),
+        }}
       >
         {/* Ticking is the whole interaction while a shelf is being gathered. */}
         {picking && <span className="card-tick">{ticked ? '✓' : ''}</span>}

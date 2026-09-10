@@ -939,6 +939,16 @@ export function Player({ video, item, onClose }) {
   return (
     <div
       className="player"
+      /*
+       * The colour of the thing being watched.
+       *
+       * The chrome was neutral grey whatever was playing, which is the safe
+       * answer and reads as belonging to no particular film. The scrubber and
+       * the fill take the title's own colour instead — the same one its poster
+       * and its card already use, so playback looks like part of the title
+       * rather than a window it happens to be inside.
+       */
+      style={item?.accent ? { '--accent': item.accent } : undefined}
       ref={boxRef}
       onPointerDown={wakeChrome}
       // A trackpad or mouse should reveal the controls by moving, not only by

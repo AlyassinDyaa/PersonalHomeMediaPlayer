@@ -6637,3 +6637,244 @@ body[class*="bg-"]:not(.bg-grid)::before { opacity: var(--bg-strength, 1); }
   .cast-face span { font-size: 28px; }
   .cast-crew { padding: 0 16px; }
 }
+
+/* ------------------------------------------------ a season at a glance --- */
+
+/*
+ * Where you are in a series, before any of it is read.
+ *
+ * One block per episode. A series is the one shape this library holds that a
+ * list cannot describe — forty episodes in, which are done is a question you
+ * answer by scrolling — and this answers it without words.
+ */
+.glance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding: 0 42px 18px;
+}
+
+.glance-season {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 9px;
+  background: none;
+  cursor: pointer;
+  color: var(--text-faint);
+  transition: background 140ms ease, color 140ms ease;
+}
+.glance-season:hover { background: rgba(255, 255, 255, 0.06); color: var(--text-dim); }
+.glance-season.on { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+
+.glance-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.glance-blocks { display: flex; gap: 3px; }
+
+/* Hollow for unseen, filled for done, part-filled for started. */
+.glance-block {
+  position: relative;
+  width: 9px;
+  height: 16px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.glance-block.done { background: var(--accent, #7d8aa0); }
+.glance-block i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: block;
+  background: var(--accent, #7d8aa0);
+  opacity: 0.75;
+}
+
+.glance-count {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* A very long season stays one row and scrolls rather than wrapping into a
+   block of confetti. */
+@media (max-width: 760px) {
+  .glance { padding: 0 16px 14px; gap: 8px 14px; }
+  .glance-block { width: 7px; height: 13px; }
+}
+
+/* ------------------------------------------------------- already seen --- */
+
+/*
+ * Dimmed, not hidden.
+ *
+ * A library is for rewatching too, so this only answers "what is left" — it
+ * never puts anything out of reach. Full strength the moment it is pointed at,
+ * so looking at a title is enough to see it properly.
+ */
+.card.seen .card-poster { opacity: 0.44; transition: opacity 160ms ease; }
+.card.seen:hover .card-poster { opacity: 1; }
+.card.seen .card-label { color: var(--text-faint); }
+
+/* ------------------------------------------- the colour while it loads --- */
+
+/*
+ * A poster's own colour stands in for it.
+ *
+ * A cold start drew a screen of identical grey rectangles, which over a mesh
+ * address is a real part of what using the library looks like. Every title
+ * already carries a colour taken from its artwork, so the wait can be the
+ * right colour instead of no colour.
+ */
+.card-poster {
+  background-color: color-mix(in srgb, var(--loading, var(--surface)) 55%, #0b0b0f);
+}
+.card-poster img {
+  /* Fades in over its own colour rather than replacing a grey box. */
+  animation: poster-in 260ms ease both;
+}
+@keyframes poster-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ------------------------------------------------- covers stood on end --- */
+
+/*
+ * A shelf of discs, seen from the front.
+ *
+ * The other styles lay a cover flat and dress its edges. This one turns it:
+ * each poster is squeezed to a spine's width and tilted, and the one under
+ * the pointer swings out and shows itself. It suits a library of a couple of
+ * hundred better than a rail does, because a shelf is what a couple of
+ * hundred of anything actually looks like.
+ */
+body.shelf-spines .row-scroller { gap: 2px; padding-top: 16px; padding-bottom: 22px; perspective: 900px; }
+
+body.shelf-spines .row-scroller .card {
+  width: 46px;
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms ease;
+}
+body.shelf-spines .row-scroller .card .card-poster {
+  border-radius: 3px;
+  box-shadow:
+    inset -6px 0 12px rgba(0, 0, 0, 0.5),
+    inset 2px 0 0 rgba(255, 255, 255, 0.16),
+    0 14px 26px rgba(0, 0, 0, 0.6);
+}
+/* The artwork keeps its proportions and is cropped to the spine, so a spine
+   shows the middle of a poster rather than a squashed one. */
+body.shelf-spines .row-scroller .card .card-poster img { object-fit: cover; object-position: center; }
+
+/* Pulled out of the shelf, the way a hand does it. */
+body.shelf-spines .row-scroller .card:hover,
+body.shelf-spines .row-scroller .card:focus-within {
+  width: var(--card-w);
+  transform: translateY(-8px);
+  z-index: 3;
+}
+
+/* The caption belongs to whichever one is out. */
+body.shelf-spines .row-scroller .card-label {
+  opacity: 0;
+  transition: opacity 180ms ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+body.shelf-spines .row-scroller .card:hover .card-label,
+body.shelf-spines .row-scroller .card:focus-within .card-label { opacity: 1; }
+
+/* A grid of spines is not a shelf, so the grid keeps its covers flat. */
+body.shelf-spines .grid .card { width: 100%; }
+
+/* A finger has no hover, so a phone gets the flat covers instead. */
+@media (max-width: 760px) {
+  body.shelf-spines .row-scroller .card { width: var(--card-w); }
+  body.shelf-spines .row-scroller .card-label { opacity: 1; }
+}
+
+/* --------------------------------------------------- how big a cover is --- */
+
+body.cards-small { --card-w: 132px; --card-wide-w: 244px; }
+body.cards-large { --card-w: 208px; --card-wide-w: 366px; }
+body.cards-small .grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); }
+
+/* ----------------------------------------------------------- the wall --- */
+
+/*
+ * Every cover at once, sorted by colour.
+ *
+ * Every other screen narrows: a genre, a shelf, a search, a row of ten. None
+ * of them says how much there is. This one does nothing else — no labels, no
+ * order you could look something up in — and the title you had forgotten
+ * owning is the one that catches your eye.
+ */
+.mosaic {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 4px;
+  padding: 0 42px 90px;
+}
+
+.mosaic-tile {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+  background-color: color-mix(in srgb, var(--loading, var(--surface)) 60%, #0b0b0f);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.mosaic-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.mosaic-tile:hover,
+.mosaic-tile:focus-visible {
+  transform: scale(1.5);
+  z-index: 2;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.7);
+  outline: none;
+}
+
+/* One name, fixed along the bottom, so the wall never moves as it changes. */
+.mosaic-name {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 20;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 18px;
+  border-radius: 999px;
+  background: rgba(10, 10, 14, 0.86);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.mosaic-name.showing { opacity: 1; transform: translateX(-50%) translateY(0); }
+.mosaic-name strong { font-size: 14px; }
+.mosaic-name span { font-size: 12px; color: var(--text-faint); }
+
+/* The way in, beside the count. */
+.see-everything { margin-left: auto; }
+
+@media (max-width: 760px) {
+  .mosaic { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 3px; padding: 0 12px 90px; }
+  .mosaic-tile:hover { transform: none; }
+  .mosaic-name { bottom: calc(var(--tabbar-height, 64px) + 12px); }
+}

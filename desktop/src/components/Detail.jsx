@@ -4,6 +4,51 @@ import Row from './Row.jsx';
 import Skeleton from './Skeleton.jsx';
 
 /**
+ * Every episode as a block: filled for seen, part-filled for started.
+ *
+ * Clickable, because having just shown somebody where they stopped, the next
+ * thing they want is to go there.
+ */
+function SeasonProgress({ seasons, current, onPick }) {
+  if (!seasons?.length) return null;
+
+  return (
+    <div className="glance">
+      {seasons.map((entry) => {
+        const done = entry.episodes.filter((episode) => episode.watched).length;
+        return (
+          <button
+            key={entry.number}
+            type="button"
+            className={entry.number === current ? 'glance-season on' : 'glance-season'}
+            onClick={() => onPick(entry.number)}
+            title={entry.name + ' — ' + done + ' of ' + entry.episodes.length + ' watched'}
+          >
+            <span className="glance-label">S{entry.number}</span>
+            <span className="glance-blocks">
+              {entry.episodes.map((episode) => {
+                const part = !episode.watched && episode.position > 0 && episode.duration
+                  ? Math.min(100, (episode.position / episode.duration) * 100)
+                  : 0;
+                return (
+                  <span
+                    key={episode.id}
+                    className={episode.watched ? 'glance-block done' : 'glance-block'}
+                  >
+                    {part > 0 && <i style={{ width: part + '%' }} />}
+                  </span>
+                );
+              })}
+            </span>
+            <span className="glance-count">{done}/{entry.episodes.length}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The faces in a title, under the episodes.
  *
  * Faces rather than a list of names, because recognising somebody is what
@@ -390,6 +435,17 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
       <div className="detail-body">
         {tab === 'episodes' && item.kind === 'show' && item.seasons?.length > 0 && (
           <>
+            {/*
+              * Where you are in the whole thing, before any of it is read.
+              *
+              * A series is the one shape this library holds that a list
+              * cannot describe: forty episodes in, which of them are done is
+              * a question you answer by scrolling. One block per episode
+              * answers it in a glance, and the seasons stack so a show is
+              * legible whole.
+              */}
+            <SeasonProgress seasons={item.seasons} current={season} onPick={setSeason} />
+
             <div className="section-head">
               <div className="season-tabs">
                 {item.seasons.map((entry) => (

@@ -13,6 +13,7 @@ import {
   shelfStyleClass, shelfRowClass,
 } from '../shelfStyles.js';
 import { RAIL_STYLES, railStyleClass } from '../railStyles.js';
+import { CARD_SIZES } from '../shelfStyles.js';
 
 /**
  * Library settings: which folders to scan, and running a scan with live
@@ -706,6 +707,37 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
                 ? 'The shelf keeps this colour on every screen.'
                 : 'The shelf takes its colour from whatever is on screen, like the backdrop.'}
               {' '}Everybody watching sees the same shelves.
+            </p>
+          </details>
+
+          {/*
+            * How much of a screen one cover takes.
+            *
+            * Offered as words rather than a slider: there are three sensible
+            * answers and a slider would invite fiddling with a number that
+            * does not want tuning.
+            */}
+          <details className="settings-card" open>
+            <summary><h2>Cover size</h2></summary>
+            <p className="settings-hint">
+              How large the artwork is drawn, on every screen that draws it.
+            </p>
+            <div className="view-toggle" role="group" aria-label="Cover size">
+              {CARD_SIZES.map(([id, label, hint]) => (
+                <button
+                  key={id}
+                  type="button"
+                  title={hint}
+                  aria-pressed={(settings.cardSize ?? 'medium') === id}
+                  className={(settings.cardSize ?? 'medium') === id ? 'view-btn active' : 'view-btn'}
+                  onClick={() => saveToggle('cardSize', id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+              {(CARD_SIZES.find(([id]) => id === (settings.cardSize ?? 'medium')) ?? CARD_SIZES[1])[2]}.
             </p>
           </details>
 
