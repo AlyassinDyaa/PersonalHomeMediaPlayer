@@ -161,7 +161,53 @@ function png(rgba, size) {
   ]);
 }
 
-/** An ICO, which is a directory of images; PNGs may be stored as they are. */
+/**
+ * One image inside an ICO, in the format Windows has always understood.
+ *
+ * An ICO may hold a PNG, and every size here was one — which is why the file
+ * on disk looked right and the pinned copy did not. The shell reads PNG
+ * entries in some places and not in others, and the taskbar is one of the
+ * places it does badly: it falls back to whatever it can decode and scales
+ * it, so a mark drawn at exactly the right size gets replaced by a blurred
+ * one that had to be resized.
+ *
+ * So everything below 256 is written as a DIB instead, which is what the
+ * format meant originally and what every part of Windows reads the same way.
+ * A DIB in an icon is upside down, carries its height doubled to account for
+ * a mask that follows the colour, and pads every row to four bytes.
+ */
+function dib(rgba, size) {
+  const head = Buffer.alloc(40);
+  head.writeUInt32LE(40, 0);
+  head.writeInt32LE(size, 4);
+  head.writeInt32LE(size * 2, 8);       // colour and mask together
+  head.writeUInt16LE(1, 12);            // planes
+  head.writeUInt16LE(32, 14);           // bits per pixel
+  head.writeUInt32LE(0, 16);            // uncompressed
+
+  /* Bottom-up, and blue first. */
+  const colour = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const from = (size - 1 - y) * size * 4;
+    for (let x = 0; x < size; x++) {
+      const i = from + x * 4;
+      const o = (y * size + x) * 4;
+      colour[o] = rgba[i + 2];
+      colour[o + 1] = rgba[i + 1];
+      colour[o + 2] = rgba[i];
+      colour[o + 3] = rgba[i + 3];
+    }
+  }
+
+  /* The mask is only consulted for one-bit transparency, which the alpha
+     channel above has already answered. Left at zero: nothing masked out. */
+  const maskRow = Math.ceil(size / 32) * 4;
+  const mask = Buffer.alloc(maskRow * size);
+
+  return Buffer.concat([head, colour, mask]);
+}
+
+/** An ICO: a small directory, then each image in whichever form suits it. */
 function ico(entries) {
   const head = Buffer.alloc(6);
   head.writeUInt16LE(0, 0);
@@ -180,7 +226,6 @@ function ico(entries) {
     dir[at + 3] = 0;
     dir.writeUInt16LE(1, at + 4);           // colour planes
     dir.writeUInt16LE(32, at + 6);          // bits per pixel
-    dir.writeUInt32BE(0, at + 8);
     dir.writeUInt32LE(entry.data.length, at + 8);
     dir.writeUInt32LE(offset, at + 12);
     offset += entry.data.length;
@@ -205,5 +250,13 @@ for (const size of [180, 192, 512, 1024]) {
 /* And the one Windows wants, holding the sizes it actually draws. */
 const icoSizes = [16, 24, 32, 48, 64, 128, 256];
 const icoFile = path.join(buildDir, 'icon.ico');
-fs.writeFileSync(icoFile, ico(icoSizes.map((size) => ({ size, data: png(draw(size), size) }))));
+fs.writeFileSync(icoFile, ico(icoSizes.map((size) => {
+  const pixels = draw(size);
+  /* A DIB at every size, including 256.
+     A PNG entry is legal and smaller, and most of Windows reads it — but not
+     all of it, which is the whole complaint this is answering. Two hundred
+     and sixty kilobytes buys away the question of which surface is reading
+     it today. */
+  return { size, data: dib(pixels, size) };
+})));
 console.log('  ' + path.relative(ROOT, icoFile) + '  (' + icoSizes.join(', ') + ')');

@@ -3386,6 +3386,23 @@ body.modal-open { overflow: hidden; }
 /* Room for the figure, so it does not sit under the poster beside it. */
 .row-scroller .card:has(.card-rank) { margin-left: 16px; }
 
+/*
+ * And room for it under the poster, where the title is.
+ *
+ * The numeral is drawn low and to the left, behind everything, so on a
+ * ranked rail it lands squarely on the first line or two of the title —
+ * "2" through "Batman: Knightfall", "4" through "Arcane". The figure is the
+ * point of the row and stays where it is; the words step aside for it.
+ *
+ * This was written once for one of the cover styles and only ever applied
+ * there, so every other style had the collision.
+ */
+.row-scroller .card:has(.card-rank) .card-label { padding-left: 46px; }
+
+@media (max-width: 760px) {
+  .row-scroller .card:has(.card-rank) .card-label { padding-left: 34px; }
+}
+
 /* -------------------------------------------------------------- pulled --- */
 
 .pull {

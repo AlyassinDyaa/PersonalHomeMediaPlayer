@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, artwork, episodeLabel, displayTitle, formatRuntime } from './api.js';
+import { api, artwork, episodeLabel, displayTitle, formatRuntime, formatYears } from './api.js';
 import Hero from './components/Hero.jsx';
 import Row from './components/Row.jsx';
 import Card from './components/Card.jsx';
@@ -51,7 +51,11 @@ function timeLeft(entry) {
 }
 
 function cardMeta(item) {
-  if (item.kind === 'show') return plural(item.seasonCount, 'season');
+  if (item.kind === 'show') {
+    /* When it ran, then how much of it there is. */
+    return [formatYears(item), plural(item.seasonCount, 'season')]
+      .filter(Boolean).join(' · ');
+  }
   return [item.year, formatRuntime(item.runtime)].filter(Boolean).join(' · ');
 }
 

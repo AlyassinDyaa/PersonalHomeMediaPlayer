@@ -425,6 +425,14 @@ const MIGRATIONS = [
   // page rather than every page wearing the same red.
   { table: 'items', column: 'accent', definition: 'TEXT' },
   /*
+   * The year a programme finished, where it has.
+   *
+   * "2000" under a series says when it started and leaves the more useful
+   * half unsaid: whether it is still going, and how long it ran. The year it
+   * began was already kept; this is the other end of the line.
+   */
+  { table: 'items', column: 'end_year', definition: 'INTEGER' },
+  /*
    * Where a shelf belongs: the films screen, the shows screen, or both.
    *
    * Added after collections shipped, so existing shelves need the column put
@@ -449,6 +457,70 @@ function migrate(db) {
     if (columns.some((info) => info.name === column)) continue;
     db.exec('ALTER TABLE ' + table + ' ADD COLUMN ' + column + ' ' + definition);
   }
+  try {
+    fillEndYears(db);
+  } catch {
+    // A date that could not be filled in is not a reason to refuse to open.
+  }
+}
+
+/**
+ * Fill in when a series finished, for the ones already scanned.
+ *
+ * A new column arrives empty, and the year a programme ended would otherwise
+ * appear only for whatever is scanned next — so a library would show the
+ * dates of its newest handful and nothing for the rest until somebody
+ * rescanned every folder they own.
+ *
+ * Nothing needs fetching. The answer is in the replies already kept from the
+ * metadata provider, which are stored against the address they came from, so
+ * this reads what is on the disk and asks nobody. Only rows still empty are
+ * touched, so it costs one query on every start after the first.
+ */
+function fillEndYears(db) {
+  /*
+   * Nothing here is worth failing to open a database over.
+   *
+   * This runs on every open, including one being made from scratch and one
+   * old enough to predate the columns it reads — a test fixture, or a library
+   * carried forward from far enough back. Asked for a column that is not
+   * there, SQLite raises, and raising inside a migration takes the whole
+   * library down rather than leaving one date unfilled.
+   */
+  const columns = new Set(db.prepare('PRAGMA table_info(items)').all().map((c) => c.name));
+  if (!columns.has('end_year') || !columns.has('tmdb_id') || !columns.has('kind')) return;
+  const hasCache = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tmdb_cache'",
+  ).get();
+  if (!hasCache) return;
+
+  const pending = db.prepare(`
+    SELECT id, tmdb_id FROM items
+    WHERE kind = 'show' AND end_year IS NULL AND tmdb_id IS NOT NULL
+  `).all();
+  if (pending.length === 0) return;
+
+  const cached = db.prepare(
+    "SELECT body FROM tmdb_cache WHERE url LIKE ? AND url NOT LIKE '%/season/%' LIMIT 1",
+  );
+  const write = db.prepare('UPDATE items SET end_year = ? WHERE id = ?');
+
+  let filled = 0;
+  for (const row of pending) {
+    const hit = cached.get('/tv/' + row.tmdb_id + '%');
+    if (!hit) continue;
+    try {
+      const ended = JSON.parse(hit.body)?.last_air_date;
+      if (!ended) continue;
+      const year = Number(String(ended).slice(0, 4));
+      if (!year) continue;
+      write.run(year, row.id);
+      filled += 1;
+    } catch {
+      // A reply that will not parse is one this cannot help with.
+    }
+  }
+  if (filled) console.log('filled in the end year for ' + filled + ' series');
 }
 
 /**

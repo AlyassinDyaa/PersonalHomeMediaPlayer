@@ -151,6 +151,10 @@ async function resolveMetadata(item, scanKey) {
     runtime: details.runtime ?? details.episode_run_time?.[0] ?? null,
     certification: pickCertification(details, kind),
     status: details.status ?? null,
+    /* The year of the last episode to air, which only a series has. */
+    endYear: details.last_air_date
+      ? Number(String(details.last_air_date).slice(0, 4)) || null
+      : null,
     details,
   };
 }
@@ -433,9 +437,9 @@ function persist(enriched, suggestions, scanId, startedAt) {
       INSERT INTO items (
         id, kind, title, sort_title, year, scan_key, group_key, source_folders,
         tmdb_id, tmdb_score, overview, tagline, poster_path, backdrop_path,
-        logo_path, rating, genres, runtime, certification, status,
+        logo_path, rating, genres, runtime, certification, status, end_year,
         confidence, added_at, updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title, sort_title = excluded.sort_title,
         group_key = excluded.group_key,
@@ -446,6 +450,7 @@ function persist(enriched, suggestions, scanId, startedAt) {
         logo_path = excluded.logo_path, rating = excluded.rating,
         genres = excluded.genres, runtime = excluded.runtime,
         certification = excluded.certification, status = excluded.status,
+        end_year = excluded.end_year,
         confidence = excluded.confidence, updated_at = excluded.updated_at
     `);
 
@@ -523,6 +528,7 @@ function persist(enriched, suggestions, scanId, startedAt) {
         metadata?.runtime ?? null,
         metadata?.certification ?? null,
         metadata?.status ?? null,
+        metadata?.endYear ?? null,
         confidence,
         timestamp,
         timestamp,

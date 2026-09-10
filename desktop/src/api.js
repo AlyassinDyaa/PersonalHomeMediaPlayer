@@ -395,6 +395,27 @@ export function frameFrom(video) {
   return apiBase + '/api/videos/' + encodeURIComponent(video.id) + '/frame?t=' + second;
 }
 
+/**
+ * The years a series ran, as a person would write them.
+ *
+ * One year on its own for a programme that began and finished inside it, and
+ * for a film, which has only the one. A dash left hanging — "2019–" — for
+ * something still going, which is how any listing writes it and says more
+ * than the start year alone ever did.
+ *
+ * A programme the provider calls finished but has no last date for keeps its
+ * start year rather than growing a dash it cannot close.
+ */
+export function formatYears(item) {
+  if (!item?.year) return null;
+  if (item.kind !== 'show') return String(item.year);
+
+  const over = item.status === 'Ended' || item.status === 'Canceled';
+  if (!over) return item.year + '–';
+  if (!item.endYear || item.endYear <= item.year) return String(item.year);
+  return item.year + '–' + item.endYear;
+}
+
 export function formatRuntime(minutes) {
   if (!minutes) return null;
   const hours = Math.floor(minutes / 60);

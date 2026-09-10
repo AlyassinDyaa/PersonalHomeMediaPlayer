@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, artwork, frameFrom, formatRuntime, formatDuration, formatSize } from '../api.js';
+import { api, artwork, frameFrom, formatRuntime, formatDuration, formatSize, formatYears } from '../api.js';
 import Row from './Row.jsx';
 import Skeleton from './Skeleton.jsx';
 
@@ -309,7 +309,7 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                   {item.seasonCount} season{item.seasonCount === 1 ? '' : 's'}
                 </span>
               )}
-            {item.year && <span className="hero-fact">{item.year}</span>}
+            {formatYears(item) && <span className="hero-fact">{formatYears(item)}</span>}
             {item.rating > 0 && <span className="hero-fact">★ {item.rating.toFixed(1)}</span>}
 
             {quality?.resolution && <span className="badge tech">{quality.resolution}</span>}

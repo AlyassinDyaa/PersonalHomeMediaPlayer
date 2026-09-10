@@ -142,6 +142,7 @@ export function shapeItem(row) {
     runtime: row.runtime,
     certification: row.certification,
     status: row.status,
+    endYear: row.end_year ?? null,
     tmdbId: row.tmdb_id,
     confidence: row.confidence,
     sourceFolders: parseJsonColumn(row.source_folders, []),
