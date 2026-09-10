@@ -1,156 +1,209 @@
 /**
- * Draw the Home Screen icon.
+ * The library's own mark, drawn rather than fetched.
  *
- * Written rather than drawn in an editor so the icon can be regenerated at any
- * size without keeping a binary source around. Supersampled four times and
- * averaged down, which is what gives the curve of the triangle a clean edge at
- * 180 pixels.
+ * A rounded square carrying a blue-to-violet gradient, a dark disc set into
+ * it, and a play triangle cut out of the disc so the gradient shows through
+ * the cut. The triangle is the only shape that says "this plays things"
+ * without a word of text, and at the size a Home Screen actually draws an
+ * icon — under a centimetre — a word would be unreadable anyway.
+ *
+ * Everything is rasterised here, in this file, because the project has no
+ * image library and adding one to draw four shapes would be a strange trade.
+ * The output is a PNG written by hand: filtered scanlines, deflated with
+ * zlib, wrapped in the three chunks a PNG needs. Windows wants an ICO as
+ * well, which is a small header around PNGs it can hold verbatim.
+ *
+ *   node tools/make-icon.mjs
  */
-
 import fs from 'node:fs';
+import path from 'node:path';
 import zlib from 'node:zlib';
 
-const SS = 4; // supersampling factor
+const ROOT = path.resolve(import.meta.dirname, '..');
 
-/** sRGB-ish blend of two colours. */
-function mix(a, b, t) {
-  return [
-    Math.round(a[0] + (b[0] - a[0]) * t),
-    Math.round(a[1] + (b[1] - a[1]) * t),
-    Math.round(a[2] + (b[2] - a[2]) * t),
-  ];
-}
+/* --------------------------------------------------------------- colour --- */
+
+/** The two ends of the gradient, and the disc between them. */
+const START = [0x4c, 0x8d, 0xff];   // a bright blue, top left
+const END = [0xb4, 0x3c, 0xf0];     // violet, bottom right
+const DISC = [0x0b, 0x0b, 0x14];    // very nearly the library's own black
+
+const mix = (a, b, t) => [
+  Math.round(a[0] + (b[0] - a[0]) * t),
+  Math.round(a[1] + (b[1] - a[1]) * t),
+  Math.round(a[2] + (b[2] - a[2]) * t),
+];
+
+/* ---------------------------------------------------------- the drawing --- */
 
 /**
- * One icon, as raw RGBA.
+ * One icon, at one size, as raw RGBA.
  *
- * A deep red field with a single play triangle. iOS masks the corners itself,
- * so the colour runs to the edge rather than sitting on a drawn square.
+ * Sampled four times across and four down per pixel rather than once. Every
+ * edge here is a curve or a diagonal, and at 180 pixels a single sample per
+ * pixel leaves them visibly stepped — the corners of the rounded square worst
+ * of all, because the eye knows exactly what shape they are meant to be.
  */
-function render(size) {
-  const w = size * SS;
-  const pixels = new Uint8Array(w * w * 4);
+function draw(size) {
+  const out = Buffer.alloc(size * size * 4);
+  const S = 4;                        // samples per axis
+  const r = size * 0.225;             // corner radius, near enough Apple's
+  const cx = size / 2;
+  const cy = size / 2;
+  const discR = size * 0.315;
 
-  // Warm at the top left, dark at the bottom right, so the icon reads as lit
-  // from one side rather than flat.
-  const top = [235, 30, 45];
-  const bottom = [104, 8, 22];
+  /* The triangle, pointing right, centred on the disc and optically balanced:
+     a centred triangle looks left-heavy, so it is nudged right a little. */
+  const tw = size * 0.30;
+  const th = size * 0.33;
+  const tx = cx - tw * 0.36 + size * 0.022;
+  const ax = tx;
+  const ay = cy - th / 2;
+  const bx = tx;
+  const by = cy + th / 2;
+  const px = tx + tw;
+  const py = cy;
 
-  const cx = w / 2;
-  const cy = w / 2;
-  // A triangle that looks centred rather than measuring as centred: the eye
-  // puts the balance point of a triangle nearer its leading edge.
-  const r = w * 0.29;
-  const ax = cx - r * 0.78;
-  const bx = cx + r * 0.92;
-
-  const p1 = [ax, cy - r];
-  const p2 = [ax, cy + r];
-  const p3 = [bx, cy];
-
-  const inside = (x, y) => {
-    const sign = (px, py, qx, qy, rx, ry) => (px - rx) * (qy - ry) - (qx - rx) * (py - ry);
-    const d1 = sign(x, y, p1[0], p1[1], p2[0], p2[1]);
-    const d2 = sign(x, y, p2[0], p2[1], p3[0], p3[1]);
-    const d3 = sign(x, y, p3[0], p3[1], p1[0], p1[1]);
-    const neg = d1 < 0 || d2 < 0 || d3 < 0;
-    const pos = d1 > 0 || d2 > 0 || d3 > 0;
-    return !(neg && pos);
+  /** Distance from a rounded square's edge; negative inside. */
+  const roundedSquare = (x, y) => {
+    const dx = Math.abs(x - cx) - (size / 2 - r);
+    const dy = Math.abs(y - cy) - (size / 2 - r);
+    const ox = Math.max(dx, 0);
+    const oy = Math.max(dy, 0);
+    return Math.min(Math.max(dx, dy), 0) + Math.hypot(ox, oy) - r;
   };
 
-  for (let y = 0; y < w; y++) {
-    for (let x = 0; x < w; x++) {
-      const t = (x / w) * 0.35 + (y / w) * 0.65;
-      let [r8, g8, b8] = mix(top, bottom, Math.min(1, t));
+  /** Whether a point is inside the play triangle. */
+  const inTriangle = (x, y) => {
+    const s1 = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+    const s2 = (px - bx) * (y - by) - (py - by) * (x - bx);
+    const s3 = (ax - px) * (y - py) - (ay - py) * (x - px);
+    return (s1 <= 0 && s2 <= 0 && s3 <= 0) || (s1 >= 0 && s2 >= 0 && s3 >= 0);
+  };
 
-      // A soft highlight behind the triangle lifts it off the field.
-      const dx = (x - cx) / w;
-      const dy = (y - cy) / w;
-      const glow = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy) * 2.6);
-      r8 = Math.min(255, r8 + glow * 26);
-      g8 = Math.min(255, g8 + glow * 10);
-      b8 = Math.min(255, b8 + glow * 12);
-
-      if (inside(x + 0.5, y + 0.5)) { r8 = 255; g8 = 255; b8 = 255; }
-
-      const i = (y * w + x) * 4;
-      pixels[i] = r8;
-      pixels[i + 1] = g8;
-      pixels[i + 2] = b8;
-      pixels[i + 3] = 255;
-    }
-  }
-
-  // Average each SS x SS block down to one pixel.
-  const out = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      let r = 0; let g = 0; let b = 0;
-      for (let sy = 0; sy < SS; sy++) {
-        for (let sx = 0; sx < SS; sx++) {
-          const i = ((y * SS + sy) * w + (x * SS + sx)) * 4;
-          r += pixels[i]; g += pixels[i + 1]; b += pixels[i + 2];
+      let rSum = 0, gSum = 0, bSum = 0, aSum = 0;
+
+      for (let sy = 0; sy < S; sy++) {
+        for (let sx = 0; sx < S; sx++) {
+          const px2 = x + (sx + 0.5) / S;
+          const py2 = y + (sy + 0.5) / S;
+
+          if (roundedSquare(px2, py2) > 0) continue;   // outside the tile
+
+          /* The gradient runs corner to corner. */
+          const t = Math.min(1, Math.max(0, (px2 + py2) / (size * 2)));
+          let colour = mix(START, END, t);
+
+          /* The disc, except where the triangle cuts through it. */
+          const inDisc = Math.hypot(px2 - cx, py2 - cy) <= discR;
+          if (inDisc && !inTriangle(px2, py2)) colour = DISC;
+
+          rSum += colour[0];
+          gSum += colour[1];
+          bSum += colour[2];
+          aSum += 255;
         }
       }
-      const n = SS * SS;
-      const o = (y * size + x) * 4;
-      out[o] = Math.round(r / n);
-      out[o + 1] = Math.round(g / n);
-      out[o + 2] = Math.round(b / n);
-      out[o + 3] = 255;
+
+      const n = S * S;
+      const i = (y * size + x) * 4;
+      if (aSum === 0) continue;
+      /* Averaged over every sample, including the empty ones outside the
+         tile, so the edge fades rather than stepping. */
+      out[i] = Math.round(rSum / (aSum / 255));
+      out[i + 1] = Math.round(gSum / (aSum / 255));
+      out[i + 2] = Math.round(bSum / (aSum / 255));
+      out[i + 3] = Math.round(aSum / n);
     }
   }
   return out;
 }
 
+/* ------------------------------------------------------------ the file --- */
+
 function crc32(buf) {
-  let c;
-  const table = [];
-  for (let n = 0; n < 256; n++) {
-    c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c >>> 0;
+  let c = ~0;
+  for (const byte of buf) {
+    c ^= byte;
+    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
   }
-  let crc = 0xffffffff;
-  for (const byte of buf) crc = table[(crc ^ byte) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+  return ~c >>> 0;
 }
 
 function chunk(type, data) {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
+  const head = Buffer.alloc(4);
+  head.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([length, body, crc]);
+  const tail = Buffer.alloc(4);
+  tail.writeUInt32BE(crc32(body));
+  return Buffer.concat([head, body, tail]);
 }
 
-function writePng(file, size, rgba) {
-  const header = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8;   // bit depth
-  ihdr[9] = 6;   // RGBA
-  const raw = Buffer.alloc((size * 4 + 1) * size);
+/** RGBA pixels to a PNG. Every scanline unfiltered, which zlib handles well. */
+function png(rgba, size) {
+  const raw = Buffer.alloc(size * (size * 4 + 1));
   for (let y = 0; y < size; y++) {
-    raw[y * (size * 4 + 1)] = 0; // no filter
-    Buffer.from(rgba.buffer, y * size * 4, size * 4)
-      .copy(raw, y * (size * 4 + 1) + 1);
+    raw[y * (size * 4 + 1)] = 0;
+    rgba.copy(raw, y * (size * 4 + 1) + 1, y * size * 4, (y + 1) * size * 4);
   }
-  const png = Buffer.concat([
-    header,
-    chunk('IHDR', ihdr),
+  const head = Buffer.alloc(13);
+  head.writeUInt32BE(size, 0);
+  head.writeUInt32BE(size, 4);
+  head[8] = 8;      // bits per channel
+  head[9] = 6;      // truecolour with alpha
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', head),
     chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
     chunk('IEND', Buffer.alloc(0)),
   ]);
-  fs.writeFileSync(file, png);
-  console.log('  ' + file + '  ' + size + 'x' + size + '  ' + png.length + ' bytes');
 }
 
-const targets = process.argv.slice(2);
-for (const target of targets) {
-  const size = Number(target.match(/-(\d+)\.png$/)?.[1]);
-  if (!size) throw new Error('cannot read a size from ' + target);
-  writePng(target, size, render(size));
+/** An ICO, which is a directory of images; PNGs may be stored as they are. */
+function ico(entries) {
+  const head = Buffer.alloc(6);
+  head.writeUInt16LE(0, 0);
+  head.writeUInt16LE(1, 2);                 // 1 = icon
+  head.writeUInt16LE(entries.length, 4);
+
+  const dir = Buffer.alloc(16 * entries.length);
+  let offset = head.length + dir.length;
+
+  entries.forEach((entry, i) => {
+    const at = i * 16;
+    // 256 is written as 0, which is the format's way of saying "not a byte".
+    dir[at] = entry.size >= 256 ? 0 : entry.size;
+    dir[at + 1] = entry.size >= 256 ? 0 : entry.size;
+    dir[at + 2] = 0;                        // colours in the palette
+    dir[at + 3] = 0;
+    dir.writeUInt16LE(1, at + 4);           // colour planes
+    dir.writeUInt16LE(32, at + 6);          // bits per pixel
+    dir.writeUInt32BE(0, at + 8);
+    dir.writeUInt32LE(entry.data.length, at + 8);
+    dir.writeUInt32LE(offset, at + 12);
+    offset += entry.data.length;
+  });
+
+  return Buffer.concat([head, dir, ...entries.map((entry) => entry.data)]);
 }
+
+/* ----------------------------------------------------------------- run --- */
+
+const webDir = path.join(ROOT, 'desktop', 'web', 'public');
+const buildDir = path.join(ROOT, 'desktop', 'build');
+fs.mkdirSync(buildDir, { recursive: true });
+
+/* The sizes a Home Screen, a manifest and a browser tab ask for. */
+for (const size of [180, 192, 512, 1024]) {
+  const file = path.join(webDir, 'icon-' + size + '.png');
+  fs.writeFileSync(file, png(draw(size), size));
+  console.log('  ' + path.relative(ROOT, file));
+}
+
+/* And the one Windows wants, holding the sizes it actually draws. */
+const icoSizes = [16, 24, 32, 48, 64, 128, 256];
+const icoFile = path.join(buildDir, 'icon.ico');
+fs.writeFileSync(icoFile, ico(icoSizes.map((size) => ({ size, data: png(draw(size), size) }))));
+console.log('  ' + path.relative(ROOT, icoFile) + '  (' + icoSizes.join(', ') + ')');

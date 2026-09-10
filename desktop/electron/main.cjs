@@ -354,6 +354,9 @@ function apiUrl(pathname) {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
+    // Packaged, Windows takes this from the executable; running from source
+    // there is no executable to take it from, so it is said here as well.
+    icon: path.join(HERE, '..', 'build', 'icon.ico'),
     width: 1500,
     height: 940,
     minWidth: 900,
@@ -1359,8 +1362,12 @@ function showMainWindow() {
 function createTray() {
   if (tray) return;
   try {
-    const image = nativeImage
-      .createFromPath(path.join(HERE, '..', 'dist-web', 'icon-192.png'));
+    /* The .ico first, which carries a 16px drawing meant for this size;
+       the web icon is the fallback when running from a tree without one. */
+    let image = nativeImage.createFromPath(path.join(HERE, '..', 'build', 'icon.ico'));
+    if (image.isEmpty()) {
+      image = nativeImage.createFromPath(path.join(HERE, '..', 'dist-web', 'icon-192.png'));
+    }
     if (image.isEmpty()) return;
 
     tray = new Tray(image.resize({ width: 16, height: 16 }));
