@@ -28,6 +28,30 @@ function whenSeen(at) {
 const PROFILE_COLOURS = ['#e50914', '#0071eb', '#e6b91e', '#1db954', '#b14ae0', '#ff6b35'];
 
 /** The rating a kids profile is held to, highest first as they are offered. */
+/*
+ * Languages a household is likely to want, as ffprobe spells them.
+ *
+ * Not every language there is: this is a list somebody scrolls, and the point
+ * is to pick theirs quickly rather than to be complete. A file in something
+ * not here still plays and its track is still in the picker while watching —
+ * this only decides which one starts.
+ */
+const LANGUAGES = [
+  ['', 'English (default)'],
+  ['ara', 'Arabic'],
+  ['fre', 'French'],
+  ['spa', 'Spanish'],
+  ['ger', 'German'],
+  ['ita', 'Italian'],
+  ['por', 'Portuguese'],
+  ['rus', 'Russian'],
+  ['tur', 'Turkish'],
+  ['jpn', 'Japanese'],
+  ['kor', 'Korean'],
+  ['chi', 'Chinese'],
+  ['hin', 'Hindi'],
+];
+
 const LIMITS = [
   { value: '', label: 'Everything' },
   { value: 'PG-13', label: 'Up to PG-13' },
@@ -105,6 +129,9 @@ export function ProfilesPanel({ isOwner }) {
           name: draft.name,
           kind: draft.kind,
           maxCertification: draft.maxCertification || null,
+          audioLanguage: draft.audioLanguage ?? '',
+          subtitleLanguage: draft.subtitleLanguage ?? '',
+          subtitlesOn: Boolean(draft.subtitlesOn),
         };
         if (draft.colour) patch.colour = draft.colour;
         // An untouched PIN field must not clear the PIN that is already set,
@@ -231,6 +258,9 @@ export function ProfilesPanel({ isOwner }) {
                       name: profile.name,
                       kind: profile.kind,
                       maxCertification: profile.maxCertification ?? '',
+                      audioLanguage: profile.audioLanguage ?? '',
+                      subtitleLanguage: profile.subtitleLanguage ?? '',
+                      subtitlesOn: Boolean(profile.subtitlesOn),
                       colour: profile.colour ?? '',
                       avatarAt: profile.avatarAt ?? null,
                     })}
@@ -455,6 +485,58 @@ export function ProfilesPanel({ isOwner }) {
                 ))}
               </select>
             </label>
+
+            {/*
+              * What this person hears, and whether they read along.
+              *
+              * Everybody in a house rarely agrees. The same film wants Arabic
+              * for one of them and subtitles for another, and until now both
+              * were settled by whoever packaged the file. Only a starting
+              * point: every track is still in the picker while watching.
+              */}
+            <label className="field">
+              <span>Soundtrack</span>
+              <select
+                value={draft.audioLanguage ?? ''}
+                onChange={(event) => setDraft({ ...draft, audioLanguage: event.target.value })}
+              >
+                {LANGUAGES.map(([value, label]) => (
+                  <option key={value || 'default'} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={Boolean(draft.subtitlesOn)}
+                onChange={(event) => setDraft({ ...draft, subtitlesOn: event.target.checked })}
+              />
+              <span>
+                <strong>Subtitles on by default</strong>
+                <span className="toggle-note">
+                  {draft.subtitlesOn
+                    ? 'Switched on whenever the file carries them'
+                    : 'Off until asked for, while watching'}
+                </span>
+              </span>
+            </label>
+
+            {draft.subtitlesOn && (
+              <label className="field">
+                <span>Subtitles in</span>
+                <select
+                  value={draft.subtitleLanguage ?? ''}
+                  onChange={(event) => setDraft({ ...draft, subtitleLanguage: event.target.value })}
+                >
+                  {LANGUAGES.map(([value, label]) => (
+                    <option key={value || 'default'} value={value}>
+                      {value ? label : 'Same as the soundtrack'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <label className="field">
               <span>PIN</span>

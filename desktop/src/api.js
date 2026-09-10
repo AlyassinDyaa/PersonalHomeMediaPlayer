@@ -279,6 +279,8 @@ export const api = {
   deleteProfile: (id) =>
     request('/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' }),
 
+  /** Who is in a title, and the few names behind it. */
+  credits: (itemId) => request('/api/items/' + encodeURIComponent(itemId) + '/credits'),
   favourites: () => request('/api/favourites'),
   /** What this profile means to get to: titles and runs of comics. */
   watchlist: () => request('/api/watchlist'),

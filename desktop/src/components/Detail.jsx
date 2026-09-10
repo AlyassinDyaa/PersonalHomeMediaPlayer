@@ -3,6 +3,50 @@ import { api, artwork, frameFrom, formatRuntime, formatDuration, formatSize } fr
 import Row from './Row.jsx';
 import Skeleton from './Skeleton.jsx';
 
+/**
+ * The faces in a title, under the episodes.
+ *
+ * Faces rather than a list of names, because recognising somebody is what
+ * this is for and a name in a column is not how anybody does that. Whoever
+ * has no photograph keeps their initial instead of leaving a hole in the row.
+ *
+ * The few names behind it follow as a line of text: a director is worth
+ * saying and is not worth a portrait.
+ */
+function CastRail({ credits }) {
+  const crew = credits.crew ?? [];
+  return (
+    <div className="cast">
+      <h2 className="cast-head">Cast</h2>
+
+      <div className="cast-row">
+        {credits.cast.map((person) => (
+          <div className="cast-person" key={person.id}>
+            <div className="cast-face">
+              {person.photo
+                ? <img src={artwork(person.photo, 'w200')} alt="" loading="lazy" draggable={false} />
+                : <span aria-hidden="true">{(person.name ?? '?').charAt(0)}</span>}
+            </div>
+            <strong className="cast-name">{person.name}</strong>
+            {person.as && <span className="cast-as">{person.as}</span>}
+          </div>
+        ))}
+      </div>
+
+      {crew.length > 0 && (
+        <p className="cast-crew">
+          {crew.map((person, index) => (
+            <span key={person.id}>
+              {index > 0 && <span className="cast-dot"> · </span>}
+              <strong>{person.as}</strong> {person.name}
+            </span>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** A heart, filled once it is a favourite. */
 function HeartGlyph({ on }) {
   return (
@@ -62,6 +106,8 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
   const [episodeView, setEpisodeView] = useState(readEpisodeView);
   const [error, setError] = useState(null);
   const [favourite, setFavourite] = useState(false);
+  /* Who is in it. Missing is the ordinary case for an unmatched title. */
+  const [credits, setCredits] = useState(null);
   /* On the watchlist: meant to be got to, as opposed to loved. */
   const [watchLater, setWatchLater] = useState(false);
   /** Open only while the automatic match is being corrected. */
@@ -83,6 +129,16 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
         if (cancelled) return;
         setItem(loaded);
         setFavourite(Boolean(loaded.favourite));
+        /*
+         * Asked for separately and allowed to fail.
+         *
+         * It comes from TMDB rather than from the drive, so it is the one
+         * part of this page that depends on the house being online. The page
+         * is worth showing without it.
+         */
+        api.credits(loaded.id)
+          .then((found) => setCredits(found))
+          .catch(() => setCredits(null));
         setWatchLater(Boolean(loaded.watchlist));
         setFixing(false);
         setExpanded(false);
@@ -394,6 +450,8 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
         )}
 
         {tab === 'about' && <AboutPanel item={item} />}
+
+        {credits?.cast?.length > 0 && <CastRail credits={credits} />}
 
         {/*
           * What else is like this, under everything else.

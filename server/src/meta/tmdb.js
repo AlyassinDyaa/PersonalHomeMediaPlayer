@@ -367,6 +367,17 @@ export async function getShow(id) {
   return tmdbGet('/tv/' + id + '?append_to_response=content_ratings,images&include_image_language=en,null');
 }
 
+/**
+ * Who is in it, and who made it.
+ *
+ * Asked for separately rather than appended to the film or programme itself,
+ * because those two answers are already cached against their own addresses
+ * and widening them would throw away every one of those on the next start.
+ */
+export async function getCredits(kind, id) {
+  return tmdbGet('/' + (kind === 'show' ? 'tv' : 'movie') + '/' + id + '/credits');
+}
+
 export async function getSeason(showId, seasonNumber) {
   return tmdbGet('/tv/' + showId + '/season/' + seasonNumber);
 }

@@ -78,6 +78,10 @@ function shape(row) {
     lastAddress: row.last_address ?? null,
     lastSeenAt: row.last_seen_at ?? null,
     avatarAt: row.avatar_at ?? null,
+    /* Empty means English for audio, and nothing for subtitles. */
+    audioLanguage: row.audio_language ?? '',
+    subtitleLanguage: row.subtitle_language ?? '',
+    subtitlesOn: Boolean(row.subtitles_on),
   };
 }
 
@@ -219,6 +223,22 @@ export function updateProfile(id, patch = {}) {
     }
     sets.push('kind = ?');
     values.push(patch.kind);
+  }
+  /*
+   * Both languages are three-letter codes as ffprobe reports them, and are
+   * matched loosely when a file disagrees about the spelling.
+   */
+  if ('audioLanguage' in patch) {
+    sets.push('audio_language = ?');
+    values.push(String(patch.audioLanguage ?? '').trim().slice(0, 12).toLowerCase());
+  }
+  if ('subtitleLanguage' in patch) {
+    sets.push('subtitle_language = ?');
+    values.push(String(patch.subtitleLanguage ?? '').trim().slice(0, 12).toLowerCase());
+  }
+  if ('subtitlesOn' in patch) {
+    sets.push('subtitles_on = ?');
+    values.push(patch.subtitlesOn ? 1 : 0);
   }
   if ('maxCertification' in patch) {
     sets.push('max_certification = ?');

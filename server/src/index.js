@@ -27,7 +27,7 @@ import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
 import { ensureAccents } from './meta/accent.js';
 import { frameAt, snap } from './stream/thumbs.js';
-import { tmdbGet, searchTitles } from './meta/tmdb.js';
+import { tmdbGet, searchTitles, getCredits } from './meta/tmdb.js';
 import { startAutoScan } from './scan/autoscan.js';
 // Being found by the televisions in the house, which have no browser.
 import { serveToTelevisions } from './dlna/index.js';
@@ -621,6 +621,8 @@ app.put('/api/profiles/:id', (req, res) => {
 
   const patch = { ...(req.body ?? {}) };
   if (!owner) {
+    // What somebody may not do to their own profile is decide how old they
+    // are allowed to be. What they hear and read is theirs to say.
     delete patch.kind;
     delete patch.maxCertification;
   }
@@ -960,6 +962,44 @@ app.get('/api/tmdb/search', async (req, res) => {
 });
 
 /** Force an item to a specific TMDB id; survives rescans. */
+/*
+ * The faces in a title, and the few names behind it.
+ *
+ * Capped at twenty, which is about where a cast list stops being people you
+ * recognise and starts being a crowd. The crew is narrowed to the handful of
+ * jobs anybody looks for; a full list runs to hundreds and answers nothing.
+ */
+const CREW_JOBS = ['Director', 'Creator', 'Writer', 'Screenplay', 'Story', 'Executive Producer'];
+
+app.get('/api/items/:id/credits', async (req, res) => {
+  const item = library.getItem(req.params.id, req.profile);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  if (!item.tmdbId) return res.json({ cast: [], crew: [] });
+
+  try {
+    const credits = await getCredits(item.kind, item.tmdbId);
+    const seen = new Set();
+    res.json({
+      cast: (credits?.cast ?? []).slice(0, 20).map((person) => ({
+        id: person.id,
+        name: person.name,
+        as: person.character || '',
+        photo: person.profile_path ?? null,
+      })),
+      /* One line per person, not one per job: somebody who wrote and directed
+         is one name with both, rather than the same face twice. */
+      crew: (credits?.crew ?? [])
+        .filter((person) => CREW_JOBS.includes(person.job))
+        .filter((person) => (seen.has(person.id) ? false : seen.add(person.id)))
+        .slice(0, 8)
+        .map((person) => ({ id: person.id, name: person.name, as: person.job })),
+    });
+  } catch (error) {
+    // Nobody is worse off without a cast list than with a broken page.
+    res.json({ cast: [], crew: [], error: error.message });
+  }
+});
+
 app.post('/api/items/:id/match', requireOwner, (req, res) => {
   const { tmdbId } = req.body ?? {};
   const row = getDb()
@@ -1318,6 +1358,21 @@ app.get('/api/artwork/prefetch', requireOwner, async (req, res) => {
  * Asked before playing so the interface can say what is about to happen rather
  * than simply stalling.
  */
+/**
+ * Whether a track is in a wanted language.
+ *
+ * Files disagree about how to spell one. The same language turns up as "eng",
+ * "en" and "English" depending on who packaged it, and a match that insisted
+ * on one spelling would pick the wrong track on half the library. Compared on
+ * the first two letters, which is the part every spelling shares.
+ */
+function speaks(stream, wanted) {
+  const tag = String(stream?.tags?.language ?? '').trim().toLowerCase();
+  const want = String(wanted ?? '').trim().toLowerCase();
+  if (!tag || !want) return false;
+  return tag.slice(0, 2) === want.slice(0, 2);
+}
+
 app.get('/api/stream/:videoId/info', async (req, res) => {
   const video = library.getVideo(req.params.videoId, req.profile);
   if (!video) {
@@ -1333,6 +1388,9 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
     const probed = await probeFile(video.path);
     const plan = planDelivery(probed, deviceCan(req));
     const streams = probed?.streams ?? [];
+
+    /* What this profile asked to hear; English until somebody says otherwise. */
+    const wantedAudio = req.profile?.audioLanguage || 'eng';
 
     /** A stream's own name for itself, falling back to something readable. */
     const describe = (stream, ordinal, kind) => {
@@ -1403,7 +1461,25 @@ app.get('/api/stream/:videoId/info', async (req, res) => {
        * for anything genuinely made in another language.
        */
       preferredAudio: Math.max(0, ofType('audio')
-        .findIndex((stream) => /^en(g|glish)?$/i.test(stream.tags?.language ?? ''))),
+        .findIndex((stream) => speaks(stream, wantedAudio))),
+      /*
+       * The subtitle to switch on without being asked, or -1 for none.
+       *
+       * Off unless this profile said otherwise, because a subtitle nobody
+       * asked for is worse than one they have to reach for. When they did ask,
+       * their language is preferred and anything else will do rather than
+       * nothing — a subtitle in the wrong language is still a subtitle, and
+       * they can change it.
+       */
+      preferredSubtitle: (() => {
+        if (!req.profile?.subtitlesOn) return -1;
+        const wanted = req.profile.subtitleLanguage || wantedAudio;
+        const usable = ofType('subtitle')
+          .map((stream, i) => ({ stream, i }))
+          .filter(({ stream }) => /subrip|ass|ssa|mov_text|webvtt|text/.test(stream.codec_name ?? ''));
+        const match = usable.findIndex(({ stream }) => speaks(stream, wanted));
+        return match >= 0 ? match : (usable.length ? 0 : -1);
+      })(),
       subtitleTracks: ofType('subtitle')
         // Only text subtitles convert to something a browser can display;
         // picture-based ones (PGS, VobSub) would need rendering, not converting.

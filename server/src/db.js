@@ -380,6 +380,17 @@ const MIGRATIONS = [
   // When a profile has a picture of its own, this is when it was set — used to
   // bust the browser's cache, since the file name never changes.
   { table: 'profiles', column: 'avatar_at', definition: 'INTEGER' },
+  /*
+   * What this person wants to hear, and whether they want to read along.
+   *
+   * Empty means English, which is what the library assumed for everybody
+   * before it could be asked. A household is rarely of one mind about this:
+   * the same film wants Arabic for one person and subtitles for another, and
+   * both were previously settled by whoever packaged the file.
+   */
+  { table: 'profiles', column: 'audio_language', definition: 'TEXT' },
+  { table: 'profiles', column: 'subtitle_language', definition: 'TEXT' },
+  { table: 'profiles', column: 'subtitles_on', definition: 'INTEGER NOT NULL DEFAULT 0' },
   // A collection's own badge: an image path at the metadata provider, and a
   // colour to ring it with. Added after collections shipped, so existing
   // libraries need the columns put on rather than the table rebuilt.

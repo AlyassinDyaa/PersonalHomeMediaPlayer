@@ -59,6 +59,9 @@ function playsPlaylistsItself() {
  * so a film paused on the television is picked up here, and the other way
  * round, with no syncing to arrange.
  */
+/** How long the next episode waits before it starts itself. */
+const UP_NEXT_SECONDS = 10;
+
 export function Player({ video, item, onClose }) {
   const videoRef = useRef(null);
   /** The hls.js engine, when this browser needs one. */
@@ -114,6 +117,18 @@ export function Player({ video, item, onClose }) {
   }, []);
   const [scrubTo, setScrubTo] = useState(0);
   const [subtitleTrack, setSubtitleTrack] = useState(-1);
+  /* Null until somebody picks subtitles themselves; then it is their choice. */
+  const chosenSubtitleRef = useRef(null);
+  /*
+   * The episode after this one, once this one has finished.
+   *
+   * Null until then. It used to move straight on the moment the picture ended,
+   * which is right nine times out of ten and impossible to stop the tenth —
+   * somebody who has fallen asleep, or who wanted the credits, or who is done
+   * for the night. A few seconds with a way out costs the nine nothing.
+   */
+  const [upNext, setUpNext] = useState(null);
+  const [ticksLeft, setTicksLeft] = useState(0);
   const [full, setFull] = useState(false);
   /** Every episode of this show in order, for stepping between them. */
   const [episodes, setEpisodes] = useState([]);
@@ -251,7 +266,10 @@ export function Player({ video, item, onClose }) {
      * with the same target. Moving to another film, or the next episode, lets
      * the English preference apply again.
      */
-    if (target?.id !== currentRef.current?.id) chosenAudioRef.current = null;
+    if (target?.id !== currentRef.current?.id) {
+      chosenAudioRef.current = null;
+      chosenSubtitleRef.current = null;
+    }
 
     setStatus('preparing');
     setError(null);
@@ -281,6 +299,18 @@ export function Player({ video, item, onClose }) {
       if (chosenAudioRef.current === null && preferred !== wantedAudio) {
         wantedAudio = preferred;
         setAudioTrack(preferred);
+      }
+
+      /*
+       * Subtitles on, for whoever asked for them on their profile.
+       *
+       * Under the same rule as the soundtrack above: only while nobody has
+       * chosen by hand. Somebody who turned subtitles off during an episode
+       * meant off, and the next episode reloading is not permission to
+       * overrule that.
+       */
+      if (chosenSubtitleRef.current === null && (info.preferredSubtitle ?? -1) >= 0) {
+        chooseSubtitles(info.preferredSubtitle);
       }
 
       /*
@@ -410,6 +440,24 @@ export function Player({ video, item, onClose }) {
     wakeChrome();
     load(target, 0, target.position > 30 ? Math.floor(target.position) : 0);
   }, [load, report, wakeChrome]);
+
+  /*
+   * Count down, once a second, and go when it reaches nothing.
+   *
+   * Cleared by anything that cancels or hurries it along, because both of
+   * those set upNext back to null and this stops with it.
+   */
+  useEffect(() => {
+    if (!upNext) return undefined;
+    if (ticksLeft <= 0) {
+      const target = upNext;
+      setUpNext(null);
+      goTo(target);
+      return undefined;
+    }
+    const timer = setTimeout(() => setTicksLeft((left) => left - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [upNext, ticksLeft, goTo]);
 
   /**
    * Jump to the resume point once the film's length is known.
@@ -1006,7 +1054,7 @@ export function Player({ video, item, onClose }) {
            */
           report(true);
           api.setWatched(currentRef.current.id, true).catch(() => {});
-          if (next) goTo(next);
+          if (next) { setUpNext(next); setTicksLeft(UP_NEXT_SECONDS); }
         }}
         onError={() => {
           if (status !== 'preparing') setError('The video stopped unexpectedly');
@@ -1199,7 +1247,12 @@ export function Player({ video, item, onClose }) {
             CC
             <select
               value={subtitleTrack}
-              onChange={(event) => chooseSubtitles(Number(event.target.value))}
+              onChange={(event) => {
+                const index = Number(event.target.value);
+                // Chosen by hand, so the profile's preference stops applying.
+                chosenSubtitleRef.current = index;
+                chooseSubtitles(index);
+              }}
             >
               <option value={-1}>Off</option>
               {tracks.subtitles.map((track, index) => (
@@ -1209,6 +1262,37 @@ export function Player({ video, item, onClose }) {
           </label>
         )}
       </div>
+
+      {/*
+        * The next episode, waiting rather than arriving.
+        *
+        * Bottom right, clear of the transport in the middle and of the bar
+        * along the bottom, which are both still live underneath it — pausing
+        * or scrubbing the credits does not dismiss this, and should not.
+        */}
+      {upNext && (
+        <div className="up-next">
+          <span className="up-next-when">
+            Up next in {ticksLeft}s
+          </span>
+          <strong className="up-next-title">{displayTitle(item, upNext)}</strong>
+          <div className="up-next-buttons">
+            <button
+              className="up-next-go"
+              onClick={() => { const target = upNext; setUpNext(null); goTo(target); }}
+            >
+              Play now
+            </button>
+            <button className="up-next-stop" onClick={() => setUpNext(null)}>
+              Not now
+            </button>
+          </div>
+          {/* How much of the wait is left, without a number to read. */}
+          <div className="up-next-bar">
+            <span style={{ width: ((ticksLeft / UP_NEXT_SECONDS) * 100) + '%' }} />
+          </div>
+        </div>
+      )}
 
       {status === 'preparing' && (
         <div className="player-note">
