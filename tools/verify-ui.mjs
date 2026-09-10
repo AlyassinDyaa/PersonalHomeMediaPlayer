@@ -70,6 +70,19 @@ const FEATURES = [
       && sheet.includes('input[type=checkbox]{appearance:none')],
   ['English audio is preferred', 'js',
     (code) => code.includes('preferredAudio')],
+  ['the shelves can be dressed', 'js',
+    (code) => ['How shelves look', 'Prints', 'Spotlight', 'Neon'].every((label) => code.includes(label))],
+  ['the shelf styles are styled', 'css',
+    (sheet) => ['shelf-ledge', 'shelf-glass', 'shelf-prints', 'shelf-tiles', 'shelf-spotlight', 'shelf-neon']
+      .every((name) => sheet.includes('body.' + name))],
+  ['there is a way out at the foot of the sidebar', 'js',
+    (code) => code.includes('Log out?') && code.includes('rail-out')],
+  ['the sidebar can be glass', 'css',
+    (sheet) => sheet.includes('body.rail-glass:not(.tv-layout) .rail') && sheet.includes('rail-swatch')],
+  ['there is a page for the lists', 'js',
+    (code) => code.includes('My Lists') && code.includes('Watch later') && code.includes('Read later')],
+  ['folders live under Maintenance now', 'js',
+    (code) => code.includes('Appearance') && !code.includes('label:"Folders"')],
 ];
 
 const page = await fetch(base + '/').then((res) => {

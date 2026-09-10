@@ -65,7 +65,7 @@ function deviceCan(req) {
 import {
   canPrepare, prepare, preparedPath, preparedState, preparedStats,
 } from './stream/prepared.js';
-import { webAppDir, loginPage } from './webapp.js';
+import { webAppDir, loginPage, escapeHtml } from './webapp.js';
 import { loadCertificate, watchCertificate } from './certificate.js';
 
 const app = express();
@@ -211,6 +211,32 @@ app.get([
   if (!fs.existsSync(file)) {
     next();
     return;
+  }
+
+  /*
+   * The manifest names the library, not the app.
+   *
+   * "Library" was written into it once, before the library had a name. The
+   * name is put in here so the icon somebody adds to a Home Screen is called
+   * what the door is called, and follows a rename without a rebuild.
+   */
+  if (req.path === '/manifest.webmanifest') {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const name = (config.libraryName ?? '').trim();
+      if (name) {
+        manifest.name = name;
+        manifest.short_name = name.length <= 12 ? name : name.slice(0, 12);
+        const line = (config.librarySubtitle ?? '').trim();
+        if (line) manifest.description = line;
+      }
+      res.setHeader('Cache-Control', 'no-cache');
+      res.type('application/manifest+json').send(JSON.stringify(manifest, null, 2));
+      return;
+    } catch {
+      // A manifest that cannot be read is sent as it is; the file is still
+      // the right shape, just under the old name.
+    }
   }
 
   /*
@@ -693,6 +719,34 @@ app.get('/api/continue', (req, res) => {
 
 app.get('/api/favourites', (req, res) => {
   res.json(library.listFavourites(req.profile));
+});
+
+/*
+ * What somebody means to get to: titles, and runs of comics.
+ *
+ * The comics half is only sent to somebody who may see comics at all; for
+ * anybody else the list simply has no comics on it, which is the same thing
+ * the Comics tab says by not being there.
+ */
+app.get('/api/watchlist', (req, res) => {
+  const { items, comicIds } = library.listWatchlist(req.profile);
+  const allowed = maySee('comics', req.profile?.id);
+  res.json({
+    items,
+    comics: allowed ? comics.seriesByIds(comicIds, req.profile.id) : [],
+  });
+});
+
+app.put('/api/items/:id/watchlist', (req, res) => {
+  const result = library.setWatchlist('item', req.params.id, req.body?.watchlist !== false, req.profile);
+  if (!result) return res.status(404).json({ error: 'item not found' });
+  res.json(result);
+});
+
+app.put('/api/comics/series/:id/watchlist', requireSection('comics'), (req, res) => {
+  const result = library.setWatchlist('comic', req.params.id, req.body?.watchlist !== false, req.profile);
+  if (!result) return res.status(404).json({ error: 'No such series' });
+  res.json(result);
 });
 
 // ---------------------------------------------------------------------------
@@ -1949,8 +2003,25 @@ if (config.serveToTelevisions) {
   });
 }
 
+/*
+ * The entry page has one address.
+ *
+ * Asked for by its file name, it would come straight from disk with the name
+ * the build gave it rather than the one the library has. Nothing links to it
+ * that way, but a bookmark might; it is sent to the front door instead.
+ */
+app.get('/index.html', (req, res) => res.redirect(302, '/'));
 app.use(express.static(webAppDir(), {
-  index: 'index.html',
+  /*
+   * The entry page is not served from here.
+   *
+   * With an index set, a request for "/" was answered straight from disk and
+   * never reached the fallback below — which is where the library's name is
+   * written into the page's title and its Home Screen label. The manifest was
+   * renamed and the page beside it still said "Library". The fallback already
+   * sends the entry page for every page-like path, so it can take "/" too.
+   */
+  index: false,
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('index.html')) {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
@@ -1996,7 +2067,29 @@ app.get(/^\/(?!api\/|artwork\/).*/, (req, res, next) => {
     return;
   }
   res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-  res.sendFile(index);
+
+  /*
+   * The page's own title, and the name a Home Screen gives it.
+   *
+   * Both were "Library", baked in at build time. iOS takes the Home Screen
+   * label from the apple-mobile-web-app-title tag rather than from the
+   * manifest, so the manifest alone was not enough — the icon still said
+   * "Library" beside a door that said "PSS".
+   */
+  const name = (config.libraryName ?? '').trim();
+  if (!name) {
+    res.sendFile(index);
+    return;
+  }
+  try {
+    const shell = fs.readFileSync(index, 'utf8')
+      .replace(/<title>[^<]*<\/title>/, '<title>' + escapeHtml(name) + '</title>')
+      .replace(/(<meta name="apple-mobile-web-app-title" content=")[^"]*(")/,
+        '$1' + escapeHtml(name) + '$2');
+    res.type('html').send(shell);
+  } catch {
+    res.sendFile(index);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -63,11 +63,15 @@ export const BACKDROP_COLOURS = [
  * @param {object} [options]
  * @param {string[]} [options.posters] artwork addresses, used only by the wall
  * @param {string}   [options.colour]  a fixed tint, or empty to follow the art
+ * @param {number}   [options.strength] how strongly it is drawn, 10–100
  */
-export function applyBackground(id, { posters = [], colour = '' } = {}) {
+export function applyBackground(id, { posters = [], colour = '', strength = 100 } = {}) {
   if (typeof document === 'undefined') return;
 
   const body = document.body;
+  /* A fraction of the design's own intensity; the sheet uses it as an opacity. */
+  const amount = Math.min(100, Math.max(10, Number(strength) || 100)) / 100;
+  body.style.setProperty('--bg-strength', String(amount));
   for (const [name] of BACKGROUNDS) body.classList.remove('bg-' + name);
 
   const chosen = backgroundClass(id);

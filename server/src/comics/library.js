@@ -179,7 +179,45 @@ export function getSeries(id, profileId) {
     shelf: series.shelf,
     path: series.path,
     issues,
+    /* Whether this run is on the reader's watchlist. */
+    watchlist: Boolean(db.prepare(
+      "SELECT 1 FROM watchlist WHERE profile_id = ? AND kind = 'comic' AND target_id = ?",
+    ).get(profileId, id)),
   };
+}
+
+/**
+ * Named runs of comics, in the order asked for, shaped as the shelves shape
+ * them. One that no longer exists — its folder gone since the list was made
+ * — is left out rather than sent as a hole.
+ */
+export function seriesByIds(ids, profileId) {
+  if (!ids.length) return [];
+  const db = getDb();
+  const get = db.prepare(`
+    SELECT s.*,
+           (SELECT COUNT(*) FROM comic_issues i WHERE i.series_id = s.id) AS issues,
+           (SELECT i.id FROM comic_issues i WHERE i.series_id = s.id
+             ORDER BY i.number IS NULL, i.number, i.title LIMIT 1) AS cover_issue,
+           (SELECT COUNT(*) FROM comic_issues i
+              JOIN comic_progress p ON p.issue_id = i.id AND p.profile_id = ?
+             WHERE i.series_id = s.id AND p.finished = 1) AS read_issues
+    FROM comic_series s
+    WHERE s.id = ?
+  `);
+  return ids
+    .map((id) => get.get(profileId, id))
+    .filter(Boolean)
+    .map((row) => ({
+      id: row.id,
+      title: row.title,
+      shelf: row.shelf,
+      path: row.path,
+      issues: row.issues,
+      readIssues: row.read_issues,
+      coverIssue: row.cover_issue,
+      watchlist: true,
+    }));
 }
 
 /** One issue, with where it sits among its neighbours. */

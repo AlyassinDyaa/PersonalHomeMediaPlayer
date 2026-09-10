@@ -6,9 +6,14 @@ import Card from './components/Card.jsx';
 import Detail from './components/Detail.jsx';
 import Browse from './components/Browse.jsx';
 import Comics from './components/Comics.jsx';
+import Lists from './components/Lists.jsx';
 import ComicReader from './components/ComicReader.jsx';
 import { shelveByGenre } from './genres.js';
 import { applyBackground } from './backgrounds.js';
+import { applyShelfStyle } from './shelfStyles.js';
+import { applyRailStyle } from './railStyles.js';
+import { leaveProfile } from './leave.js';
+import Confirm from './components/Confirm.jsx';
 import BrandRail from './components/BrandRail.jsx';
 import ProfileFace from './components/ProfileFace.jsx';
 import Settings from './components/Settings.jsx';
@@ -44,6 +49,7 @@ const VIEWS = [
   { id: 'shows', label: 'TV Shows', glyph: '▦' },
   { id: 'movies', label: 'Movies', glyph: '▶' },
   { id: 'comics', label: 'Comics', glyph: '❐' },
+  { id: 'lists', label: 'My Lists', glyph: '☆' },
   { id: 'library', label: 'Library', glyph: '⚙' },
 ];
 
@@ -69,17 +75,21 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [items, setItems] = useState([]);
   const [resume, setResume] = useState([]);
   const [favourites, setFavourites] = useState([]);
+  /* What this profile means to get to: titles, and runs of comics. */
+  const [watchlist, setWatchlist] = useState({ items: [], comics: [] });
+  /* A run of comics the Lists page asked to have opened, once on Comics. */
+  const [comicSeries, setComicSeries] = useState(null);
   const [genres, setGenres] = useState([]);
   /** Shelves the user arranged by hand, in Settings. */
-  const [collections, setCollections] = useState([]);
-  /*
-   * Every shelf, including the empty ones.
-   *
-   * The rails above are only the shelves worth drawing — an empty one is a
-   * gap on the page rather than information. But a shelf just made is empty
-   * by definition, and filling it is the first thing anybody does, so the
-   * list to add to has to be the whole list.
-   */
+  const [collections, setCollections] = useState([]);
+  /*
+   * Every shelf, including the empty ones.
+   *
+   * The rails above are only the shelves worth drawing — an empty one is a
+   * gap on the page rather than information. But a shelf just made is empty
+   * by definition, and filling it is the first thing anybody does, so the
+   * list to add to has to be the whole list.
+   */
   const [allShelves, setAllShelves] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -91,8 +101,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   /** Whether the Comics tab is offered; set in Settings. */
   const [showComics, setShowComics] = useState(true);
   /** Which collection layouts the owner offers; null until settings arrive. */
-  const [shelfLayouts, setShelfLayouts] = useState(null);
-  /** Whether the home screen also shelves titles by genre; set in Settings. */
+  const [shelfLayouts, setShelfLayouts] = useState(null);
+  /** Whether the home screen also shelves titles by genre; set in Settings. */
   const [genreShelves, setGenreShelves] = useState(true);
   /** Who is watching, shown in the bar so it is never a guess. */
   const [me, setMe] = useState(null);
@@ -102,29 +112,46 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [background, setBackground] = useState('flat');
   /* Empty means the backdrop follows whatever artwork is on screen. */
   const [backgroundColor, setBackgroundColor] = useState('');
+  /* How every row of covers is drawn: plain, on a ledge, in glass, and so on. */
+  const [shelfStyle, setShelfStyle] = useState('plain');
+  const [shelfRow, setShelfRow] = useState('none');
+  const [shelfColor, setShelfColor] = useState('');
+  const [shelfStrength, setShelfStrength] = useState(50);
+  /* What the sidebar is made of. */
+  const [railStyle, setRailStyle] = useState('glass');
+  const [railOpacity, setRailOpacity] = useState(45);
+  const [backgroundStrength, setBackgroundStrength] = useState(100);
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, kept, genreList, settings, shelves, everyShelf] = await Promise.all([
+      const [allItems, continueWatching, kept, genreList, settings, shelves, everyShelf, later] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
         api.favourites(),
         api.genres(),
         api.settings().catch(() => ({})),
         // A library with no collections is the normal case, not a failure.
-        api.collectionShelves().catch(() => []),
+        api.collectionShelves().catch(() => []),
         api.collections().catch(() => []),
+        api.watchlist().catch(() => ({ items: [], comics: [] })),
       ]);
       setLibraryName(settings.libraryName ?? '');
       setLibraryColor(settings.libraryColor ?? '');
       setBackground(settings.background ?? 'flat');
       setBackgroundColor(settings.backgroundColor ?? '');
+      setShelfStyle(settings.shelfStyle ?? 'plain');
+      setShelfRow(settings.shelfRow ?? 'none');
+      setShelfColor(settings.shelfColor ?? '');
+      setShelfStrength(settings.shelfStrength ?? 50);
+      setRailStyle(settings.railStyle ?? 'glass');
+      setRailOpacity(settings.railOpacity ?? 45);
+      setBackgroundStrength(settings.backgroundStrength ?? 100);
       setGrouping({
         movies: settings.groupMoviesByGenre ?? true,
         shows: settings.groupShowsByGenre ?? true,
       });
       setShowComics(settings.showComics !== false);
-      setShelfLayouts(Array.isArray(settings.shelfLayouts) ? settings.shelfLayouts : null);
+      setShelfLayouts(Array.isArray(settings.shelfLayouts) ? settings.shelfLayouts : null);
       setGenreShelves(settings.genreShelves !== false);
       setItems(allItems);
       // What counts as newly arrived depends on the rest of the library, so
@@ -132,8 +159,9 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       rememberArrivals(allItems);
       setResume(continueWatching);
       setFavourites(kept);
+      setWatchlist({ items: later?.items ?? [], comics: later?.comics ?? [] });
       setGenres(genreList);
-      setCollections(shelves);
+      setCollections(shelves);
       setAllShelves(everyShelf);
       setError(null);
     } catch (err) {
@@ -226,6 +254,13 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
     setLibraryColor(next.libraryColor ?? '');
     setBackground(next.background ?? 'flat');
     setBackgroundColor(next.backgroundColor ?? '');
+    setShelfStyle(next.shelfStyle ?? 'plain');
+    setShelfRow(next.shelfRow ?? 'none');
+    setShelfColor(next.shelfColor ?? '');
+    setShelfStrength(next.shelfStrength ?? 50);
+    setRailStyle(next.railStyle ?? 'glass');
+    setRailOpacity(next.railOpacity ?? 45);
+    setBackgroundStrength(next.backgroundStrength ?? 100);
   }, []);
 
 
@@ -319,8 +354,14 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       .filter((item) => item.poster)
       .slice(0, 3)
       .map((item) => artwork(item.poster, 'w300'));
-    applyBackground(background, { posters: wall, colour: backgroundColor });
-  }, [background, backgroundColor, items]);
+    applyBackground(background, { posters: wall, colour: backgroundColor, strength: backgroundStrength });
+  }, [background, backgroundColor, backgroundStrength, items]);
+
+  useEffect(() => {
+    applyShelfStyle(shelfStyle, shelfRow, shelfColor, shelfStrength);
+  }, [shelfStyle, shelfRow, shelfColor, shelfStrength]);
+
+  useEffect(() => { applyRailStyle(railStyle, railOpacity); }, [railStyle, railOpacity]);
 
   const movies = useMemo(() => items.filter((item) => item.kind === 'movie'), [items]);
   const shows = useMemo(() => items.filter((item) => item.kind === 'show'), [items]);
@@ -378,18 +419,39 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   /*
    * The handful of titles the banner rotates through.
    *
-   * Needs a backdrop and a description to fill the space, and is sorted by
-   * rating so the largest thing on screen is something worth showing. Titles
-   * with a logo are preferred — the banner is built around one — but only
-   * while there are enough of them to rotate through.
+   * Needs a backdrop and a description to fill the space. Titles with a logo
+   * are preferred — the banner is built around one — but only while there are
+   * enough of them to rotate through.
+   *
+   * Drawn at random, because taking the ten best-rated meant the same ten
+   * titles in the same order every single time the library was opened. A
+   * banner that never changes stops being looked at, and a library of 250
+   * films that always opens on the same four is a library that feels much
+   * smaller than it is.
+   *
+   * Not random over everything, though. The banner is the largest thing on
+   * the screen, and the worst-rated title in the library has no business
+   * filling it. So the field is the better-rated part of what has the artwork,
+   * and the shuffle happens inside that — varied every time, without ever
+   * being embarrassing.
    */
   const heroPicks = useMemo(() => {
     const withArt = items.filter((item) => item.backdrop && item.overview);
     const withLogo = withArt.filter((item) => item.logo);
-    const pool = withLogo.length >= 5 ? withLogo : withArt;
-    return [...pool]
+    const pool = withLogo.length >= 10 ? withLogo : withArt;
+
+    const field = [...pool]
       .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-      .slice(0, 10);
+      .slice(0, 60);
+
+    // Fisher-Yates: every order equally likely, which sorting by a random key
+    // is not — and it is three lines rather than a dependency.
+    for (let i = field.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [field[i], field[j]] = [field[j], field[i]];
+    }
+
+    return field.slice(0, 10);
   }, [items]);
 
   const [heroIndex, setHeroIndex] = useState(0);
@@ -801,6 +863,17 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         <TitleActions
           entry={heldItem}
           favourite={favourites.some((entry) => entry.id === (heldItem.item ?? heldItem).id)}
+          watchLater={watchlist.items.some((entry) => entry.id === (heldItem.item ?? heldItem).id)}
+          onWatchLater={async (wanted) => {
+            const item = heldItem.item ?? heldItem;
+            setHeldItem(null);
+            try {
+              await api.setWatchlist(item.id, wanted);
+              await reload();
+            } catch (failure) {
+              setError(failure.message);
+            }
+          }}
           onClose={() => setHeldItem(null)}
           onOpen={() => { setHeldItem(null); openDetail(heldItem); }}
           onFavourite={async (wanted) => {
@@ -893,8 +966,6 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
                 </>
               )}
             />
-            <Row title="Your List" items={favourites} onSelect={openDetail} onLongPress={setHeldItem}
-                 renderLabel={(item) => <><strong>{item.title}</strong>{cardMeta(item)}</>} />
             {/*
               * Shelves are not drawn here.
               *
@@ -964,7 +1035,32 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       )}
 
       {!loading && view === 'comics' && (
-        <Comics onRead={readComic} query={query} shelfLayouts={shelfLayouts} />
+        <Comics
+          onRead={readComic}
+          query={query}
+          shelfLayouts={shelfLayouts}
+          openSeriesId={comicSeries}
+          onSeriesShown={() => setComicSeries(null)}
+        />
+      )}
+
+      {!loading && view === 'lists' && (
+        <Lists
+          favourites={favourites}
+          watchlist={watchlist}
+          onSelect={openDetail}
+          onLongPress={setHeldItem}
+          onOpenComic={(id) => { setComicSeries(id); goto('comics'); }}
+          onRemoveFavourite={async (item) => {
+            try { await api.setFavourite(item.id, false); await reload(); } catch (failure) { setError(failure.message); }
+          }}
+          onRemoveWatch={async (item) => {
+            try { await api.setWatchlist(item.id, false); await reload(); } catch (failure) { setError(failure.message); }
+          }}
+          onRemoveComic={async (series) => {
+            try { await api.setComicWatchlist(series.id, false); await reload(); } catch (failure) { setError(failure.message); }
+          }}
+        />
       )}
 
       {!loading && view === 'library' && (
@@ -1057,7 +1153,7 @@ function GatherBar({ count, shelves, allShelves, onAdd, onCancel }) {
  * same. It comes up from the bottom edge, where the hand already is, rather
  * than in the middle of the screen where nothing else is.
  */
-function TitleActions({ entry, favourite, onClose, onOpen, onFavourite }) {
+function TitleActions({ entry, favourite, watchLater = false, onClose, onOpen, onFavourite, onWatchLater = null }) {
   const item = entry.item ?? entry;
 
   return (
@@ -1075,8 +1171,15 @@ function TitleActions({ entry, favourite, onClose, onOpen, onFavourite }) {
 
         <button type="button" className="actions-row" onClick={() => onFavourite(!favourite)}>
           <span className="actions-mark" aria-hidden="true">{favourite ? '✓' : '♡'}</span>
-          {favourite ? 'Remove from your list' : 'Add to your list'}
+          {favourite ? 'Remove from favourites' : 'Add to favourites'}
         </button>
+
+        {onWatchLater && (
+          <button type="button" className="actions-row" onClick={() => onWatchLater(!watchLater)}>
+            <span className="actions-mark" aria-hidden="true">{watchLater ? '✓' : '+'}</span>
+            {watchLater ? 'Remove from watch later' : 'Watch later'}
+          </button>
+        )}
 
         <button type="button" className="actions-row quiet" onClick={onClose}>
           <span className="actions-mark" aria-hidden="true">✕</span>
@@ -1129,6 +1232,17 @@ const SECTION_ICONS = {
       <path d="M12 6.5v13" />
     </svg>
   ),
+  lists: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6.5 3.5h11a1 1 0 0 1 1 1V21l-6.5-4.2L5.5 21V4.5a1 1 0 0 1 1-1z" />
+    </svg>
+  ),
+  leave: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M14.5 4H18a1.5 1.5 0 0 1 1.5 1.5v13A1.5 1.5 0 0 1 18 20h-3.5" />
+      <path d="M3.5 12h11M10.5 8l4 4-4 4" />
+    </svg>
+  ),
   library: (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="3.2" />
@@ -1155,6 +1269,9 @@ const SECTION_ICONS = {
  * of targets at the far edge of the reach.
  */
 function Rail({ view, goto, tabs, me }) {
+  /* Whether the way out has been pressed and is waiting on an answer. */
+  const [leaving, setLeaving] = useState(false);
+
   return (
     <nav className="rail" aria-label="Sections">
       {me && (
@@ -1195,6 +1312,36 @@ function Rail({ view, goto, tabs, me }) {
           </button>
         ))}
       </div>
+
+      {/*
+        * The way out, at the foot.
+        *
+        * Kept apart from the sections by all the space the column has, so it
+        * cannot be hit on the way to Movies — and behind a question, because
+        * one stray press should not put anybody back at the door.
+        */}
+      {me && (
+        <button
+          type="button"
+          className="rail-item rail-out"
+          title="Log out"
+          onClick={() => setLeaving(true)}
+        >
+          <span className="rail-glyph" aria-hidden="true">{SECTION_ICONS.leave}</span>
+          <span className="rail-label">Log out</span>
+        </button>
+      )}
+
+      {leaving && (
+        <Confirm
+          title="Log out?"
+          body={'You will be back at the faces, and ' + me.name + ' will have to be chosen again to carry on.'}
+          confirmLabel="Log out"
+          cancelLabel="Stay"
+          onConfirm={() => { setLeaving(false); leaveProfile(); }}
+          onCancel={() => setLeaving(false)}
+        />
+      )}
     </nav>
   );
 }
@@ -1210,7 +1357,11 @@ function TabBar({ view, goto, tabs }) {
           aria-current={view === entry.id}
           onClick={() => goto(entry.id)}
         >
-          <span className="tabbar-glyph" aria-hidden="true">{entry.glyph}</span>
+          <span className="tabbar-glyph" aria-hidden="true">
+            {/* The same drawings the sidebar uses, so one icon set serves
+                every screen rather than a phone having its own. */}
+            {SECTION_ICONS[entry.id] ?? entry.glyph}
+          </span>
           {entry.label}
         </button>
       ))}

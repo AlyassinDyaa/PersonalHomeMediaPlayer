@@ -43,6 +43,12 @@ function firstSet(...values) {
 /** The layouts that exist, in the order they are offered. */
 export const SHELF_LAYOUTS = ['rows', 'grid', 'list'];
 
+/** The ways a cover can be drawn, and what a row can stand on; the page holds the drawings. */
+export const SHELF_STYLES = ['plain', 'glass', 'prints', 'tiles', 'neon'];
+export const SHELF_ROWS = ['none', 'ledge', 'spotlight', 'panel', 'band', 'underglow'];
+/** What the sidebar is made of. */
+export const RAIL_STYLES = ['solid', 'glass', 'clear'];
+
 /**
  * Sanitise a list of layouts.
  *
@@ -196,6 +202,26 @@ export const config = {
    */
   backgroundColor: local.backgroundColor ?? defaults.backgroundColor ?? '',
   /*
+   * How each row of covers is drawn.
+   *
+   * The covers on their own is the plain default; the rest are treatments of
+   * the same rail — a ledge under it, a frame around each, a wash behind —
+   * chosen by looking, in Settings. The page itself does the drawing.
+   */
+  shelfStyle: local.shelfStyle ?? defaults.shelfStyle ?? 'plain',
+  /* And what each row stands on: nothing, a ledge, or a wash of colour. */
+  shelfRow: local.shelfRow ?? defaults.shelfRow ?? 'none',
+  /* The colour the shelf is drawn in; empty follows the artwork. */
+  shelfColor: local.shelfColor ?? defaults.shelfColor ?? '',
+  /* How strongly the row's design is drawn, as a percentage. */
+  shelfStrength: local.shelfStrength ?? defaults.shelfStrength ?? 50,
+  /* What the sidebar is made of: a solid strip, glass, or nothing. */
+  railStyle: local.railStyle ?? defaults.railStyle ?? 'glass',
+  /* How opaque the sidebar's strip is, as a percentage. */
+  railOpacity: local.railOpacity ?? defaults.railOpacity ?? 45,
+  /* How strongly the backdrop is drawn, as a percentage of its design. */
+  backgroundStrength: local.backgroundStrength ?? defaults.backgroundStrength ?? 100,
+  /*
    * Whether televisions on this network may find the library by themselves.
    *
    * Off unless asked for. The protocol a set speaks has no notion of who is
@@ -237,6 +263,14 @@ export const config = {
 
   /** Shown in the header, e.g. "Dyaa's Library". Blank falls back to a generic label. */
   libraryName: local.libraryName ?? defaults.libraryName ?? '',
+  /*
+   * A line under the name, for when the name is initials.
+   *
+   * Empty by default, and empty means the door keeps saying "<name>'s
+   * Library" — which is right when the name is a person's. Filled in, the
+   * name stands alone and this explains it.
+   */
+  librarySubtitle: local.librarySubtitle ?? defaults.librarySubtitle ?? '',
   libraryColor: local.libraryColor ?? defaults.libraryColor ?? '',
 
   port: Number(process.env.PORT ?? local.port ?? defaults.port ?? 8787),
@@ -356,6 +390,33 @@ export function saveSettings(patch) {
     // A colour or nothing; anything else is not a thing to paint a room with.
     allowed.backgroundColor = /^#[0-9a-f]{6}$/i.test(wanted) ? wanted.toLowerCase() : '';
   }
+  if (typeof patch.shelfStyle === 'string') {
+    // One of the styles the page knows how to draw, or the plain one.
+    const wanted = patch.shelfStyle.trim();
+    allowed.shelfStyle = SHELF_STYLES.includes(wanted) ? wanted : 'plain';
+  }
+  if (typeof patch.shelfRow === 'string') {
+    const wanted = patch.shelfRow.trim();
+    allowed.shelfRow = SHELF_ROWS.includes(wanted) ? wanted : 'none';
+  }
+  if (typeof patch.shelfColor === 'string') {
+    const wanted = patch.shelfColor.trim();
+    allowed.shelfColor = /^#[0-9a-f]{6}$/i.test(wanted) ? wanted.toLowerCase() : '';
+  }
+  if (typeof patch.railStyle === 'string') {
+    const wanted = patch.railStyle.trim();
+    allowed.railStyle = RAIL_STYLES.includes(wanted) ? wanted : 'glass';
+  }
+  if (typeof patch.railOpacity === 'number' && Number.isFinite(patch.railOpacity)) {
+    allowed.railOpacity = Math.min(100, Math.max(0, Math.round(patch.railOpacity)));
+  }
+  if (typeof patch.backgroundStrength === 'number' && Number.isFinite(patch.backgroundStrength)) {
+    allowed.backgroundStrength = Math.min(100, Math.max(10, Math.round(patch.backgroundStrength)));
+  }
+  if (typeof patch.shelfStrength === 'number' && Number.isFinite(patch.shelfStrength)) {
+    // A whole percentage, and never so faint it looks like a fault.
+    allowed.shelfStrength = Math.min(100, Math.max(10, Math.round(patch.shelfStrength)));
+  }
   if (typeof patch.serveToTelevisions === 'boolean') allowed.serveToTelevisions = patch.serveToTelevisions;
   if (Array.isArray(patch.shelfLayouts)) allowed.shelfLayouts = readLayouts(patch.shelfLayouts);
   if (typeof patch.genreShelves === 'boolean') allowed.genreShelves = patch.genreShelves;
@@ -367,6 +428,9 @@ export function saveSettings(patch) {
   if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
   if (typeof patch.skipOutroEnabled === 'boolean') allowed.skipOutroEnabled = patch.skipOutroEnabled;
   if (typeof patch.libraryName === 'string') allowed.libraryName = patch.libraryName.trim().slice(0, 40);
+  if (typeof patch.librarySubtitle === 'string') {
+    allowed.librarySubtitle = patch.librarySubtitle.trim().slice(0, 60);
+  }
   // The colour the library's name is written in. Only a plain hex colour is
   // accepted: this value is interpolated into a stylesheet, and anything else
   // reaching that far would be a way to inject rules into the page.
@@ -428,6 +492,7 @@ export function saveSettings(patch) {
 export function settingsView() {
   return {
     libraryName: config.libraryName,
+    librarySubtitle: config.librarySubtitle,
     libraryColor: config.libraryColor,
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
@@ -435,6 +500,13 @@ export function settingsView() {
     showComics: config.showComics,
     background: config.background,
     backgroundColor: config.backgroundColor,
+    shelfStyle: config.shelfStyle,
+    shelfRow: config.shelfRow,
+    shelfColor: config.shelfColor,
+    shelfStrength: config.shelfStrength,
+    railStyle: config.railStyle,
+    railOpacity: config.railOpacity,
+    backgroundStrength: config.backgroundStrength,
     serveToTelevisions: config.serveToTelevisions,
     shelfLayouts: config.shelfLayouts,
     genreShelves: config.genreShelves,

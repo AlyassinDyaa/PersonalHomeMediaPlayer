@@ -133,6 +133,7 @@ export function shapeItem(row) {
     seasonCount: row.season_count ?? undefined,
     addedAt: row.added_at,
     favourite: Boolean(row.favourite),
+    watchlist: Boolean(row.watchlist),
     // Undefined rather than 0 when the query did not ask, so "no unwatched
     // episodes" and "not counted" stay distinguishable.
     unwatchedCount: row.unwatched_count ?? undefined,
@@ -157,6 +158,8 @@ function shapeVideo(row) {
     runtime: row.runtime,
     position: row.position ?? 0,
     watched: Boolean(row.watched),
+    /* When the position was last written; only the show page asks for it. */
+    progressAt: row.progress_at ?? 0,
   };
 }
 
@@ -180,13 +183,15 @@ export function listItems({ kind = null, sort = 'title', profile } = {}) {
            (SELECT 1 FROM favorites f WHERE f.item_id = i.id AND f.profile_id = ?) AS favourite,
            (SELECT COUNT(*) FROM videos v
               LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
-             WHERE v.item_id = i.id AND COALESCE(p.watched, 0) = 0) AS unwatched_count
+             WHERE v.item_id = i.id AND COALESCE(p.watched, 0) = 0) AS unwatched_count,
+           (SELECT 1 FROM watchlist w
+             WHERE w.kind = 'item' AND w.target_id = i.id AND w.profile_id = ?) AS watchlist
     FROM items i
     WHERE 1 = 1
       ${kind ? 'AND i.kind = ?' : ''}
       ${limit.sql}
     ORDER BY ${order}
-  `).all(profileId, profileId, ...(kind ? [kind] : []), ...limit.values);
+  `).all(profileId, profileId, profileId, ...(kind ? [kind] : []), ...limit.values);
 
   return rows.map(shapeItem);
 }
@@ -212,9 +217,13 @@ export function getItem(id, profile) {
   if (!row) return null;
 
   const item = shapeItem(row);
+  /* Before the film's early return, so a film carries it as a series does. */
+  item.watchlist = Boolean(db.prepare(
+    "SELECT 1 FROM watchlist WHERE profile_id = ? AND kind = 'item' AND target_id = ?",
+  ).get(profileId, id));
 
   const videos = db.prepare(`
-    SELECT v.*, p.position, p.watched
+    SELECT v.*, p.position, p.watched, p.updated_at AS progress_at
     FROM videos v
     LEFT JOIN progress p ON p.video_id = v.id AND p.profile_id = ?
     WHERE v.item_id = ?
@@ -245,8 +254,20 @@ export function getItem(id, profile) {
     // the shelf should be honest in the meantime.
     .filter((season) => season.episodes.length > 0);
 
-  // Next unwatched episode, which is what the play button should target.
-  item.nextUp = videos.find((video) => !video.watched && video.position === 0)
+  /*
+   * What the play button should target, and what the list points at.
+   *
+   * The episode being watched comes first: somebody halfway through one has
+   * a place to go back to, and that beats any episode not yet started. If
+   * more than one is part-way through — a household sharing a profile, or
+   * someone who skipped ahead — the one touched most recently is the one
+   * meant. With nothing under way, the first unwatched; with nothing
+   * unwatched, the first.
+   */
+  const underWay = videos
+    .filter((video) => !video.watched && video.position > 0)
+    .sort((a, b) => b.progressAt - a.progressAt);
+  item.nextUp = underWay[0]
     ?? videos.find((video) => !video.watched)
     ?? videos[0]
     ?? null;
@@ -488,6 +509,62 @@ export function listFavourites(profile) {
     ORDER BY f.added_at DESC
   `).all(profileId, ...rated.values);
   return rows.map(shapeItem);
+}
+
+/**
+ * What somebody means to get to, newest first.
+ *
+ * The titles come back shaped; the comics come back as ids, because their
+ * shape lives with the comics and whether they may be seen at all is a
+ * question the route answers.
+ */
+export function listWatchlist(profile) {
+  const db = getDb();
+  const profileId = idOf(profile);
+  const rated = certificationFilter(profile);
+
+  const items = db.prepare(`
+    SELECT i.*,
+           (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
+           (SELECT COUNT(*) FROM seasons s WHERE s.item_id = i.id) AS season_count,
+           (SELECT 1 FROM favorites f WHERE f.item_id = i.id AND f.profile_id = ?) AS favourite,
+           1 AS watchlist
+    FROM watchlist w
+    JOIN items i ON i.id = w.target_id
+    WHERE w.profile_id = ? AND w.kind = 'item' ${rated.sql}
+    ORDER BY w.added_at DESC
+  `).all(profileId, profileId, ...rated.values).map(shapeItem);
+
+  const comicIds = db.prepare(`
+    SELECT target_id FROM watchlist
+    WHERE profile_id = ? AND kind = 'comic'
+    ORDER BY added_at DESC
+  `).all(profileId).map((row) => row.target_id);
+
+  return { items, comicIds };
+}
+
+/**
+ * Put something on the watchlist, or take it off.
+ *
+ * @param {'item'|'comic'} kind  a title, or a run of comics
+ * @returns {{kind: string, id: string, watchlist: boolean}|null} null when there is no such thing.
+ */
+export function setWatchlist(kind, id, on, profile) {
+  const db = getDb();
+  const profileId = idOf(profile);
+  const table = kind === 'comic' ? 'comic_series' : kind === 'item' ? 'items' : null;
+  if (!table) return null;
+  if (!db.prepare('SELECT id FROM ' + table + ' WHERE id = ?').get(id)) return null;
+
+  if (on) {
+    db.prepare('INSERT OR IGNORE INTO watchlist (profile_id, kind, target_id, added_at) VALUES (?, ?, ?, ?)')
+      .run(profileId, kind, id, Date.now());
+  } else {
+    db.prepare('DELETE FROM watchlist WHERE profile_id = ? AND kind = ? AND target_id = ?')
+      .run(profileId, kind, id);
+  }
+  return { kind, id, watchlist: Boolean(on) };
 }
 
 /**

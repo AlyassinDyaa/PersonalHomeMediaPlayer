@@ -3,6 +3,15 @@ import { api, artwork, frameFrom, formatRuntime, formatDuration, formatSize } fr
 import Row from './Row.jsx';
 import Skeleton from './Skeleton.jsx';
 
+/** A heart, filled once it is a favourite. */
+function HeartGlyph({ on }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" style={on ? { fill: 'currentColor' } : undefined}>
+      <path d="M12 20.3 4.6 13.2A4.6 4.6 0 0 1 11 6.6l1 1 1-1a4.6 4.6 0 0 1 6.4 6.6z" />
+    </svg>
+  );
+}
+
 /** A plus, and a tick once it is on the list. */
 function PlusGlyph({ on }) {
   return on
@@ -53,6 +62,8 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
   const [episodeView, setEpisodeView] = useState(readEpisodeView);
   const [error, setError] = useState(null);
   const [favourite, setFavourite] = useState(false);
+  /* On the watchlist: meant to be got to, as opposed to loved. */
+  const [watchLater, setWatchLater] = useState(false);
   /** Open only while the automatic match is being corrected. */
   const [fixing, setFixing] = useState(false);
   /** Whether the synopsis has been asked for in full. */
@@ -72,6 +83,7 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
         if (cancelled) return;
         setItem(loaded);
         setFavourite(Boolean(loaded.favourite));
+        setWatchLater(Boolean(loaded.watchlist));
         setFixing(false);
         setExpanded(false);
         setQuality(null);
@@ -219,8 +231,9 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
             )}
             {item.kind === 'show' && item.nextUp && (
               <button className="btn btn-primary" onClick={() => onPlay(item.nextUp, item)}>
-                {item.nextUp.position > 0 ? '↻ ' : '▶ '}
-                Watch S{item.nextUp.season} E{item.nextUp.episode}
+                {item.nextUp.position > 0
+                  ? '↻ Continue S' + item.nextUp.season + ' E' + item.nextUp.episode
+                  : '▶ Watch S' + item.nextUp.season + ' E' + item.nextUp.episode}
               </button>
             )}
 
@@ -236,8 +249,8 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
               type="button"
               className={favourite ? 'icon-btn on' : 'icon-btn'}
               aria-pressed={favourite}
-              title={favourite ? 'In your list' : 'Add to your list'}
-              aria-label={favourite ? 'In your list' : 'Add to your list'}
+              title={favourite ? 'In your favourites' : 'Add to favourites'}
+              aria-label={favourite ? 'In your favourites' : 'Add to favourites'}
               onClick={async () => {
                 const wanted = !favourite;
                 // Shown before it is saved: this is a toggle, and a toggle that
@@ -251,7 +264,27 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                 }
               }}
             >
-              <PlusGlyph on={favourite} />
+              <HeartGlyph on={favourite} />
+            </button>
+
+            <button
+              type="button"
+              className={watchLater ? 'icon-btn on' : 'icon-btn'}
+              aria-pressed={watchLater}
+              title={watchLater ? 'On your watch later list' : 'Watch later'}
+              aria-label={watchLater ? 'On your watch later list' : 'Watch later'}
+              onClick={async () => {
+                const wanted = !watchLater;
+                setWatchLater(wanted);
+                try {
+                  await api.setWatchlist(item.id, wanted);
+                } catch (err) {
+                  setWatchLater(!wanted);
+                  setError(err.message);
+                }
+              }}
+            >
+              <PlusGlyph on={watchLater} />
             </button>
 
             <button
@@ -342,6 +375,7 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                   <EpisodeTile
                     key={episode.id}
                     episode={episode}
+                    current={episode.id === item.nextUp?.id}
                     onPlay={() => onPlay(episode, item)}
                   />
                 ))}
@@ -351,6 +385,7 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
                 <EpisodeRow
                   key={episode.id}
                   episode={episode}
+                  current={episode.id === item.nextUp?.id}
                   onPlay={() => onPlay(episode, item)}
                 />
               ))
@@ -395,6 +430,24 @@ function watchedPercent(episode) {
   return Math.min(100, (episode.position / episode.duration) * 100);
 }
 
+/**
+ * The mark on the episode the show is at.
+ *
+ * "Continue watching" for one that is part-way through, "Up next" for the
+ * one that follows a finished episode — the same two words the home screen
+ * uses, so the mark here is recognised rather than read.
+ */
+function nowLabel(episode) {
+  return episode.position > 0 ? 'Continue watching' : 'Up next';
+}
+
+/** How much of a part-watched episode is left, as words. */
+function timeLeft(episode) {
+  if (!(episode.position > 0) || !episode.duration) return null;
+  const left = formatDuration(Math.max(0, episode.duration - episode.position));
+  return left ? left + ' left' : null;
+}
+
 /** What to show next to an episode's name: how long it runs, or that it is done. */
 function episodeNote(episode) {
   if (episode.watched) return <span className="episode-watched">Watched</span>;
@@ -430,13 +483,15 @@ function EpisodeStill({ episode, size, children = null }) {
   );
 }
 
-function EpisodeRow({ episode, onPlay }) {
+function EpisodeRow({ episode, onPlay, current = false }) {
   const percent = watchedPercent(episode);
+  const left = current ? timeLeft(episode) : null;
 
   return (
-    <div className="episode" onClick={onPlay}>
+    <div className={current ? 'episode current' : 'episode'} onClick={onPlay}>
       <div className="episode-number">{episode.episode}</div>
       <div className="episode-still">
+        {current && <span className="episode-now">{nowLabel(episode)}</span>}
         <EpisodeStill episode={episode} size="w300" />
         {percent > 0 && (
           <div className="card-progress"><span style={{ width: percent + '%' }} /></div>
@@ -449,7 +504,7 @@ function EpisodeRow({ episode, onPlay }) {
             {episode.episodeEnd && ' – ' + episode.episodeEnd}
           </span>
           <span style={{ color: 'var(--text-faint)', fontWeight: 400, fontSize: 13 }}>
-            {episodeNote(episode)}
+            {left ? <span className="episode-left">{left}</span> : episodeNote(episode)}
           </span>
         </div>
         {episode.overview && <p className="episode-overview">{episode.overview}</p>}
@@ -459,17 +514,19 @@ function EpisodeRow({ episode, onPlay }) {
 }
 
 /** The same episode as a large tile, for browsing a season by its artwork. */
-function EpisodeTile({ episode, onPlay }) {
+function EpisodeTile({ episode, onPlay, current = false }) {
   const percent = watchedPercent(episode);
+  const left = current ? timeLeft(episode) : null;
 
   return (
-    <div className="episode-tile" onClick={onPlay} role="button" tabIndex={0}
+    <div className={current ? 'episode-tile current' : 'episode-tile'} onClick={onPlay} role="button" tabIndex={0}
          onKeyDown={(event) => { if (event.key === 'Enter') onPlay(); }}>
       <div className="episode-tile-still">
         <EpisodeStill episode={episode} size="w500">
           <div className="card-fallback">{episode.title || 'Episode ' + episode.episode}</div>
         </EpisodeStill>
         <span className="episode-tile-badge">{episode.episode}</span>
+        {current && <span className="episode-now">{nowLabel(episode)}</span>}
         <span className="episode-tile-play">▶</span>
         {percent > 0 && (
           <div className="card-progress"><span style={{ width: percent + '%' }} /></div>
@@ -479,7 +536,9 @@ function EpisodeTile({ episode, onPlay }) {
         {episode.title || 'Episode ' + episode.episode}
         {episode.episodeEnd && ' – ' + episode.episodeEnd}
       </div>
-      <div className="episode-tile-note">{episodeNote(episode)}</div>
+      <div className="episode-tile-note">
+        {left ? <span className="episode-left">{left}</span> : episodeNote(episode)}
+      </div>
       {episode.overview && <p className="episode-tile-overview">{episode.overview}</p>}
     </div>
   );

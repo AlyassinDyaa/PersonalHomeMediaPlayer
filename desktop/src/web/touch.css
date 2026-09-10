@@ -632,3 +632,161 @@ body.tv-layout.by-remote .player-actions :focus {
   outline-offset: 4px;
   border-radius: 6px;
 }
+
+
+/* ------------------------------------------------ the player, on a phone --- */
+
+/*
+ * Laid out the way a phone lays out a player.
+ *
+ * Everything here was one row along the top and one along the bottom, which
+ * a tablet has the width for. A phone held upright does not: the row of
+ * actions ran off the right edge, and the bottom row — three keys, two
+ * times, the timeline, quality and captions — squeezed the timeline to a
+ * sliver and pushed the pickers off the screen.
+ *
+ * So, upright: the title on its own line with the way back, the actions in a
+ * row beneath it that scrolls sideways if it must; the timeline across the
+ * full width with the two times under its ends; quality and captions as two
+ * wide buttons along the bottom, where a thumb is. Play and the skips are
+ * the large controls over the middle of the picture, as they already were.
+ *
+ * Nothing is removed and nothing is rewired. Every control keeps its
+ * handler; only where it sits has changed.
+ */
+@media (pointer: coarse) {
+  /* On any touch screen the actions may scroll rather than be cropped. */
+  .player-actions {
+    min-width: 0;
+    flex-shrink: 1;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .player-actions::-webkit-scrollbar { display: none; }
+}
+
+@media (max-width: 760px) {
+  /* ---- the top ---- */
+
+  .player-chrome {
+    flex-wrap: wrap;
+    row-gap: 10px;
+    padding: calc(env(safe-area-inset-top, 0) + 8px) 12px 22px;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 100%);
+  }
+
+  .player-close {
+    flex: none;
+    font-size: 17px;
+    padding: 8px 10px 8px 4px;
+  }
+
+  .player-title {
+    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  /* The actions take the whole second line and scroll along it. */
+  .player-actions {
+    flex-basis: 100%;
+    margin-left: 0;
+    gap: 8px;
+    padding-bottom: 2px;
+  }
+
+  .player-step,
+  .player-chrome .player-pick {
+    flex: none;
+    font-size: 13px;
+    padding: 8px 13px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.14);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+
+  /* ---- the middle ---- */
+
+  .player-touch { gap: clamp(26px, 10vw, 60px); }
+  .touch-key { width: 62px; height: 62px; }
+  .touch-key.play { width: 82px; height: 82px; }
+
+  /* ---- the bottom ---- */
+
+  .player-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    column-gap: 10px;
+    padding: 34px 16px calc(env(safe-area-inset-bottom, 0) + 10px);
+    background: linear-gradient(0deg, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.4) 55%, rgba(0, 0, 0, 0) 100%);
+  }
+
+  /*
+   * The small play and skip keys go: the three large ones over the picture
+   * are the same three controls, and a phone does not need them twice.
+   */
+  .player-bar > .player-key { display: none; }
+
+  /* The timeline takes the full width, first. */
+  .player-seek-wrap {
+    order: 1;
+    flex: 1 1 100%;
+    margin: 0;
+  }
+
+  /* The two times sit under its ends, one each way. */
+  .player-bar > .player-time {
+    order: 2;
+    flex: 1 1 40%;
+    min-width: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .player-key + .player-time { text-align: left; }
+  .player-seek-wrap + .player-time { text-align: right; }
+
+  /* Quality and captions become two wide buttons along the bottom. */
+  .player-bar > .player-pick {
+    order: 3;
+    flex: 1 1 0;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    background: rgba(255, 255, 255, 0.12);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+  }
+  .player-bar > .player-pick select {
+    max-width: none;
+    font-weight: 600;
+  }
+
+  /* The frame under a scrubbing finger stays inside a narrow screen. */
+  .scrub-preview img { width: 132px; }
+}
+
+/*
+ * A phone on its side: wide, but with very little height.
+ *
+ * The rows fit across, so the upright layout is not wanted — but the bands
+ * top and bottom have to be shallow or they meet in the middle, and the
+ * controls over the picture come down a size to leave some of it visible.
+ */
+@media (pointer: coarse) and (max-height: 460px) {
+  .player-chrome { padding-top: calc(env(safe-area-inset-top, 0) + 6px); padding-bottom: 14px; gap: 10px; }
+  .player-bar { padding-top: 14px; padding-bottom: calc(env(safe-area-inset-bottom, 0) + 8px); gap: 8px; }
+  .player-touch { gap: clamp(24px, 8vw, 64px); }
+  .touch-key { width: 54px; height: 54px; }
+  .touch-key.play { width: 70px; height: 70px; }
+  .touch-glyph { font-size: 20px; }
+  .touch-glyph.big { font-size: 28px; }
+  .scrub-preview img { width: 120px; }
+}
+
+/* The way back is two words on one line, however narrow the bar. */
+.player-close { white-space: nowrap; }

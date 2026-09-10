@@ -15,7 +15,7 @@ import { api, comicCover } from '../api.js';
  * say — somebody who keeps `COMICS/DC/Action Comics 1019-1049` has been clear
  * enough, and rearranging it would only be second-guessing them.
  */
-export function Comics({ onRead, query = '', shelfLayouts = null }) {
+export function Comics({ onRead, query = '', shelfLayouts = null, openSeriesId = null, onSeriesShown = null }) {
   const [shelves, setShelves] = useState([]);
   const [reading, setReading] = useState([]);
   const [stats, setStats] = useState(null);
@@ -55,6 +55,26 @@ export function Comics({ onRead, query = '', shelfLayouts = null }) {
   const openTheSeries = useCallback((id) => {
     api.comicSeries(id).then(setOpenSeries).catch((f) => setError(f.message));
   }, []);
+
+  /* Sent here from the Lists page with a run to open: open it, once. */
+  useEffect(() => {
+    if (!openSeriesId) return;
+    openTheSeries(openSeriesId);
+    onSeriesShown?.();
+  }, [openSeriesId, openTheSeries, onSeriesShown]);
+
+  /* Put this run on the watchlist, or take it off; shown before it is saved. */
+  const toggleWatchLater = useCallback(async () => {
+    if (!openSeries) return;
+    const wanted = !openSeries.watchlist;
+    setOpenSeries((was) => (was ? { ...was, watchlist: wanted } : was));
+    try {
+      await api.setComicWatchlist(openSeries.id, wanted);
+    } catch (f) {
+      setOpenSeries((was) => (was ? { ...was, watchlist: !wanted } : was));
+      setError(f.message);
+    }
+  }, [openSeries]);
 
   const trimmed = query.trim().toLowerCase();
 
@@ -105,6 +125,14 @@ export function Comics({ onRead, query = '', shelfLayouts = null }) {
             {openSeries.shelf ? openSeries.shelf + ' · ' : ''}
             {openSeries.issues.length} issues
           </span>
+          <button
+            type="button"
+            className={openSeries.watchlist ? 'btn btn-secondary comic-later on' : 'btn btn-ghost comic-later'}
+            aria-pressed={Boolean(openSeries.watchlist)}
+            onClick={toggleWatchLater}
+          >
+            {openSeries.watchlist ? '✓ On your list' : '+ Read later'}
+          </button>
         </div>
 
         <div className="grid comic-grid">

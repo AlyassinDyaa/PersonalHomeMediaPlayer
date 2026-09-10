@@ -280,6 +280,20 @@ export const api = {
     request('/api/profiles/' + encodeURIComponent(id), { method: 'DELETE' }),
 
   favourites: () => request('/api/favourites'),
+  /** What this profile means to get to: titles and runs of comics. */
+  watchlist: () => request('/api/watchlist'),
+  setWatchlist: (itemId, watchlist) =>
+    request('/api/items/' + encodeURIComponent(itemId) + '/watchlist', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watchlist }),
+    }),
+  setComicWatchlist: (seriesId, watchlist) =>
+    request('/api/comics/series/' + encodeURIComponent(seriesId) + '/watchlist', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watchlist }),
+    }),
   setFavourite: (itemId, favourite) =>
     request('/api/items/' + encodeURIComponent(itemId) + '/favourite', {
       method: 'PUT',

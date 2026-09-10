@@ -27,8 +27,15 @@ export function webAppDir() {
  * explanation of why.
  */
 export function loginPage({ configured }) {
+  /*
+   * Initials do not want a possessive.
+   *
+   * With a second line to carry the meaning, the heading is the name itself;
+   * without one it makes the sentence it always made.
+   */
+  const subtitle = escapeHtml((config.librarySubtitle ?? '').trim());
   const name = config.libraryName
-    ? escapeHtml(config.libraryName) + '’s Library'
+    ? escapeHtml(config.libraryName) + (subtitle ? '' : '’s Library')
     : 'My Library';
   const colour = /^#[0-9a-f]{6}$/i.test(config.libraryColor ?? '')
     ? config.libraryColor
@@ -135,6 +142,14 @@ export function loginPage({ configured }) {
     text-decoration: underline; display: block;
   }
   h1 { color: ${colour}; font-size: 26px; font-weight: 800; letter-spacing: -0.4px; margin: 0 0 6px; }
+  .tagline {
+    color: ${colour};
+    opacity: 0.72;
+    font-size: 13.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: -2px 0 10px;
+  }
   .sub { color: #a8a8b3; font-size: 14px; margin: 0 0 28px; }
   input {
     width: 100%; padding: 15px 16px; font-size: 17px; text-align: center;
@@ -190,6 +205,7 @@ export function loginPage({ configured }) {
 <body>
   <div class="card">
     <h1>${name}</h1>
+    ${subtitle ? `<p class="tagline">${subtitle}</p>` : ''}
     <p class="sub">Enter the passcode to watch</p>
     ${body}
   </div>
@@ -414,7 +430,7 @@ export function loginPage({ configured }) {
 </html>`;
 }
 
-function escapeHtml(value) {
+export function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

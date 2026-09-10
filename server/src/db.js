@@ -320,6 +320,27 @@ CREATE TABLE IF NOT EXISTS favorites (
 `,
   },
   {
+    table: 'watchlist',
+    columns: 'kind, target_id, added_at',
+    indexes: [],
+    /*
+     * What somebody means to get to. One table for every medium: a title is
+     * an item, a run of comics is a series, and `kind` says which the id
+     * belongs to. Nothing is enforced against either parent, because a
+     * comic series lives in a table that can be rebuilt by a scan and a
+     * dangling row is simply skipped when the list is read.
+     */
+    create: `
+CREATE TABLE IF NOT EXISTS watchlist (
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  target_id  TEXT NOT NULL,
+  added_at   INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, kind, target_id)
+);
+`,
+  },
+  {
     table: 'comic_progress',
     columns: 'issue_id, series_id, page, pages, finished, updated_at',
     indexes: [],

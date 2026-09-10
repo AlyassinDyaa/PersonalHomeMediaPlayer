@@ -152,7 +152,17 @@ button {
   transition: background 0.25s ease;
 }
 
-.nav.scrolled { background: rgba(9, 9, 13, 0.97); border-bottom: 1px solid var(--border); }
+/*
+ * Scrolled, the bar becomes solid — but without a rule under it.
+ *
+ * The line was there to separate the bar from the page. The page is already
+ * moving underneath a blurred, darker surface, which separates them perfectly
+ * well; the rule only added a hard grey edge across the top of the screen.
+ */
+.nav.scrolled {
+  background: rgba(9, 9, 13, 0.97);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
+}
 
 .nav-brand {
   font-size: 21px;
@@ -2807,7 +2817,8 @@ body.modal-open { overflow: hidden; }
   /* A shorter bar on a phone, but the notch is still the notch. */
   :root {
     --nav-height: calc(58px + var(--safe-top));
-    --tabbar-height: calc(58px + var(--safe-bottom));
+    /* Taller, now that the icons are drawn at a size a thumb can find. */
+    --tabbar-height: calc(64px + var(--safe-bottom));
   }
 
   /*
@@ -2829,7 +2840,14 @@ body.modal-open { overflow: hidden; }
     background: rgba(12, 12, 17, 0.82);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    /*
+     * No line along the top.
+     *
+     * The blur is what separates this from the page; a rule as well reads as a
+     * seam, and it is the border that made the screen look boxed in. What
+     * replaces it is a soft lift, which says "above" without drawing anything.
+     */
+    box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.34);
   }
 
   .tabbar-tab {
@@ -2850,7 +2868,43 @@ body.modal-open { overflow: hidden; }
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .tabbar-glyph { font-size: 17px; line-height: 1; }
+  .tabbar-glyph {
+    font-size: 17px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 26px;
+  }
+
+  /*
+   * Drawn, at one weight.
+   *
+   * The characters used before came out at whatever size and weight the font
+   * happened to give them, so the row never sat straight. These are the same
+   * drawings the sidebar uses, so a phone and a desktop show one icon set.
+   */
+  .tabbar-glyph svg {
+    width: 25px;
+    height: 25px;
+    display: block;
+    stroke: currentColor;
+    fill: none;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  /* The label sits under the icon, small and quiet, as it does on a phone. */
+  .tabbar-tab {
+    gap: 4px;
+    padding: 6px 2px 2px;
+    font-size: 10px;
+    letter-spacing: 0.01em;
+  }
+
+  /* Current: the icon takes the library's colour and the word goes solid. */
+  .tabbar-tab.on { color: var(--text); font-weight: 600; }
   .tabbar-tab.on { color: var(--text); }
   .tabbar-tab.on .tabbar-glyph { color: var(--accent); }
   .tabbar-tab:active { background: rgba(255, 255, 255, 0.06); }
@@ -3137,12 +3191,24 @@ body.modal-open { overflow: hidden; }
 
 @media (max-width: 760px) {
   .nav-section {
-    display: block;
+    /* Hidden while the page's own heading is on screen, shown once it is not:
+       the same word twice is worse than a bar with nothing in it. */
+    display: none;
     font-size: 16px;
     font-weight: 600;
     color: var(--text);
     letter-spacing: -0.2px;
   }
+  .nav.scrolled .nav-section {
+    display: block;
+    animation: nav-title-in 180ms ease both;
+  }
+
+  @keyframes nav-title-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: none; }
+  }
+
   /* The page says its own name in the bar now. */
   .settings-tabs { margin: 16px 0 18px; }
 }
@@ -4385,7 +4451,7 @@ body.bg-grid::before {
   background-position: center top;
   -webkit-mask-image: radial-gradient(80% 60% at 50% 6%, #000 0%, transparent 76%);
   mask-image: radial-gradient(80% 60% at 50% 6%, #000 0%, transparent 76%);
-  opacity: 0.55;
+  opacity: calc(0.55 * var(--bg-strength, 1));
 }
 
 /* Soft horizontal bands, like light moving on water. */
@@ -5447,4 +5513,893 @@ body.tv-layout .detail-hero .hero-actions .btn-primary { height: 56px; padding: 
 @media (max-width: 760px) {
   .settings-card { padding: 0 14px; }
   .settings-card > summary { padding: 14px 0 11px; }
+}
+
+/* --------------------------------------------- the bar, on a phone, again --- */
+
+/*
+ * The top of a phone screen, laid out the way a phone lays it out.
+ *
+ * A face in a grey pill at the far left, an empty middle, and three grey
+ * squares at the right: that is a desktop toolbar shrunk to fit, and it looks
+ * it. What a phone does instead — the pattern Apple's own apps and every
+ * streaming app since have settled on — is a large title on the page, nothing
+ * in the bar until that title scrolls away, and a small cluster of round
+ * controls at the right with the person's face last among them.
+ *
+ * Only the arrangement and the shapes change. Every control that was here is
+ * still here, doing what it did.
+ */
+@media (max-width: 760px) {
+  .nav {
+    gap: 8px;
+    justify-content: flex-end;
+    padding: var(--safe-top) 14px 0;
+  }
+
+  /*
+   * The face goes last, and loses its pill.
+   *
+   * It led the bar because on a desktop it doubles as a label — "watching as
+   * DYaa". A phone has no room for the label and the face alone at the far
+   * left read as a stray. At the right, after the controls, it is where a
+   * phone keeps a profile and it needs no frame around it.
+   */
+  .nav-me {
+    order: 10;
+    padding: 0;
+    margin-left: 4px;
+    background: none;
+    border-radius: 50%;
+  }
+  .nav-me .profile-face {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+    box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.22);
+  }
+  .nav-me:active .profile-face { transform: scale(0.94); }
+
+  /*
+   * Round, glass, one size.
+   *
+   * Three different squares at three different weights read as three things
+   * that happened to land near each other. The same circle three times reads
+   * as a set of controls.
+   */
+  .nav-search,
+  .nav-gather,
+  .nav-refresh {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    color: var(--text);
+    font-size: 16px;
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+  .nav-search:active,
+  .nav-gather:active,
+  .nav-refresh:active { background: rgba(255, 255, 255, 0.2); }
+
+  /* The spacer has nothing to hold apart now; the section title, when it
+     appears, sits at the left on its own. */
+  .nav-spacer { display: none; }
+  .nav-section { margin-right: auto; }
+  .nav-section.titled { margin-right: auto; }
+
+  /*
+   * A phone's bar starts clear and becomes glass as the page moves under it,
+   * rather than starting as a dark strip. At rest there is nothing behind the
+   * controls but the page, which is what lets the large title feel like part
+   * of the screen and not something under a lid.
+   */
+  .nav { background: transparent; }
+  .nav.scrolled {
+    background: rgba(9, 9, 13, 0.72);
+    -webkit-backdrop-filter: blur(18px) saturate(160%);
+    backdrop-filter: blur(18px) saturate(160%);
+  }
+}
+
+/*
+ * The same on a tablet held upright, where the sidebar is not offered and the
+ * bar does the same job it does on a phone.
+ */
+@media (min-width: 761px) and (max-width: 899px) {
+  .nav { justify-content: flex-end; gap: 10px; }
+  .nav-me { order: 10; padding: 0; background: none; border-radius: 50%; }
+  .nav-me-name { display: none; }
+  .nav-me .profile-face { width: 34px; height: 34px; box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.22); }
+  .nav-spacer { display: none; }
+  .nav-section { margin-right: auto; }
+}
+
+/* ------------------------------------------ every card head, the same head --- */
+
+/*
+ * Three cards were built before the others became disclosures, and kept their
+ * old heads: Profiles with a bare heading, Collections with its own fold
+ * button, and Needs attention with a third kind. Each still lifted its title
+ * six pixels clear of the slab — a trick from when the heading floated above
+ * the card — so on those three the title sat on the top edge with no air over
+ * it, while the cards either side of them had plenty.
+ *
+ * One head, then, for all of them: the same room above and below, the same
+ * hairline under, the same chevron at the far end that turns.
+ */
+
+/* A heading on its own is a row inside the slab, not a label floating above. */
+.settings-card > h2 {
+  margin: 0;
+  padding: 16px 0 13px;
+  transform: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 14px;
+}
+
+/* A plain section has no [open] to give it a bottom, so it gets its own. */
+section.settings-card { padding-bottom: 14px; }
+
+/* The two hand-made fold buttons, made to look like the browser's own. */
+.settings-card > .settings-fold,
+.settings-card > .settings-disclosure {
+  padding: 16px 0 13px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.settings-fold h2,
+.settings-fold-caret,
+.settings-fold-count { margin-bottom: 0; }
+.settings-fold h2 { flex: 1; }
+.settings-fold h2, .settings-disclosure h2 { transform: none; }
+
+/* The typed carets go; the drawn chevron takes their place at the far end. */
+.settings-fold-caret,
+.settings-disclosure-mark { display: none; }
+
+.settings-fold::after,
+.settings-disclosure::after {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-right: 2px;
+  border-right: 1.6px solid var(--text-faint);
+  border-bottom: 1.6px solid var(--text-faint);
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.2s ease;
+}
+.settings-fold.folded::after,
+.settings-disclosure[aria-expanded="false"]::after {
+  transform: rotate(-45deg) translate(-1px, -1px);
+}
+.settings-fold:hover::after,
+.settings-disclosure:hover::after { border-color: var(--text-dim); }
+
+/* Shut, the slab is its title and nothing more — no line, no band beneath. */
+.settings-card.is-shut { padding-bottom: 0; }
+.settings-card.is-shut > .settings-fold { margin-bottom: 0; border-bottom: none; }
+.settings-card > .settings-disclosure[aria-expanded="false"] { margin-bottom: 12px; }
+
+@media (max-width: 760px) {
+  .settings-card > h2,
+  .settings-card > .settings-fold,
+  .settings-card > .settings-disclosure { padding: 14px 0 11px; }
+}
+
+/* ------------------------------------------------ the face, on a tablet --- */
+
+/*
+ * The sidebar started at the very top of the screen, under the clock.
+ *
+ * On a monitor there is nothing there. On an iPad added to the Home Screen
+ * the status bar is drawn over the page, so the face — the first thing in the
+ * column — sat half beneath it, thirty pixels wide, in the corner where the
+ * system also listens for a swipe. It was there, but it was hard to hit.
+ *
+ * The column now starts below the inset, and where there is no pointer the
+ * face is drawn at a finger's size rather than a cursor's.
+ */
+@media (min-width: 900px) {
+  body:not(.tv-layout) .rail {
+    padding-top: calc(14px + var(--safe-top));
+    padding-bottom: calc(14px + var(--safe-bottom));
+  }
+
+  /* A touch screen gets the larger target; a mouse never needed it. */
+  @media (hover: none), (pointer: coarse) {
+    body:not(.tv-layout) .rail { gap: 10px; padding-top: calc(22px + var(--safe-top)); }
+    .rail-me { width: 54px; height: 54px; border-radius: 14px; margin-bottom: 8px; }
+    .rail-me .profile-face { width: 42px; height: 42px; font-size: 18px; }
+    .rail-item { width: 52px; height: 52px; }
+    .rail-glyph svg { width: 25px; height: 25px; }
+  }
+}
+
+/* ----------------------------------------------------- how shelves look --- */
+
+/*
+ * Six treatments of the same rail.
+ *
+ * None of them moves a cover or changes its size: each is only what the
+ * covers sit on, or in, or what lies behind them. That is what lets them be
+ * swapped with a class on the body and nothing else, and it is what keeps a
+ * choice made for looks from ever costing anybody a title.
+ */
+
+/* ---- Shelf: every row stands on a ledge ---- */
+
+/*
+ * One plank, the width of the screen, under every row.
+ *
+ * It has to sit at the bottom of the pictures, not the bottom of the rail —
+ * on the Films and TV screens every cover carries a caption, and the rail's
+ * bottom edge is under the words. Every cover on a rail is the same width
+ * and a poster is half again as tall as it is wide, so where the pictures
+ * end is a sum: the rail's top padding plus the poster's height. The widths
+ * are named once, below, and every screen size sets its own.
+ */
+body.shelf-ledge .row-scroller { padding-top: 10px; padding-bottom: 20px; }
+body.shelf-ledge .row-viewport::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(10px + var(--card-w) * 3 / 2);
+  height: 11px;
+  z-index: 1;
+  border-radius: 0 0 3px 3px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 42%, #3a3a44) 0%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 22%, #1c1c23) 45%,
+      #0e0e12 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 8px 18px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+/* The wide stills of Continue Watching are a different shape. */
+body.shelf-ledge .row-viewport:has(.row-scroller.wide)::after {
+  top: calc(10px + var(--card-wide-w) * 9 / 16);
+}
+/* On a tile the picture starts 8px in and is 18px narrower, so it ends sooner. */
+body.shelf-tiles.shelf-ledge .row-viewport::after {
+  top: calc(18px + (var(--card-w) - 18px) * 3 / 2);
+}
+body.shelf-tiles.shelf-ledge .row-viewport:has(.row-scroller.wide)::after {
+  top: calc(18px + (var(--card-wide-w) - 18px) * 9 / 16);
+}
+body.shelf-ledge .card-poster {
+  border-radius: 5px 5px 2px 2px;
+  box-shadow: 0 16px 16px -10px rgba(0, 0, 0, 0.9), 0 2px 6px rgba(0, 0, 0, 0.5);
+}
+/* The caption steps down past the plank. */
+/* Named with the rail so a phone's smaller caption cannot pull it back up. */
+body.shelf-ledge .row-scroller .card-label { margin-top: 22px; }
+/* Lifted off the shelf rather than swelled, which is what a hand does. */
+body.shelf-ledge .card:hover { transform: translateY(-6px) scale(1.04); z-index: 2; }
+
+/* ---- Glass: each cover set in a pane ---- */
+
+body.shelf-glass .card-poster {
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+body.shelf-glass .card-poster img,
+body.shelf-glass .card-fallback { border-radius: 9px; }
+body.shelf-glass .card-progress { left: 6px; right: 6px; bottom: 6px; border-radius: 0 0 9px 9px; }
+body.shelf-glass .card-new { left: 12px; bottom: 12px; }
+body.shelf-glass .card:hover .card-poster { border-color: rgba(255, 255, 255, 0.34); }
+
+/* ---- Prints: white borders, pinned a little askew ---- */
+
+body.shelf-prints .row-scroller { gap: 18px; padding-top: 12px; padding-bottom: 20px; }
+body.shelf-prints .card-poster {
+  padding: 7px 7px 24px;
+  border-radius: 2px;
+  background: #f4f0e8;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+body.shelf-prints .card-poster img,
+body.shelf-prints .card-fallback { border-radius: 1px; }
+body.shelf-prints .card-fallback { color: #3a3630; }
+body.shelf-prints .card-progress { left: 7px; right: 7px; bottom: 24px; }
+body.shelf-prints .card-new { left: 13px; bottom: 30px; }
+body.shelf-prints .row-scroller .card:nth-child(odd) { transform: rotate(-1.6deg); }
+body.shelf-prints .row-scroller .card:nth-child(even) { transform: rotate(1.3deg); }
+body.shelf-prints .row-scroller .card:nth-child(3n) { transform: rotate(-0.6deg); }
+body.shelf-prints .row-scroller .card:hover { transform: rotate(0) scale(1.06); }
+/* The pin: a small head of the library colour at the top edge. */
+body.shelf-prints .card-poster::before {
+  content: "";
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  margin-left: -5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff 0%, var(--shelf-tint, var(--accent, #7d8aa0)) 45%, #2a2a30 100%);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* A print on a shelf: the pin above and the plank below share one box. */
+body.shelf-tiles.shelf-ledge .card { padding-bottom: 20px; }
+
+/* ---- Tiles: each cover on its own soft tile ---- */
+
+body.shelf-tiles .row-scroller { gap: 14px; }
+body.shelf-tiles .card {
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+body.shelf-tiles .card-poster { border-radius: 10px; box-shadow: none; }
+body.shelf-tiles .card:hover { background: rgba(255, 255, 255, 0.1); }
+body.shelf-tiles .card-label { padding: 0 2px; }
+
+/* ---- Spotlight: a wash of the library colour behind every row ---- */
+
+body.shelf-spotlight .row {
+  position: relative;
+  isolation: isolate;
+  padding: 16px 0 6px;
+  margin: 0 20px 26px;
+  border-radius: 20px;
+}
+/* The wash is its own layer, so its strength is one opacity. */
+body.shelf-spotlight .row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(70% 140% at 8% 0%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 52%, transparent) 0%, transparent 65%),
+    rgba(255, 255, 255, 0.05);
+  opacity: var(--shelf-strength, 0.5);
+  pointer-events: none;
+}
+body.shelf-spotlight .row-header { padding: 0 22px; }
+body.shelf-spotlight .row-scroller { padding-left: 22px; padding-right: 22px; }
+body.shelf-spotlight .row-title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  margin-right: 10px;
+  vertical-align: -3px;
+  border-radius: 2px;
+  background: var(--shelf-tint, var(--accent, #7d8aa0));
+}
+body.shelf-spotlight .row-arrow.left { border-radius: 20px 0 0 20px; }
+body.shelf-spotlight .row-arrow.right { border-radius: 0 20px 20px 0; }
+
+/* ---- Neon: each cover outlined in its own colours ---- */
+
+body.shelf-neon .row-scroller { gap: 16px; padding-top: 10px; padding-bottom: 18px; }
+body.shelf-neon .card-poster {
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--accent, #7d8aa0) 75%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent, #7d8aa0) 40%, transparent),
+    0 12px 26px rgba(0, 0, 0, 0.55);
+}
+body.shelf-neon .card:hover .card-poster {
+  box-shadow:
+    0 0 0 2px var(--accent, #7d8aa0),
+    0 0 34px color-mix(in srgb, var(--accent, #7d8aa0) 70%, transparent),
+    0 16px 40px rgba(0, 0, 0, 0.7);
+}
+body.shelf-neon .row-title {
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent, #7d8aa0) 55%, transparent);
+}
+
+/* The gutters the ledge and the wash follow, on the screens that change them. */
+@media (max-width: 760px) {
+  body.shelf-spotlight .row { margin-left: 8px; margin-right: 8px; }
+  body.shelf-spotlight .row-header { padding: 0 14px; }
+  body.shelf-spotlight .row-scroller { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ---- The panes in Settings: three small covers, each treatment repeated ---- */
+
+.shelf-swatch {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  height: 52px;
+  min-height: 52px;
+  flex: none;
+  padding: 8px 8px 9px;
+  border-radius: 7px;
+  background: #0b0b0f;
+  overflow: hidden;
+  position: relative;
+  --tint: var(--tint, #7d8aa0);
+}
+.shelf-swatch i {
+  display: block;
+  width: 17px;
+  height: 25px;
+  border-radius: 2px;
+  background: linear-gradient(160deg, #6b7a99 0%, #3a4358 55%, #22283a 100%);
+  flex: none;
+  position: relative;
+}
+.shelf-swatch i:nth-child(2) { background: linear-gradient(160deg, #9a6b7a 0%, #5a3a48 55%, #34222c 100%); }
+.shelf-swatch i:nth-child(3) { background: linear-gradient(160deg, #6b9a80 0%, #3a5a48 55%, #22342a 100%); }
+
+.shelf-swatch.shelf-ledge { padding-bottom: 13px; }
+.shelf-swatch.shelf-ledge::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: 6px;
+  height: 5px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 42%, #3a3a44), #0e0e12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 3px 6px rgba(0, 0, 0, 0.6);
+}
+.shelf-swatch.shelf-ledge i { box-shadow: 0 5px 5px -3px rgba(0, 0, 0, 0.9); border-radius: 2px 2px 1px 1px; }
+
+.shelf-swatch.shelf-glass i {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.08), 0 0 0 3.5px rgba(255, 255, 255, 0.16);
+  border-radius: 3px;
+}
+.shelf-swatch.shelf-glass { gap: 9px; }
+
+.shelf-swatch.shelf-prints { gap: 7px; }
+.shelf-swatch.shelf-prints i {
+  box-shadow: 0 0 0 2.5px #f4f0e8, 0 4px 8px rgba(0, 0, 0, 0.5);
+  border-radius: 0;
+  height: 22px;
+  margin-bottom: 4px;
+}
+.shelf-swatch.shelf-prints i:nth-child(1) { transform: rotate(-5deg); }
+.shelf-swatch.shelf-prints i:nth-child(2) { transform: rotate(4deg); }
+.shelf-swatch.shelf-prints i:nth-child(3) { transform: rotate(-2deg); }
+
+.shelf-swatch.shelf-tiles { gap: 7px; }
+.shelf-swatch.shelf-tiles i {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.07), 0 0 0 4px rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+.shelf-swatch.shelf-spotlight {
+  background:
+    radial-gradient(90% 120% at 10% 0%, color-mix(in srgb, var(--tint) 34%, transparent) 0%, transparent 65%),
+    #121218;
+}
+.shelf-swatch.shelf-spotlight::before {
+  content: "";
+  position: absolute;
+  top: 7px;
+  left: 8px;
+  width: 3px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--tint);
+}
+
+.shelf-swatch.shelf-neon { gap: 8px; }
+.shelf-swatch.shelf-neon i {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tint) 85%, transparent), 0 0 8px color-mix(in srgb, var(--tint) 60%, transparent);
+}
+
+/* ---------------------------------------------- the way out, at the foot --- */
+
+@media (min-width: 900px) {
+  /*
+   * Pushed to the bottom by every pixel the column can spare, so it is as far
+   * from Home, Movies and the rest as the screen allows.
+   */
+  .rail-out { margin-top: auto; color: var(--text-faint); }
+  .rail-out:hover,
+  .rail-out:focus-visible { color: #ff7b7b; background: rgba(255, 96, 96, 0.13); }
+  .rail-out .rail-glyph svg { width: 22px; height: 22px; }
+}
+
+/* ------------------------------------------------ the size of a cover --- */
+
+/*
+ * Named once, so the shelf can do its sum and every screen can have its own.
+ *
+ * A phone was showing the desktop's 168px covers, two to a screen with a
+ * third cut off. Three to a screen is what a phone shows, and the captions
+ * come down a size to match.
+ */
+:root { --card-w: 168px; --card-wide-w: 300px; }
+body.tv-layout { --card-w: 210px; --card-wide-w: 340px; }
+.row-scroller .card { width: var(--card-w); }
+.row-scroller .card.wide { width: var(--card-wide-w); }
+
+@media (max-width: 760px) {
+  :root { --card-w: 116px; --card-wide-w: 236px; }
+  .row-scroller .card-label { font-size: 12px; margin-top: 6px; }
+  .row-scroller .card-rank { font-size: 46px; }
+}
+
+/* ------------------------------------------ the shelf, seen from above --- */
+
+/*
+ * A plank has a top and a front, and it is the top — the thin, lit edge you
+ * see because you are looking slightly down at it — that makes it a shelf
+ * rather than a stripe. Three pixels of it, lit from the colour it is
+ * drawn in, and a darker face below that goes into shadow at the bottom.
+ *
+ * Everything in this block is scoped to the shelf being on. With it off,
+ * nothing here applies and the rails are exactly as they were.
+ */
+body.shelf-ledge .row-viewport::after {
+  height: 14px;
+  border-radius: 0 0 2px 2px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 50%, #e6dfd2) 0px,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 48%, #b9b1a3) 3px,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 40%, #35333a) 4px,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 30%, #232228) 60%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 18%, #101013) 100%);
+  box-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.7),
+    0 12px 24px rgba(0, 0, 0, 0.7);
+}
+/* The plank is taller now, so the caption steps a little further down. */
+body.shelf-ledge .row-scroller .card-label { margin-top: 26px; }
+
+/*
+ * The numeral on a ranked rail, with a shelf under it.
+ *
+ * It was drawn behind the caption on purpose — an outline, quietly, at the
+ * foot of the card. With the caption pushed down past the plank the two
+ * landed on top of each other, and the figure read as a scrawl through the
+ * words. On a shelf the caption steps aside for it instead: the numeral
+ * stands at the left and the title starts after it.
+ */
+body.shelf-ledge .row-scroller .card:has(.card-rank) .card-label { padding-left: 46px; }
+body.shelf-ledge .row-scroller .card-rank { bottom: 4px; left: -6px; }
+
+@media (max-width: 760px) {
+  body.shelf-ledge .row-scroller .card:has(.card-rank) .card-label { padding-left: 34px; }
+}
+
+/* ------------------------------------------- three more things under a row --- */
+
+/*
+ * Each is drawn on its own layer behind the covers, so its strength is one
+ * opacity — the slider in Settings — and the covers themselves are never
+ * touched. All three find the pictures the way the shelf does, by the width
+ * every cover on a rail shares.
+ */
+
+/* ---- Panel: each row in its own quiet frame ---- */
+
+body.shelf-panel .row {
+  position: relative;
+  isolation: isolate;
+  padding: 16px 0 8px;
+  margin: 0 20px 24px;
+  border-radius: 18px;
+}
+body.shelf-panel .row::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
+    color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 45%, rgba(255, 255, 255, 0.14));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 14px 34px rgba(0, 0, 0, 0.35);
+  opacity: var(--shelf-strength, 0.5);
+  pointer-events: none;
+}
+body.shelf-panel .row-header { padding: 0 22px; }
+body.shelf-panel .row-scroller { padding-left: 22px; padding-right: 22px; }
+body.shelf-panel .row-arrow.left { border-radius: 18px 0 0 18px; }
+body.shelf-panel .row-arrow.right { border-radius: 0 18px 18px 0; }
+
+/* ---- Band: a ribbon of colour running behind the covers ---- */
+
+body.shelf-band .row-viewport { isolation: isolate; }
+body.shelf-band .row-viewport::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  /* Through the middle of the pictures: from a third of the way down to
+     just past two-thirds. */
+  top: calc(6px + var(--card-w) * 3 / 2 * 0.32);
+  height: calc(var(--card-w) * 3 / 2 * 0.42);
+  background:
+    linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 70%, transparent) 12%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 70%, transparent) 88%,
+      transparent 100%);
+  opacity: var(--shelf-strength, 0.5);
+  pointer-events: none;
+}
+body.shelf-band .row-viewport:has(.row-scroller.wide)::before {
+  top: calc(6px + var(--card-wide-w) * 9 / 16 * 0.32);
+  height: calc(var(--card-wide-w) * 9 / 16 * 0.42);
+}
+/* Covers on a band throw a shadow onto it. */
+body.shelf-band .card-poster { box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6); }
+
+/* ---- Underglow: light spilling out from beneath the covers ---- */
+
+body.shelf-underglow .row-viewport { isolation: isolate; }
+body.shelf-underglow .row-scroller { padding-bottom: 26px; }
+body.shelf-underglow .row-viewport::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: -1;
+  /* Starting just above the bottom of the pictures and spilling below. */
+  top: calc(6px + var(--card-w) * 3 / 2 - 10px);
+  height: 34px;
+  background:
+    linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 90%, white) 10%,
+      color-mix(in srgb, var(--shelf-tint, var(--accent, #7d8aa0)) 90%, white) 90%,
+      transparent 100%);
+  filter: blur(16px);
+  opacity: var(--shelf-strength, 0.5);
+  pointer-events: none;
+}
+body.shelf-underglow .row-viewport:has(.row-scroller.wide)::before {
+  top: calc(6px + var(--card-wide-w) * 9 / 16 - 10px);
+}
+
+/* The shelf's rails start 10px down, so a design combined with it starts there too. */
+body.shelf-ledge.shelf-band .row-viewport::before,
+body.shelf-ledge.shelf-underglow .row-viewport::before { margin-top: 4px; }
+
+@media (max-width: 760px) {
+  body.shelf-panel .row { margin-left: 8px; margin-right: 8px; }
+  body.shelf-panel .row-header { padding: 0 14px; }
+  body.shelf-panel .row-scroller { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ---- Their panes in Settings ---- */
+
+.shelf-swatch.shelf-panel {
+  background: #101016;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--tint) 45%, rgba(255, 255, 255, 0.14)),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.shelf-swatch.shelf-band::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 40%;
+  height: 34%;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tint) 70%, transparent) 15%, color-mix(in srgb, var(--tint) 70%, transparent) 85%, transparent);
+}
+
+.shelf-swatch.shelf-underglow::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 5px;
+  height: 10px;
+  background: color-mix(in srgb, var(--tint) 90%, white);
+  filter: blur(6px);
+}
+
+/* ---- The strength slider ---- */
+
+.shelf-strength {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.shelf-strength input[type="range"] {
+  flex: 1;
+  height: 28px;
+  margin: 0;
+  accent-color: var(--accent, #7d8aa0);
+}
+.shelf-strength-value {
+  flex: none;
+  min-width: 42px;
+  text-align: right;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------ the episode the show is at --- */
+
+/*
+ * Pointed at, not merely measured.
+ *
+ * A progress bar under a still says how far; it does not say "this one" from
+ * across the room. The row takes a tint of the library colour and a rule
+ * down its edge, the still carries the same two words the home screen uses,
+ * and the time left stands where the running time would.
+ */
+.episode.current {
+  background: color-mix(in srgb, var(--accent, #7d8aa0) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent, #7d8aa0);
+}
+.episode.current:hover {
+  background: color-mix(in srgb, var(--accent, #7d8aa0) 16%, var(--bg-raised));
+}
+.episode.current .episode-number { color: var(--accent, #7d8aa0); }
+
+.episode-now {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--accent, #7d8aa0);
+  color: #08080c;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+/* On a tile the number already holds the top-left corner. */
+.episode-tile .episode-now { left: auto; right: 8px; top: 8px; }
+.episode-tile.current .episode-tile-still {
+  box-shadow: 0 0 0 2px var(--accent, #7d8aa0), 0 12px 30px rgba(0, 0, 0, 0.5);
+}
+.episode-tile.current .episode-tile-title { color: var(--accent, #7d8aa0); }
+
+.episode-left { color: var(--accent, #7d8aa0); font-weight: 600; }
+
+/* ------------------------------------------------------------ my lists --- */
+
+/*
+ * A page for the lists, rather than a rail passed on the way somewhere else.
+ * The two lists share one segmented control, favourites first.
+ */
+.lists-toggle { padding: 0 42px 22px; }
+
+.lists-empty {
+  margin: 30px 42px 80px;
+  padding: 34px 26px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
+}
+.lists-empty strong { display: block; font-size: 17px; margin-bottom: 8px; }
+.lists-empty p { margin: 0 auto; max-width: 420px; color: var(--text-dim); line-height: 1.55; font-size: 14px; }
+
+/* On a comics run, the way onto the watchlist sits at the end of the header. */
+.comic-later { margin-left: auto; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .lists-toggle { padding: 0 16px 16px; }
+  .lists-empty { margin: 20px 16px 60px; }
+  .comic-later { margin-left: 0; }
+}
+
+/* ------------------------------------------------ what the sidebar is of --- */
+
+/*
+ * Glass: the backdrop shows through, blurred and a little brighter, with a
+ * hairline of light down the inner edge where glass catches it. Clear: no
+ * strip at all. Both only where the sidebar exists; a phone's bar along the
+ * bottom is its own thing.
+ */
+@media (min-width: 900px) {
+  body.rail-glass:not(.tv-layout) .rail {
+    background: rgba(16, 16, 24, 0.42);
+    -webkit-backdrop-filter: blur(26px) saturate(170%);
+    backdrop-filter: blur(26px) saturate(170%);
+    border-right: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04), 6px 0 30px rgba(0, 0, 0, 0.25);
+  }
+  body.rail-glass:not(.tv-layout) .rail-item:hover,
+  body.rail-glass:not(.tv-layout) .rail-me:hover { background: rgba(255, 255, 255, 0.14); }
+  body.rail-glass:not(.tv-layout) .rail-item.on,
+  body.rail-glass:not(.tv-layout) .rail-me.on { background: rgba(255, 255, 255, 0.12); }
+
+  body.rail-clear:not(.tv-layout) .rail {
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-right: none;
+  }
+  /* With nothing behind them the icons need a little more presence. */
+  body.rail-clear:not(.tv-layout) .rail-item { color: var(--text-dim); }
+  body.rail-clear:not(.tv-layout) .rail-item.on,
+  body.rail-clear:not(.tv-layout) .rail-me.on { background: rgba(255, 255, 255, 0.1); }
+}
+
+/* ---- The panes in Settings: a column against the backdrop ---- */
+
+.rail-swatch {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 52px;
+  min-height: 52px;
+  flex: none;
+  border-radius: 7px;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 90% at 70% 20%, color-mix(in srgb, var(--tint, #7d8aa0) 55%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 70% at 20% 90%, color-mix(in srgb, var(--tint, #7d8aa0) 35%, transparent) 0%, transparent 70%),
+    #0b0b0f;
+}
+/* The column, with three marks for icons. */
+.rail-swatch::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 16px;
+  background: rgba(8, 8, 12, 0.92);
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+}
+.rail-swatch.rail-glass::before {
+  background: rgba(16, 16, 24, 0.42);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  border-right-color: rgba(255, 255, 255, 0.16);
+}
+.rail-swatch.rail-clear::before { background: transparent; border-right: none; }
+.rail-swatch i {
+  position: absolute;
+  left: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.rail-swatch i:nth-child(1) { top: 10px; border-radius: 50%; }
+.rail-swatch i:nth-child(2) { top: 24px; }
+.rail-swatch i:nth-child(3) { top: 36px; }
+
+/* --------------------------------------------- the dials on the surfaces --- */
+
+/* The backdrop, at the strength the owner set; the one design with its own
+   opacity has the strength folded into it above. */
+body[class*="bg-"]:not(.bg-grid)::before { opacity: var(--bg-strength, 1); }
+
+/* The sidebar's strip, at the opacity the owner set, for either look. */
+@media (min-width: 900px) {
+  body:not(.tv-layout):not(.rail-clear) .rail {
+    background: rgba(8, 8, 12, var(--rail-alpha, 0.92));
+  }
+  body.rail-glass:not(.tv-layout) .rail {
+    background: rgba(16, 16, 24, var(--rail-alpha, 0.42));
+  }
 }

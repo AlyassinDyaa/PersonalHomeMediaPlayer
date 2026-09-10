@@ -8,6 +8,11 @@ import RequestsPanel from './RequestsPanel.jsx';
 import ProfilesPanel from './ProfilesPanel.jsx';
 import { headerPreview, brandColor, BRAND_COLORS } from '../branding.js';
 import { BACKGROUNDS, BACKDROP_COLOURS, backgroundClass } from '../backgrounds.js';
+import {
+  SHELF_STYLES, SHELF_ROWS, SHELF_COLOURS, SHELF_ROWS_WITH_STRENGTH,
+  shelfStyleClass, shelfRowClass,
+} from '../shelfStyles.js';
+import { RAIL_STYLES, railStyleClass } from '../railStyles.js';
 
 /**
  * Library settings: which folders to scan, and running a scan with live
@@ -32,14 +37,14 @@ const SHELF_LAYOUT_CHOICES = [
  * of the household they are.
  */
 const SETTINGS_TABS = [
-  { id: 'library', label: 'Folders', ownerOnly: true, hint: 'Where your movies and shows live, and how they are arranged' },
+  { id: 'library', label: 'Appearance', ownerOnly: true, hint: 'How the library looks — its name, colour, backdrop and shelves' },
   { id: 'collections', label: 'Collections', ownerOnly: true, hint: 'Your own shelves on the home screen' },
   { id: 'comics', label: 'Comics', ownerOnly: true, hint: 'Where your comics live, and whether the tab is shown' },
   { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
   { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
   { id: 'profiles', label: 'Profiles', hint: 'Who is watching, and what each of them can see' },
   { id: 'requests', label: 'Requests', hint: 'Films and shows people would like added' },
-  { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Scanning, storage, and the state of the library' },
+  { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Folders, scanning, storage, and the state of the library' },
 ];
 
 export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
@@ -55,6 +60,8 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   // 'saved' after pasting one, 'included' after going back to the shipped key.
   const [keySaved, setKeySaved] = useState('');
   const [name, setName] = useState('');
+  /* The line under the name; empty means the door makes a sentence of it. */
+  const [subtitle, setSubtitle] = useState('');
   const [nameSaved, setNameSaved] = useState(false);
   const [color, setColor] = useState('');
   const [error, setError] = useState(null);
@@ -78,6 +85,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
         setStats(loadedStats);
         setSuggestions(pending);
         setName(loadedSettings.libraryName ?? '');
+        setSubtitle(loadedSettings.librarySubtitle ?? '');
         setColor(brandColor(loadedSettings.libraryColor));
       })
       .catch((err) => setError(err.message));
@@ -106,7 +114,11 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
   const saveName = async () => {
     try {
-      const saved = await api.saveSettings({ libraryName: name, libraryColor: color });
+      const saved = await api.saveSettings({
+        libraryName: name,
+        librarySubtitle: subtitle,
+        libraryColor: color,
+      });
       setSettings(saved);
       setNameSaved(true);
       setError(null);
@@ -364,31 +376,6 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
         {active === 'library' && (
           <>
           <details className="settings-card" open>
-            <summary><h2>Folders</h2></summary>
-            <p className="settings-hint">
-              Point at any folder containing movies or TV shows. Sub-folders are searched
-              automatically, and nothing needs renaming.
-            </p>
-
-            {!hasRoots && (
-              <p className="settings-empty">No folders added yet.</p>
-            )}
-
-            {settings.rootsStatus.map((root) => (
-              <div className="root-row" key={root.path}>
-                <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
-                <code className="root-path">{root.path}</code>
-                {!root.available && <span className="root-warn">not connected</span>}
-                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
-              </div>
-            ))}
-
-            <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
-              + Add folder
-            </button>
-          </details>
-
-          <details className="settings-card" open>
             <summary><h2>Name</h2></summary>
             <p className="settings-hint">
               Your name appears in the header, so the library reads as yours.
@@ -405,6 +392,27 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
               />
               <button className="btn btn-secondary" onClick={saveName}>Save</button>
             </div>
+
+            {/*
+              * A second line, for when the name is initials.
+              *
+              * Left empty the door says "<name>'s Library", which is right
+              * when the name is a person's. Filled in, the name stands on its
+              * own and this explains it underneath, in the same colour.
+              */}
+            <div className="key-row">
+              <input
+                className="key-input"
+                value={subtitle}
+                placeholder="A line underneath — optional"
+                maxLength={60}
+                spellCheck={false}
+                onChange={(event) => { setSubtitle(event.target.value); setNameSaved(false); }}
+                onKeyDown={(event) => { if (event.key === 'Enter') saveName(); }}
+              />
+              <button className="btn btn-secondary" onClick={saveName}>Save</button>
+            </div>
+
             <div className="color-row">
               <span className="settings-hint" style={{ margin: 0 }}>Colour</span>
               {BRAND_COLORS.map((swatch) => (
@@ -522,6 +530,28 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
                 </label>
               </div>
 
+              {(settings.background ?? 'flat') !== 'flat' && (
+                <label className="shelf-strength">
+                  <span className="settings-hint" style={{ margin: 0 }}>Strength</span>
+                  <input
+                    type="range"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={settings.backgroundStrength ?? 100}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setSettings((previous) => ({ ...previous, backgroundStrength: value }));
+                    }}
+                    onPointerUp={(event) => saveToggle('backgroundStrength', Number(event.target.value))}
+                    onKeyUp={(event) => saveToggle('backgroundStrength', Number(event.target.value))}
+                    onTouchEnd={(event) => saveToggle('backgroundStrength', Number(event.target.value))}
+                    aria-label="Backdrop strength"
+                  />
+                  <span className="shelf-strength-value">{settings.backgroundStrength ?? 100}%</span>
+                </label>
+              )}
+
               <p className="settings-hint" style={{ margin: '10px 0 0' }}>
                 Everybody watching sees the same one.{' '}
                 {(settings.backgroundColor ?? '')
@@ -529,6 +559,218 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
                   : 'It takes its colour from whatever is on screen, so it follows the film rather than sitting on top of it.'}
               </p>
             </div>
+          </details>
+
+          {/*
+            * How every row of covers is drawn.
+            *
+            * Chosen by looking, like the backdrop: each pane is three small
+            * covers given the same treatment the real shelves get, so the
+            * word underneath is a caption rather than the whole description.
+            */}
+          <details className="settings-card" open>
+            <summary><h2>How shelves look</h2></summary>
+            <p className="settings-hint">
+              Every row of covers &mdash; your collections and the genres alike
+              &mdash; is drawn from two choices that go together any way you like:
+              what each cover looks like, and what the row stands on. The covers
+              stay the same size, in the same order, whichever you pick.
+            </p>
+
+            <span className="settings-hint" style={{ margin: '0 0 8px' }}>Each cover</span>
+            <div className="bg-options">
+              {SHELF_STYLES.map(([id, label, hint]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={
+                    (settings.shelfStyle ?? 'plain') === id
+                      ? 'bg-option selected' : 'bg-option'
+                  }
+                  title={hint}
+                  aria-pressed={(settings.shelfStyle ?? 'plain') === id}
+                  onClick={() => saveToggle('shelfStyle', id)}
+                >
+                  <span
+                    className={'shelf-swatch ' + (shelfStyleClass(id) || 'shelf-plain')}
+                    style={{ '--tint': settings.shelfColor || settings.backgroundColor || color }}
+                    aria-hidden="true"
+                  >
+                    <i /><i /><i />
+                  </span>
+                  <span className="bg-option-name">{label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="settings-hint" style={{ margin: '8px 0 16px' }}>
+              {(SHELF_STYLES.find(([id]) => id === (settings.shelfStyle ?? 'plain')) ?? SHELF_STYLES[0])[2]}.
+            </p>
+
+            <span className="settings-hint" style={{ margin: '0 0 8px' }}>Under each row</span>
+            <div className="bg-options">
+              {SHELF_ROWS.map(([id, label, hint]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={
+                    (settings.shelfRow ?? 'none') === id
+                      ? 'bg-option selected' : 'bg-option'
+                  }
+                  title={hint}
+                  aria-pressed={(settings.shelfRow ?? 'none') === id}
+                  onClick={() => saveToggle('shelfRow', id)}
+                >
+                  <span
+                    className={'shelf-swatch ' + (shelfRowClass(id) || 'shelf-plain')}
+                    style={{ '--tint': settings.shelfColor || settings.backgroundColor || color }}
+                    aria-hidden="true"
+                  >
+                    <i /><i /><i />
+                  </span>
+                  <span className="bg-option-name">{label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="settings-hint" style={{ margin: '8px 0 0' }}>
+              {(SHELF_ROWS.find(([id]) => id === (settings.shelfRow ?? 'none')) ?? SHELF_ROWS[0])[2]}.
+            </p>
+
+            {/*
+              * How much of it.
+              *
+              * The value changes as the thumb moves, so the number beside it
+              * keeps up, and is written once the thumb is let go — a save on
+              * every pixel of a drag would be a hundred saves for one choice.
+              */}
+            {SHELF_ROWS_WITH_STRENGTH.has(settings.shelfRow ?? 'none') && (
+              <label className="shelf-strength">
+                <span className="settings-hint" style={{ margin: 0 }}>Strength</span>
+                <input
+                  type="range"
+                  min={10}
+                  max={100}
+                  step={5}
+                  value={settings.shelfStrength ?? 50}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setSettings((previous) => ({ ...previous, shelfStrength: value }));
+                  }}
+                  onPointerUp={(event) => saveToggle('shelfStrength', Number(event.target.value))}
+                  onKeyUp={(event) => saveToggle('shelfStrength', Number(event.target.value))}
+                  onTouchEnd={(event) => saveToggle('shelfStrength', Number(event.target.value))}
+                  aria-label="Strength"
+                />
+                <span className="shelf-strength-value">{settings.shelfStrength ?? 50}%</span>
+              </label>
+            )}
+
+            {/* The colour the shelf, the spotlight and the pins are drawn in. */}
+            <div className="backdrop-colour">
+              <span className="settings-hint" style={{ margin: 0 }}>Colour</span>
+              <button
+                type="button"
+                className={(settings.shelfColor ?? '') ? 'backdrop-follow' : 'backdrop-follow selected'}
+                onClick={() => saveToggle('shelfColor', '')}
+              >
+                Follow the artwork
+              </button>
+
+              {SHELF_COLOURS.filter(([value]) => value).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={value === settings.shelfColor ? 'swatch selected' : 'swatch'}
+                  style={{ background: value }}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={value === settings.shelfColor}
+                  onClick={() => saveToggle('shelfColor', value)}
+                />
+              ))}
+
+              <label
+                className="swatch custom"
+                title="Custom colour"
+                style={{ background: settings.shelfColor || '#0b0b0f' }}
+              >
+                <input
+                  type="color"
+                  value={settings.shelfColor || '#a8773f'}
+                  onChange={(event) => saveToggle('shelfColor', event.target.value)}
+                />
+              </label>
+            </div>
+
+            <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+              {(settings.shelfColor ?? '')
+                ? 'The shelf keeps this colour on every screen.'
+                : 'The shelf takes its colour from whatever is on screen, like the backdrop.'}
+              {' '}Everybody watching sees the same shelves.
+            </p>
+          </details>
+
+          {/*
+            * What the sidebar is made of.
+            *
+            * Three panes, each a small picture of the column against the
+            * backdrop, because "glass" means nothing until it is seen.
+            */}
+          <details className="settings-card" open>
+            <summary><h2>Sidebar</h2></summary>
+            <p className="settings-hint">
+              The column of sections down the left of a wide screen. A phone
+              keeps its bar along the bottom either way.
+            </p>
+            <div className="bg-options">
+              {RAIL_STYLES.map(([id, label, hint]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={
+                    (settings.railStyle ?? 'glass') === id
+                      ? 'bg-option selected' : 'bg-option'
+                  }
+                  title={hint}
+                  aria-pressed={(settings.railStyle ?? 'glass') === id}
+                  onClick={() => saveToggle('railStyle', id)}
+                >
+                  <span
+                    className={'rail-swatch ' + (railStyleClass(id) || 'rail-solid')}
+                    style={{ '--tint': settings.backgroundColor || color }}
+                    aria-hidden="true"
+                  >
+                    <i /><i /><i />
+                  </span>
+                  <span className="bg-option-name">{label}</span>
+                </button>
+              ))}
+            </div>
+            {(settings.railStyle ?? 'glass') !== 'clear' && (
+              <label className="shelf-strength">
+                <span className="settings-hint" style={{ margin: 0 }}>Opacity</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={settings.railOpacity ?? 45}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setSettings((previous) => ({ ...previous, railOpacity: value }));
+                  }}
+                  onPointerUp={(event) => saveToggle('railOpacity', Number(event.target.value))}
+                  onKeyUp={(event) => saveToggle('railOpacity', Number(event.target.value))}
+                  onTouchEnd={(event) => saveToggle('railOpacity', Number(event.target.value))}
+                  aria-label="Sidebar opacity"
+                />
+                <span className="shelf-strength-value">{settings.railOpacity ?? 45}%</span>
+              </label>
+            )}
+
+            <p className="settings-hint" style={{ margin: '10px 0 0' }}>
+              {(RAIL_STYLES.find(([id]) => id === (settings.railStyle ?? 'glass')) ?? RAIL_STYLES[1])[2]}.
+              Everybody watching sees the same one.
+            </p>
           </details>
 
           {/*
@@ -941,6 +1183,31 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'maintenance' && (
           <>
+          <details className="settings-card" open>
+            <summary><h2>Folders</h2></summary>
+            <p className="settings-hint">
+              Point at any folder containing movies or TV shows. Sub-folders are searched
+              automatically, and nothing needs renaming.
+            </p>
+
+            {!hasRoots && (
+              <p className="settings-empty">No folders added yet.</p>
+            )}
+
+            {settings.rootsStatus.map((root) => (
+              <div className="root-row" key={root.path}>
+                <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
+                <code className="root-path">{root.path}</code>
+                {!root.available && <span className="root-warn">not connected</span>}
+                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
+              </div>
+            ))}
+
+            <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
+              + Add folder
+            </button>
+          </details>
+
           <details className="settings-card" open>
             <summary><h2>Scan</h2></summary>
 
