@@ -8,7 +8,7 @@
  * across versions, and the renderer's module format is independent of this.
  */
 
-const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, screen, Tray, Menu, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { MpvPlayer, resolveMpvPath } = require('./mpv.cjs');
@@ -29,6 +29,21 @@ const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || null;
 const PROGRESS_INTERVAL_MS = 5000;
 
 let mainWindow = null;
+/*
+ * The library outlives its window.
+ *
+ * Closing the window used to quit the app, and quitting the app stops the
+ * server every other device in the house is watching through. So shutting the
+ * window on the computer turned the television, the tablet and both phones
+ * white, with nothing anywhere to say why — no crash, no log, just a machine
+ * that had been told to stop.
+ *
+ * The window is the way in to the library, not the library itself. It now
+ * hides, an icon by the clock brings it back, and quitting is something asked
+ * for rather than something that happens on the way past.
+ */
+let tray = null;
+let quitting = false;
 let playerWindow = null;
 let overlayWindow = null;
 let player = null;
@@ -375,6 +390,16 @@ function createMainWindow() {
 
   mainWindow.webContents.on('console-message', (event, level, message) => {
     if (level >= 2) console.error('[renderer] ' + message);
+  });
+
+  /*
+   * Put away rather than shut down — unless the app is genuinely quitting,
+   * in which case this must not stand in the way of it.
+   */
+  mainWindow.on('close', (event) => {
+    if (quitting || !tray) return;
+    event.preventDefault();
+    mainWindow.hide();
   });
 
   mainWindow.on('focus', () => { mainFocused = true; syncOverlayVisibility(); });
@@ -1312,6 +1337,47 @@ function logStartupError(error) {
   return { detail, logPath };
 }
 
+/** Bring the window back, making a new one if it has genuinely gone. */
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+/**
+ * The icon by the clock, and the only way out.
+ *
+ * Without it there would be no way to reach a hidden window and no way to
+ * stop the library at all, so everything above is conditional on this having
+ * worked: if the icon cannot be made, closing the window quits as it always
+ * did, which is worse but is never a trap.
+ */
+function createTray() {
+  if (tray) return;
+  try {
+    const image = nativeImage
+      .createFromPath(path.join(HERE, '..', 'dist-web', 'icon-192.png'));
+    if (image.isEmpty()) return;
+
+    tray = new Tray(image.resize({ width: 16, height: 16 }));
+    tray.setToolTip('The library is running');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open the library', click: showMainWindow },
+      { type: 'separator' },
+      { label: 'Quit — stops every device', click: () => { quitting = true; app.quit(); } },
+    ]));
+    tray.on('click', showMainWindow);
+    tray.on('double-click', showMainWindow);
+  } catch {
+    // No icon, so no hiding: the old behaviour is the safe one.
+    tray = null;
+  }
+}
+
 app.whenReady().then(async () => {
   try {
     await startApiServer();
@@ -1326,6 +1392,8 @@ app.whenReady().then(async () => {
   }
 
   registerIpc();
+  // Before the window, so its close handler already knows there is a way back.
+  createTray();
   createMainWindow();
 
   app.on('activate', () => {
@@ -1334,10 +1402,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
+  // With an icon by the clock there is still a way back in and a way out, so
+  // the library keeps serving the house with no window open on the computer.
+  if (tray) return;
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', async () => {
+  quitting = true;
+  if (tray) { tray.destroy(); tray = null; }
   if (player) await player.stop();
   stopApiServer();
 });

@@ -25,11 +25,28 @@ import './touch.css';
  */
 function installOfflinePage() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
-  window.addEventListener('load', () => {
-    // Nothing depends on the registration succeeding; the library works
-    // exactly as before without it, only less gracefully when it is asleep.
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
+
+  // Nothing depends on the registration succeeding; the library works
+  // exactly as before without it, only less gracefully when it is asleep.
+  const register = () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); };
+
+  /*
+   * Waiting for a load event that has already happened is waiting for ever.
+   *
+   * This used to be a bare listener on 'load'. It is reached after the first
+   * call to the server has come back, and over a mesh address that round trip
+   * is slower than the page takes to finish loading — so the event had already
+   * fired, the listener was attached to something that never came again, and
+   * the worker was never installed at all. On the desk, where the server
+   * answers in a millisecond, it registered every time and looked fine.
+   *
+   * The cost was not the worker. It was the offline page the worker keeps: a
+   * phone that never installed one has nothing whatsoever to draw when the
+   * computer at home is off, and an app opened from the Home Screen has no
+   * address bar to explain itself in. That is the white screen.
+   */
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
 }
 
 /**
@@ -109,9 +126,12 @@ applyTelevision();
 // the way instead. Waits for the first press, which is all a browser will allow.
 fullScreenOnTelevision();
 
+// Before the first call to the server, not after it: the offline page is
+// wanted precisely when that call is the thing that fails.
+installOfflinePage();
+
 initApi()
   .then((info) => {
-    installOfflinePage();
     watchForNewerBuild();
     createRoot(document.getElementById('root')).render(
       <ErrorBoundary>
