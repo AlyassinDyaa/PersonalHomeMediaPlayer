@@ -63,7 +63,18 @@ export function Card({
     >
       {item.accent && <div className="card-glow" style={{ background: item.accent }} />}
       {rank !== null && <span className="card-rank" aria-hidden="true">{rank}</span>}
-      <div className="card-poster">
+      {/*
+        * The poster carries the picture twice.
+        *
+        * Once as itself, shown whole; and once as this background, which the
+        * stylesheet blurs to fill whatever the first one does not reach. A
+        * picture already the right shape covers the card exactly and the fill
+        * never shows, so this costs nothing in the ordinary case.
+        */}
+      <div
+        className="card-poster"
+        style={src ? { backgroundImage: 'url("' + src + '")' } : undefined}
+      >
         {/* Ticking is the whole interaction while a shelf is being gathered. */}
         {picking && <span className="card-tick">{ticked ? '✓' : ''}</span>}
         {/* Among the handful that arrived most recently; see recent.js. */}

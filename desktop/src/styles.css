@@ -6403,3 +6403,55 @@ body[class*="bg-"]:not(.bg-grid)::before { opacity: var(--bg-strength, 1); }
     background: rgba(16, 16, 24, var(--rail-alpha, 0.42));
   }
 }
+
+/* ------------------------------------------- a cover of the wrong shape --- */
+
+/*
+ * Artwork does not all arrive the same shape.
+ *
+ * A card is 16 by 9 and most backdrops are too, but not all of them: the
+ * one for Teenage Mutant Ninja Turtles is 780 by 585, which is 4 by 3. Told
+ * to cover the card it was scaled up until it did, and a quarter of it —
+ * the top and the bottom — was thrown away. Nothing was off centre, and it
+ * still sat wrong beside three neighbours showing themselves in full.
+ *
+ * So the picture is fitted inside the card rather than cropped to it, and a
+ * blurred copy of itself fills what is left over. One that is already the
+ * right shape reaches every edge and the copy behind it never shows.
+ */
+.card.wide .card-poster {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.card.wide .card-poster::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* The parent's own background, blurred and pushed back. Scaled up so the
+     blur has something to bleed from and no soft edge shows at the sides. */
+  background: inherit;
+  filter: blur(20px) saturate(130%) brightness(0.5);
+  transform: scale(1.2);
+  pointer-events: none;
+}
+
+.card.wide .card-poster img {
+  position: relative;
+  z-index: 1;
+  object-fit: contain;
+}
+
+/*
+ * Everything drawn over the picture has to stay over it.
+ *
+ * The picture is raised a layer to sit above the blur behind it, which would
+ * otherwise leave the resume bar and the dismiss control underneath it — the
+ * control being the one a finger is aiming for.
+ */
+.card.wide .card-progress,
+.card.wide .card-remove,
+.card.wide .card-new,
+.card.wide .card-tick { z-index: 2; }
