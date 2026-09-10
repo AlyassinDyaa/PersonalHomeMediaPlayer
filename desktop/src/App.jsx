@@ -22,6 +22,7 @@ import SearchScreen from './components/SearchScreen.jsx';
 import Skeleton from './components/Skeleton.jsx';
 import { headerPreview, brandColor } from './branding.js';
 import { rememberArrivals, isRecent } from './recent.js';
+import { pickHeroes, rememberHeroes } from './hero.js';
 import { useSwipe } from './useSwipe.js';
 import { usePull, bothGestures } from './usePull.js';
 import { useRemote } from './useRemote.js';
@@ -469,24 +470,13 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
    * and the shuffle happens inside that — varied every time, without ever
    * being embarrassing.
    */
-  const heroPicks = useMemo(() => {
-    const withArt = items.filter((item) => item.backdrop && item.overview);
-    const withLogo = withArt.filter((item) => item.logo);
-    const pool = withLogo.length >= 10 ? withLogo : withArt;
+  const heroPicks = useMemo(() => pickHeroes(items, 10), [items]);
 
-    const field = [...pool]
-      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
-      .slice(0, 60);
-
-    // Fisher-Yates: every order equally likely, which sorting by a random key
-    // is not — and it is three lines rather than a dependency.
-    for (let i = field.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [field[i], field[j]] = [field[j], field[i]];
-    }
-
-    return field.slice(0, 10);
-  }, [items]);
+  /* Noted after the fact, not while choosing: a memo that wrote to storage
+     would be doing something other than working out a value. */
+  useEffect(() => {
+    rememberHeroes(heroPicks.map((item) => item.id));
+  }, [heroPicks]);
 
   const [heroIndex, setHeroIndex] = useState(0);
 

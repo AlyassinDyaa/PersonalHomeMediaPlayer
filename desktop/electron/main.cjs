@@ -44,6 +44,30 @@ let mainWindow = null;
  */
 let tray = null;
 let quitting = false;
+
+/**
+ * The library's mark, as an image rather than as a path.
+ *
+ * A path was the obvious thing and was wrong: the file lives inside app.asar,
+ * which is a sealed archive. Electron reads it happily, but the icon of a
+ * window is handed to Windows itself, and Windows knows nothing about asar —
+ * it found no file, and fell back to the toolkit's own icon. So the packaged
+ * app wore Electron's atom while the executable beside it wore ours, which is
+ * the difference that showed up the moment anything was pinned.
+ *
+ * Read here instead and handed over as pixels, which sidesteps the question
+ * of what can read what.
+ */
+function libraryIcon(size = null) {
+  try {
+    const png = fs.readFileSync(path.join(HERE, '..', 'dist-web', 'icon-512.png'));
+    const image = nativeImage.createFromBuffer(png);
+    if (image.isEmpty()) return null;
+    return size ? image.resize({ width: size, height: size }) : image;
+  } catch {
+    return null;
+  }
+}
 let playerWindow = null;
 let overlayWindow = null;
 let player = null;
@@ -356,7 +380,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     // Packaged, Windows takes this from the executable; running from source
     // there is no executable to take it from, so it is said here as well.
-    icon: path.join(HERE, '..', 'build', 'icon.ico'),
+    icon: libraryIcon() ?? undefined,
     width: 1500,
     height: 940,
     minWidth: 900,
@@ -1362,15 +1386,10 @@ function showMainWindow() {
 function createTray() {
   if (tray) return;
   try {
-    /* The .ico first, which carries a 16px drawing meant for this size;
-       the web icon is the fallback when running from a tree without one. */
-    let image = nativeImage.createFromPath(path.join(HERE, '..', 'build', 'icon.ico'));
-    if (image.isEmpty()) {
-      image = nativeImage.createFromPath(path.join(HERE, '..', 'dist-web', 'icon-192.png'));
-    }
-    if (image.isEmpty()) return;
+    const image = libraryIcon(16);
+    if (!image) return;
 
-    tray = new Tray(image.resize({ width: 16, height: 16 }));
+    tray = new Tray(image);
     tray.setToolTip('The library is running');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Open the library', click: showMainWindow },
@@ -1384,6 +1403,17 @@ function createTray() {
     tray = null;
   }
 }
+
+/*
+ * What Windows files this program under.
+ *
+ * Without one it invents an id from the path of whatever launched the
+ * process, so a window and the shortcut pinned for it can end up filed as
+ * two different programs — which is why a pinned copy could show one icon
+ * and the running window another, and why the two would not group together.
+ * Said once, before any window exists, because a window takes it at birth.
+ */
+app.setAppUserModelId('com.alyassindyaa.personal-home-media-player');
 
 app.whenReady().then(async () => {
   try {
