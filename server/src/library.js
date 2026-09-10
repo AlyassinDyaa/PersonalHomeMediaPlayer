@@ -222,6 +222,10 @@ export function getItem(id, profile) {
     "SELECT 1 FROM watchlist WHERE profile_id = ? AND kind = 'item' AND target_id = ?",
   ).get(profileId, id));
 
+  item.backlog = Boolean(db.prepare(
+    'SELECT 1 FROM backlog WHERE profile_id = ? AND item_id = ?',
+  ).get(profileId, id));
+
   const videos = db.prepare(`
     SELECT v.*, p.position, p.watched, p.updated_at AS progress_at
     FROM videos v
@@ -369,10 +373,23 @@ export function continueWatching(limit = 20, profile) {
 
   const merged = [...rows, ...nextUp].sort((a, b) => b.updated_at - a.updated_at);
 
+  /*
+   * Anything set aside is not offered, including the next episode of it.
+   *
+   * Filtered here rather than in the two queries above so it applies to both
+   * of them, and so a title on the backlog cannot come back through the
+   * "your last episode is finished" path.
+   */
+  const setAside = new Set(getDb()
+    .prepare('SELECT item_id FROM backlog WHERE profile_id = ?')
+    .all(profileId)
+    .map((row) => row.item_id));
+
   const seen = new Set();
   const result = [];
   for (const row of merged) {
     if (seen.has(row.item_id)) continue;
+    if (setAside.has(row.item_id)) continue;
     seen.add(row.item_id);
     result.push({
       item: {
@@ -437,6 +454,16 @@ export function saveProgress({ videoId, position, duration, profile }) {
       watched = excluded.watched,
       updated_at = excluded.updated_at
   `).run(profileId, videoId, video.item_id, position, total, watched, Date.now());
+
+  /*
+   * Watching it again is the end of it being set aside.
+   *
+   * Without this a title could sit on the backlog and in the middle of being
+   * watched at the same time, and Continue Watching — which skips the backlog
+   * — would be hiding the very thing being played.
+   */
+  db.prepare('DELETE FROM backlog WHERE profile_id = ? AND item_id = ?')
+    .run(profileId, video.item_id);
 
   // Cache the runtime on the video the first time we learn it from playback.
   // This one is a fact about the file, not about the viewer, so it is not
@@ -565,6 +592,71 @@ export function setWatchlist(kind, id, on, profile) {
       .run(profileId, kind, id);
   }
   return { kind, id, watchlist: Boolean(on) };
+}
+
+/**
+ * What was started and set aside, newest first.
+ *
+ * Shaped like Continue Watching, because it is the same thing seen from the
+ * other side and the page draws it the same way: where you got to, and in
+ * which episode. A title whose progress has since been cleared keeps its
+ * place on the shelf with nothing to resume, which is honest — it says the
+ * title was set aside, not that it was never begun.
+ */
+export function listBacklog(profile) {
+  const db = getDb();
+  const profileId = idOf(profile);
+  const rated = certificationFilter(profile);
+
+  const rows = db.prepare(`
+    SELECT i.*, b.added_at AS set_aside_at
+    FROM backlog b
+    JOIN items i ON i.id = b.item_id
+    WHERE b.profile_id = ? ${rated.sql}
+    ORDER BY b.added_at DESC
+  `).all(profileId, ...rated.values);
+
+  /* The furthest-along unfinished episode, asked for one title at a time.
+     A backlog is a handful of things, so this is a handful of small reads. */
+  const furthest = db.prepare(`
+    SELECT v.*, p.position, p.watched, p.updated_at
+    FROM progress p
+    JOIN videos v ON v.id = p.video_id
+    WHERE p.profile_id = ? AND p.item_id = ? AND p.watched = 0
+    ORDER BY p.updated_at DESC
+    LIMIT 1
+  `);
+
+  return rows.map((row) => {
+    const item = shapeItem(row);
+    const where = furthest.get(profileId, row.id);
+    return {
+      item,
+      setAsideAt: row.set_aside_at,
+      video: where ? shapeVideo(where) : null,
+      progressPercent: where?.duration
+        ? Math.min(100, (where.position / where.duration) * 100)
+        : 0,
+    };
+  });
+}
+
+/**
+ * Set a title aside, or take it back up.
+ * @returns {{itemId: string, backlog: boolean}|null} null when there is no such item.
+ */
+export function setBacklog(itemId, on, profile) {
+  const db = getDb();
+  const profileId = idOf(profile);
+  if (!db.prepare('SELECT id FROM items WHERE id = ?').get(itemId)) return null;
+
+  if (on) {
+    db.prepare('INSERT OR IGNORE INTO backlog (profile_id, item_id, added_at) VALUES (?, ?, ?)')
+      .run(profileId, itemId, Date.now());
+  } else {
+    db.prepare('DELETE FROM backlog WHERE profile_id = ? AND item_id = ?').run(profileId, itemId);
+  }
+  return { itemId, backlog: Boolean(on) };
 }
 
 /**

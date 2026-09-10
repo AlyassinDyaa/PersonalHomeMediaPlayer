@@ -77,6 +77,8 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [favourites, setFavourites] = useState([]);
   /* What this profile means to get to: titles, and runs of comics. */
   const [watchlist, setWatchlist] = useState({ items: [], comics: [] });
+  /* Started and set aside, kept off Continue Watching. */
+  const [backlog, setBacklog] = useState([]);
   /* A run of comics the Lists page asked to have opened, once on Comics. */
   const [comicSeries, setComicSeries] = useState(null);
   const [genres, setGenres] = useState([]);
@@ -124,7 +126,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
 
   const reload = useCallback(async () => {
     try {
-      const [allItems, continueWatching, kept, genreList, settings, shelves, everyShelf, later] = await Promise.all([
+      const [allItems, continueWatching, kept, genreList, settings, shelves, everyShelf, later, aside] = await Promise.all([
         api.items({ sort: 'title' }),
         api.continueWatching(),
         api.favourites(),
@@ -134,6 +136,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         api.collectionShelves().catch(() => []),
         api.collections().catch(() => []),
         api.watchlist().catch(() => ({ items: [], comics: [] })),
+        api.backlog().catch(() => []),
       ]);
       setLibraryName(settings.libraryName ?? '');
       setLibraryColor(settings.libraryColor ?? '');
@@ -160,6 +163,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       setResume(continueWatching);
       setFavourites(kept);
       setWatchlist({ items: later?.items ?? [], comics: later?.comics ?? [] });
+      setBacklog(Array.isArray(aside) ? aside : []);
       setGenres(genreList);
       setCollections(shelves);
       setAllShelves(everyShelf);
@@ -864,6 +868,20 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
           entry={heldItem}
           favourite={favourites.some((entry) => entry.id === (heldItem.item ?? heldItem).id)}
           watchLater={watchlist.items.some((entry) => entry.id === (heldItem.item ?? heldItem).id)}
+          setAside={backlog.some((entry) => entry.item.id === (heldItem.item ?? heldItem).id)}
+          /* Only worth offering for something actually under way. */
+          canSetAside={Boolean(heldItem.video)
+            || backlog.some((entry) => entry.item.id === (heldItem.item ?? heldItem).id)}
+          onSetAside={async (wanted) => {
+            const item = heldItem.item ?? heldItem;
+            setHeldItem(null);
+            try {
+              await api.setBacklog(item.id, wanted);
+              await reload();
+            } catch (failure) {
+              setError(failure.message);
+            }
+          }}
           onWatchLater={async (wanted) => {
             const item = heldItem.item ?? heldItem;
             setHeldItem(null);
@@ -959,6 +977,7 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
               wide
               onSelect={(entry) => play(entry.video, entry.item)}
               onRemove={forgetProgress}
+              onLongPress={setHeldItem}
               renderLabel={(entry) => (
                 <>
                   <strong>{entry.item.title}</strong>
@@ -1048,6 +1067,11 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         <Lists
           favourites={favourites}
           watchlist={watchlist}
+          backlog={backlog}
+          onResume={(entry) => (entry.video ? play(entry.video, entry.item) : openDetail(entry.item))}
+          onTakeUp={async (entry) => {
+            try { await api.setBacklog(entry.item.id, false); await reload(); } catch (failure) { setError(failure.message); }
+          }}
           onSelect={openDetail}
           onLongPress={setHeldItem}
           onOpenComic={(id) => { setComicSeries(id); goto('comics'); }}
@@ -1153,7 +1177,10 @@ function GatherBar({ count, shelves, allShelves, onAdd, onCancel }) {
  * same. It comes up from the bottom edge, where the hand already is, rather
  * than in the middle of the screen where nothing else is.
  */
-function TitleActions({ entry, favourite, watchLater = false, onClose, onOpen, onFavourite, onWatchLater = null }) {
+function TitleActions({
+  entry, favourite, watchLater = false, onClose, onOpen, onFavourite, onWatchLater = null,
+  setAside = false, canSetAside = false, onSetAside = null,
+}) {
   const item = entry.item ?? entry;
 
   return (
@@ -1178,6 +1205,19 @@ function TitleActions({ entry, favourite, watchLater = false, onClose, onOpen, o
           <button type="button" className="actions-row" onClick={() => onWatchLater(!watchLater)}>
             <span className="actions-mark" aria-hidden="true">{watchLater ? '✓' : '+'}</span>
             {watchLater ? 'Remove from watch later' : 'Watch later'}
+          </button>
+        )}
+
+        {/*
+          * Between being nagged about it and forgetting it.
+          *
+          * Only offered for something already under way, because setting
+          * aside a title nobody has started is what the watchlist is for.
+          */}
+        {onSetAside && canSetAside && (
+          <button type="button" className="actions-row" onClick={() => onSetAside(!setAside)}>
+            <span className="actions-mark" aria-hidden="true">{setAside ? '↩' : '⇥'}</span>
+            {setAside ? 'Put back on Continue Watching' : 'Set aside for later'}
           </button>
         )}
 

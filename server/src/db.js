@@ -341,6 +341,31 @@ CREATE TABLE IF NOT EXISTS watchlist (
 `,
   },
   {
+    table: 'backlog',
+    columns: 'item_id, added_at',
+    indexes: [],
+    /*
+     * Started, and set aside.
+     *
+     * Continue Watching answers "what were you in the middle of", and a title
+     * nobody intends to go back to soon makes it answer badly — four episodes
+     * of something abandoned in March push out the thing being watched this
+     * week. Taking it off used to mean forgetting where you were, which is a
+     * poor trade for tidiness.
+     *
+     * A row here keeps the position and stops the title being offered. It is
+     * a shelf, not a bin.
+     */
+    create: `
+CREATE TABLE IF NOT EXISTS backlog (
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  item_id    TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  added_at   INTEGER NOT NULL,
+  PRIMARY KEY (profile_id, item_id)
+);
+`,
+  },
+  {
     table: 'comic_progress',
     columns: 'issue_id, series_id, page, pages, finished, updated_at',
     indexes: [],

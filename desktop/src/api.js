@@ -282,6 +282,15 @@ export const api = {
   /** Who is in a title, and the few names behind it. */
   credits: (itemId) => request('/api/items/' + encodeURIComponent(itemId) + '/credits'),
   favourites: () => request('/api/favourites'),
+  /** Started and set aside: kept, but not offered on the home screen. */
+  backlog: () => request('/api/backlog'),
+  setBacklog: (itemId, backlog) =>
+    request('/api/items/' + encodeURIComponent(itemId) + '/backlog', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backlog }),
+    }),
+
   /** What this profile means to get to: titles and runs of comics. */
   watchlist: () => request('/api/watchlist'),
   setWatchlist: (itemId, watchlist) =>

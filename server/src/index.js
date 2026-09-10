@@ -739,6 +739,19 @@ app.get('/api/watchlist', (req, res) => {
   });
 });
 
+/*
+ * Started and set aside: a shelf between Continue Watching and forgetting.
+ */
+app.get('/api/backlog', (req, res) => {
+  res.json(library.listBacklog(req.profile));
+});
+
+app.put('/api/items/:id/backlog', (req, res) => {
+  const result = library.setBacklog(req.params.id, req.body?.backlog !== false, req.profile);
+  if (!result) return res.status(404).json({ error: 'item not found' });
+  res.json(result);
+});
+
 app.put('/api/items/:id/watchlist', (req, res) => {
   const result = library.setWatchlist('item', req.params.id, req.body?.watchlist !== false, req.profile);
   if (!result) return res.status(404).json({ error: 'item not found' });

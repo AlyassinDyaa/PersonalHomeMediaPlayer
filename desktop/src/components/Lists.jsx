@@ -17,22 +17,27 @@ import { comicCover } from '../api.js';
 const LISTS = [
   ['favourites', 'Favourites'],
   ['watchlist', 'Watch later'],
+  ['backlog', 'Set aside'],
 ];
 
 export function Lists({
   favourites = [],
   watchlist = { items: [], comics: [] },
+  /* Started and set aside: where you got to, kept off the home screen. */
+  backlog = [],
   onSelect,
   onOpenComic,
   onLongPress = null,
   onRemoveFavourite,
   onRemoveWatch,
   onRemoveComic,
+  onResume = null,
+  onTakeUp = null,
 }) {
   const [which, setWhich] = useState('favourites');
 
-  const count = which === 'favourites'
-    ? favourites.length
+  const count = which === 'favourites' ? favourites.length
+    : which === 'backlog' ? backlog.length
     : watchlist.items.length + watchlist.comics.length;
 
   return (
@@ -77,6 +82,40 @@ export function Lists({
                 onLongPress={onLongPress ? () => onLongPress(item) : null}
                 onRemove={() => onRemoveFavourite(item)}
                 removeLabel="Remove from favourites"
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {which === 'backlog' && (
+        backlog.length === 0 ? (
+          <Empty
+            title="Nothing set aside"
+            body="Hold down anything on Continue Watching and choose Set aside for later. It keeps your place and stops the home screen asking about it."
+          />
+        ) : (
+          <div className="grid">
+            {backlog.map((entry) => (
+              <Card
+                key={entry.item.id}
+                item={entry.item}
+                wide
+                progress={entry.progressPercent}
+                label={(
+                  <>
+                    <strong>{entry.item.title}</strong>
+                    {entry.video
+                      ? (entry.video.episode
+                        ? 'Season ' + entry.video.season + ' · Episode ' + entry.video.episode
+                        : 'Part way through')
+                      : 'Nothing to resume'}
+                  </>
+                )}
+                onClick={() => (onResume ? onResume(entry) : onSelect(entry.item))}
+                onLongPress={onLongPress ? () => onLongPress(entry) : null}
+                onRemove={onTakeUp ? () => onTakeUp(entry) : null}
+                removeLabel="Put back on Continue Watching"
               />
             ))}
           </div>
