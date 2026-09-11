@@ -39,6 +39,7 @@ const SHELF_LAYOUT_CHOICES = [
  * of the household they are.
  */
 const SETTINGS_TABS = [
+  { id: 'overview', label: 'Overview', hint: 'What is here, and how it is doing' },
   { id: 'library', label: 'Appearance', ownerOnly: true, hint: 'How the library looks — its name, colour, backdrop and shelves' },
   { id: 'collections', label: 'Collections', ownerOnly: true, hint: 'Your own shelves on the home screen' },
   { id: 'sections', label: 'Sections', ownerOnly: true, hint: 'The parts of the library, and who is let into each' },
@@ -48,6 +49,26 @@ const SETTINGS_TABS = [
   { id: 'requests', label: 'Requests', hint: 'Films and shows people would like added' },
   { id: 'maintenance', label: 'Maintenance', ownerOnly: true, hint: 'Folders, scanning, storage, and the state of the library' },
 ];
+
+/**
+ * A mark for each tab.
+ *
+ * Drawn rather than typed, at one weight, so the column reads as one set
+ * instead of eight characters that happened to land near each other. They
+ * are what makes a list of eight scannable at a glance — the word is read
+ * second, and only to confirm.
+ */
+const TAB_ICONS = {
+  overview: <path d="M4 13h6V4H4v9zm0 7h6v-5H4v5zm10 0h6v-9h-6v9zm0-16v5h6V4h-6z" />,
+  library: <path d="M12 3.5 14.6 9l6 .9-4.3 4.2 1 6-5.3-2.8L6.7 20l1-6L3.4 9.9 9.4 9z" />,
+  collections: <path d="M4 7h16M4 12h16M4 17h10" />,
+  sections: <path d="M4 5h7v7H4zm9 0h7v4h-7zm0 6h7v8h-7zm-9 3h7v5H4z" />,
+  playback: <path d="M9 7.5v9l7-4.5z M4.5 12a7.5 7.5 0 1 0 15 0 7.5 7.5 0 1 0-15 0" />,
+  sharing: <path d="M12 4v9m0-9-3.2 3.2M12 4l3.2 3.2M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />,
+  profiles: <path d="M9 11a3.2 3.2 0 1 0 0-6.4A3.2 3.2 0 0 0 9 11zm-6 8.2c0-2.9 2.7-4.6 6-4.6s6 1.7 6 4.6M16 5.2a3 3 0 0 1 0 5.9m1.6 3.7c2 .5 3.4 1.9 3.4 4.4" />,
+  requests: <path d="M12 6.5v11M6.5 12h11" />,
+  maintenance: <path d="M14.7 6.3a3.8 3.8 0 0 1 5 5l-8.7 8.7a2 2 0 0 1-2.8 0l-2.2-2.2a2 2 0 0 1 0-2.8z M13 8l3 3" />,
+};
 
 export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   const [settings, setSettings] = useState(null);
@@ -372,71 +393,95 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   // simply absent rather than empty.
   const hasRoots = (settings.libraryRoots ?? []).length > 0;
 
+  const here = tabs.find((entry) => entry.id === active);
+
   return (
     <>
-      <div className="page-header">
-        <h1 className="page-title">Settings</h1>
-        <span className="page-sub">
-          {tabs.find((entry) => entry.id === active)?.hint}
-        </span>
-      </div>
+      <div className="settings-shell">
+        <aside className="settings-nav">
+          <div className="settings-nav-head">
+            <h1>Settings</h1>
+            <p>{(settings.libraryName || '').trim() || 'Your library'}</p>
+          </div>
 
-      <nav className="settings-tabs">
-        {tabs.map((entry, index) => (
-          <span className={'settings-tab-slot' + (arranging ? ' arranging' : '')} key={entry.id}>
-            {arranging && (
-              <button
-                type="button"
-                className="settings-tab-move"
-                title={'Move ' + entry.label + ' earlier'}
-                aria-label={'Move ' + entry.label + ' earlier'}
-                disabled={index === 0}
-                onClick={() => moveTab(entry.id, -1)}
+          <nav className="settings-nav-list">
+            {tabs.map((entry, index) => (
+              <div
+                className={'settings-nav-slot' + (arranging ? ' arranging' : '')}
+                key={entry.id}
               >
-                ‹
-              </button>
-            )}
+                <button
+                  type="button"
+                  className={'settings-nav-item' + (active === entry.id ? ' on' : '')}
+                  aria-current={active === entry.id ? 'page' : undefined}
+                  onClick={() => (arranging ? undefined : setTab(entry.id))}
+                >
+                  <span className="settings-nav-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">{TAB_ICONS[entry.id]}</svg>
+                  </span>
+                  <span className="settings-nav-word">{entry.label}</span>
+                </button>
+
+                {/*
+                  * Rearranging is a mode rather than a handle on every row.
+                  *
+                  * These are pressed to get somewhere, constantly; arrows
+                  * beside each one permanently would be two more things to
+                  * miss the row with. Asked for, they appear; done, they go.
+                  */}
+                {arranging && (
+                  <span className="settings-nav-move">
+                    <button
+                      type="button"
+                      title={'Move ' + entry.label + ' up'}
+                      aria-label={'Move ' + entry.label + ' up'}
+                      disabled={index === 0}
+                      onClick={() => moveTab(entry.id, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      title={'Move ' + entry.label + ' down'}
+                      aria-label={'Move ' + entry.label + ' down'}
+                      disabled={index === tabs.length - 1}
+                      onClick={() => moveTab(entry.id, 1)}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                )}
+              </div>
+            ))}
+          </nav>
+
+          {isOwner && (
             <button
-              className={'settings-tab' + (active === entry.id ? ' is-active' : '')}
-              onClick={() => (arranging ? undefined : setTab(entry.id))}
+              type="button"
+              className={'settings-arrange' + (arranging ? ' on' : '')}
+              aria-pressed={arranging}
+              onClick={() => setArranging(!arranging)}
             >
-              {entry.label}
+              {arranging ? 'Done rearranging' : 'Rearrange'}
             </button>
-            {arranging && (
-              <button
-                type="button"
-                className="settings-tab-move"
-                title={'Move ' + entry.label + ' later'}
-                aria-label={'Move ' + entry.label + ' later'}
-                disabled={index === tabs.length - 1}
-                onClick={() => moveTab(entry.id, 1)}
-              >
-                ›
-              </button>
-            )}
-          </span>
-        ))}
-
-        {/*
-          * Rearranging is a mode, not a handle on every tab.
-          *
-          * These are pressed constantly to get somewhere, and arrows sitting
-          * permanently beside each one would be four more things to miss the
-          * tab with. Asked for, they appear; done, they go.
-          */}
-        {isOwner && (
-          <button
-            type="button"
-            className={'settings-arrange' + (arranging ? ' on' : '')}
-            aria-pressed={arranging}
-            onClick={() => setArranging(!arranging)}
-          >
-            {arranging ? 'Done' : 'Rearrange'}
-          </button>
-        )}
-      </nav>
+          )}
+        </aside>
 
       <div className="settings">
+        <header className="settings-pane-head">
+          <h2>{here?.label}</h2>
+          <p>{here?.hint}</p>
+        </header>
+
+        {active === 'overview' && (
+          <Overview
+            settings={settings}
+            stats={stats}
+            isOwner={isOwner}
+            onGo={setTab}
+          />
+        )}
+
         {error && <div className="banner" style={{ margin: '0 0 18px' }}>{error}</div>}
 
 
@@ -1481,6 +1526,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
         )}
 
       </div>
+      </div>
 
       {picking && (
         <FolderPicker
@@ -1491,6 +1537,121 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
         />
       )}
     </>
+  );
+}
+
+/**
+ * What the library actually is, before anything is changed about it.
+ *
+ * The first thing this page said used to be "Appearance", which is somewhere
+ * to change a colour rather than anything about the library itself. Somebody
+ * opening Settings mostly wants to know how it is doing — how much is here,
+ * who is watching, what is switched on, when it was last read — and only
+ * sometimes wants to change something.
+ *
+ * Every figure here is one the library already keeps. Nothing is computed for
+ * the sake of filling the page, and nothing is shown that would be a guess.
+ */
+function Overview({ settings, stats, isOwner, onGo }) {
+  const [sections, setSections] = useState(null);
+  const [profiles, setProfiles] = useState(null);
+
+  useEffect(() => {
+    api.sections().then((answer) => setSections(answer.sections ?? [])).catch(() => setSections([]));
+    api.profiles().then((answer) => setProfiles(answer.profiles ?? answer ?? [])).catch(() => setProfiles([]));
+  }, []);
+
+  const on = (sections ?? []).filter((entry) => entry.on !== false);
+  const lastScan = stats?.lastScan ? new Date(stats.lastScan) : null;
+
+  /* Said the way somebody would say it, not as a date stamp. */
+  const when = () => {
+    if (!lastScan) return 'Not yet';
+    const mins = Math.round((Date.now() - lastScan.getTime()) / 60000);
+    if (mins < 2) return 'Just now';
+    if (mins < 60) return mins + ' minutes ago';
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return hours === 1 ? 'An hour ago' : hours + ' hours ago';
+    const days = Math.round(hours / 24);
+    return days === 1 ? 'Yesterday' : days + ' days ago';
+  };
+
+  return (
+    <div className="overview">
+      {/* The size of the thing, in the four numbers worth knowing. */}
+      <div className="overview-figures">
+        <div className="figure">
+          <strong>{stats ? stats.movies : '—'}</strong>
+          <span>Films</span>
+        </div>
+        <div className="figure">
+          <strong>{stats ? stats.shows : '—'}</strong>
+          <span>Series</span>
+        </div>
+        <div className="figure">
+          <strong>{stats ? stats.episodes : '—'}</strong>
+          <span>Episodes</span>
+        </div>
+        <div className="figure">
+          <strong>{stats?.totalSize ? formatSize(stats.totalSize) : '—'}</strong>
+          <span>On disk</span>
+        </div>
+      </div>
+
+      <div className="overview-rows">
+        {/* Where it reads from, and whether it can. */}
+        {isOwner && (
+          <button type="button" className="overview-row" onClick={() => onGo('maintenance')}>
+            <span className="overview-row-name">
+              <strong>Folders</strong>
+              <span>
+                {(settings.rootsStatus ?? []).length === 0
+                  ? 'None yet — the library has nowhere to read from'
+                  : (settings.rootsStatus ?? []).map((root) => root.path).join(' · ')}
+              </span>
+            </span>
+            {(settings.rootsStatus ?? []).some((root) => !root.available) && (
+              <span className="overview-warn">not connected</span>
+            )}
+            <span className="overview-row-more" aria-hidden="true">›</span>
+          </button>
+        )}
+
+        <button type="button" className="overview-row" onClick={() => onGo('sections')}>
+          <span className="overview-row-name">
+            <strong>Sections</strong>
+            <span>
+              {sections === null ? 'Reading…'
+                : on.length === 0 ? 'None switched on'
+                  : on.map((entry) => entry.label).join(' · ')}
+            </span>
+          </span>
+          <span className="overview-row-more" aria-hidden="true">›</span>
+        </button>
+
+        <button type="button" className="overview-row" onClick={() => onGo('profiles')}>
+          <span className="overview-row-name">
+            <strong>Who is watching</strong>
+            <span>
+              {profiles === null ? 'Reading…'
+                : profiles.length === 1 ? 'Just you'
+                  : profiles.length + ' profiles'}
+            </span>
+          </span>
+          <span className="overview-row-more" aria-hidden="true">›</span>
+        </button>
+
+        {isOwner && (
+          <button type="button" className="overview-row" onClick={() => onGo('maintenance')}>
+            <span className="overview-row-name">
+              <strong>Last read</strong>
+              <span>{when()}</span>
+            </span>
+            <span className="overview-row-more" aria-hidden="true">›</span>
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
