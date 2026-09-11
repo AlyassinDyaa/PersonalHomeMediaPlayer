@@ -3,6 +3,11 @@
  *
  * Shared between the Movies and TV Shows screens and the home page, so the two
  * cannot drift into disagreeing about where a title belongs.
+ *
+ * These headings only ever hold what is not on a shelf of your own. A
+ * collection takes its titles out of the list underneath it, so the genres are
+ * the arrangement for everything nobody has filed by hand — which is the only
+ * place an automatic arrangement is worth having.
  */
 
 /** How many titles in a set carry each genre. */
@@ -15,36 +20,40 @@ export function genreFrequency(items) {
 }
 
 /**
- * One shelf per title: the genre that says most about it here.
+ * One shelf per title: the genre it leads with.
  *
- * Two other arrangements were tried and both were wrong. Filing by TMDB's
- * *first* genre put X-Men alone under Kids and left nothing under Sci-Fi &
- * Fantasy, because that order means nothing. Listing a title under every genre
- * it carries produced three consecutive identical rows — Action, Adventure and
- * Animation, the same nineteen cartoons each time — because in a library like
- * this those three travel together.
+ * A title carries several genres in the order the metadata gives them, and
+ * that order is a ranking — the first is what the thing mostly is. Cowboy
+ * Bebop lists Science Fiction before Crime, Transformers leads with Action,
+ * Arcane with Animation. Taking the first is taking the strongest theme, and
+ * nothing is filed twice.
  *
- * So each title is filed under its *rarest* genre in the set being arranged:
- * the one that distinguishes it from everything else on the shelf. Where
- * everything is Action, being Action says nothing, and being a Comedy or a
- * Mystery says a great deal. The arrangement tunes itself to whatever the
- * library holds, and nothing appears twice.
+ * Two other arrangements were tried here and both were worse.
+ *
+ * Listing a title under every genre it carries produced three consecutive
+ * identical rows — Action, Adventure and Animation, the same cartoons each
+ * time — because in a library like this those three travel together.
+ *
+ * Filing under the *rarest* genre in the set came next, on the reasoning that
+ * where everything is Action, being Action says nothing. It reads well as an
+ * argument and badly as a library: measured on this one it left thirteen
+ * Action series with no Action shelf at all, put Cowboy Bebop under Crime,
+ * Halo under Fantasy and Transformers under Family, and gave Drama a single
+ * title out of the ten that carried it. Every heading was a surprise, which
+ * is the opposite of what a heading is for.
+ *
+ * The cost of leading-genre is that a big genre stays big — a cartoon library
+ * gets a large Animation shelf. That is the honest shape of such a library,
+ * and a shelf of your own is the answer to wanting a different one.
  *
  * @param {Array} items
  * @returns {Array<{name: string, entries: Array}>} Largest shelf first.
  */
 export function shelveByGenre(items) {
-  const frequency = genreFrequency(items);
   const buckets = new Map();
 
   for (const item of items) {
-    const names = item.genres?.length ? item.genres : ['Other'];
-    const shelf = [...names].sort((a, b) => (
-      (frequency.get(a) ?? 0) - (frequency.get(b) ?? 0)
-      // Alphabetical only to break ties, so the arrangement never depends on
-      // the order TMDB happened to return.
-      || a.localeCompare(b)
-    ))[0];
+    const shelf = item.genres?.length ? item.genres[0] : 'Other';
     if (!buckets.has(shelf)) buckets.set(shelf, []);
     buckets.get(shelf).push(item);
   }

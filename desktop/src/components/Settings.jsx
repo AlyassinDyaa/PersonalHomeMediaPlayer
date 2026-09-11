@@ -977,10 +977,12 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
           <details className="settings-card">
             <summary><h2>How the library is arranged</h2></summary>
             <p className="settings-hint">
-              Films and series are normally shelved under genre headings. Where a
-              library leans heavily one way — a shelf of cartoons that are all
-              Animation — the headings say little, and a plain list reads better.
-              Each screen is set on its own.
+              Anything not on a shelf of your own is filed under a genre heading —
+              Action, Drama, and the rest — using the strongest theme each title
+              carries, so nothing appears under two headings. A collection takes
+              its titles out of this, so these headings are only ever what is left.
+              Turned off, what is left is one plain list, A to Z. Each screen is set
+              on its own.
             </p>
 
             <label className="toggle-row">
