@@ -52,6 +52,8 @@ const SETTINGS_TABS = [
 export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   const [settings, setSettings] = useState(null);
   const [stats, setStats] = useState(null);
+  /* Whether the row of tabs is being put in order rather than used. */
+  const [arranging, setArranging] = useState(false);
   // Which folder the picker is choosing: a library root, or where the
   // library's own files are kept.
   const [picking, setPicking] = useState(null);
@@ -332,7 +334,36 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   }
 
   const isOwner = settings.isOwner === true;
-  const tabs = SETTINGS_TABS.filter((entry) => isOwner || !entry.ownerOnly);
+  /*
+   * The tabs, in the order somebody put them.
+   *
+   * Anything the stored order does not name keeps its place at the end, which
+   * is what lets a tab added in a later version appear at all rather than
+   * quietly vanishing for anybody who had ever rearranged these.
+   */
+  const order = settings?.settingsTabOrder ?? [];
+  const tabs = [...SETTINGS_TABS]
+    .filter((entry) => isOwner || !entry.ownerOnly)
+    .sort((a, b) => {
+      const rank = (entry) => {
+        const at = order.indexOf(entry.id);
+        return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+      };
+      return rank(a) - rank(b);
+    });
+
+  /* Moving one, and saving where they all ended up. */
+  const moveTab = async (id, by) => {
+    const ids = tabs.map((entry) => entry.id);
+    const at = ids.indexOf(id);
+    const to = at + by;
+    if (at < 0 || to < 0 || to >= ids.length) return;
+    [ids[at], ids[to]] = [ids[to], ids[at]];
+    /* The owner-only ones a guest never sees are appended, so rearranging as
+       somebody who cannot see them all does not throw the rest away. */
+    const full = [...ids, ...SETTINGS_TABS.map((e) => e.id).filter((e) => !ids.includes(e))];
+    await saveToggle('settingsTabOrder', full);
+  };
   // The remembered tab can be one this profile is not offered — the owner
   // left Settings on Folders, then somebody else picked their own profile.
   const active = tabs.some((entry) => entry.id === tab) ? tab : tabs[0].id;
@@ -351,15 +382,58 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
       </div>
 
       <nav className="settings-tabs">
-        {tabs.map((entry) => (
-          <button
-            key={entry.id}
-            className={'settings-tab' + (active === entry.id ? ' is-active' : '')}
-            onClick={() => setTab(entry.id)}
-          >
-            {entry.label}
-          </button>
+        {tabs.map((entry, index) => (
+          <span className={'settings-tab-slot' + (arranging ? ' arranging' : '')} key={entry.id}>
+            {arranging && (
+              <button
+                type="button"
+                className="settings-tab-move"
+                title={'Move ' + entry.label + ' earlier'}
+                aria-label={'Move ' + entry.label + ' earlier'}
+                disabled={index === 0}
+                onClick={() => moveTab(entry.id, -1)}
+              >
+                ‹
+              </button>
+            )}
+            <button
+              className={'settings-tab' + (active === entry.id ? ' is-active' : '')}
+              onClick={() => (arranging ? undefined : setTab(entry.id))}
+            >
+              {entry.label}
+            </button>
+            {arranging && (
+              <button
+                type="button"
+                className="settings-tab-move"
+                title={'Move ' + entry.label + ' later'}
+                aria-label={'Move ' + entry.label + ' later'}
+                disabled={index === tabs.length - 1}
+                onClick={() => moveTab(entry.id, 1)}
+              >
+                ›
+              </button>
+            )}
+          </span>
         ))}
+
+        {/*
+          * Rearranging is a mode, not a handle on every tab.
+          *
+          * These are pressed constantly to get somewhere, and arrows sitting
+          * permanently beside each one would be four more things to miss the
+          * tab with. Asked for, they appear; done, they go.
+          */}
+        {isOwner && (
+          <button
+            type="button"
+            className={'settings-arrange' + (arranging ? ' on' : '')}
+            aria-pressed={arranging}
+            onClick={() => setArranging(!arranging)}
+          >
+            {arranging ? 'Done' : 'Rearrange'}
+          </button>
+        )}
       </nav>
 
       <div className="settings">

@@ -375,19 +375,14 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       return mySections?.includes(entry.id) ?? true;
     }
     return true;
-  }).sort((a, b) => {
-    /*
-     * In the order the owner put them.
-     *
-     * Home, the lists and the way into Settings are fixed — they are not
-     * sections and nobody is arranging them — so they keep the places this
-     * file gives them, and the sections sort themselves in between.
-     */
-    const rank = (entry) => {
-      const at = (mySections ?? []).indexOf(entry.id);
-      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
-    };
-    return rank(a) - rank(b);
+  /*
+   * Always in this order.
+   *
+   * Home at the top, then television, then films. This strip is how the
+   * library is moved around, and a way out that is in a different place each
+   * time is one nobody learns — the hand goes where it went yesterday. What
+   * is switched off is left out; what is left keeps its place.
+   */
   }), [showComics, mySections]);
 
   useEffect(() => {

@@ -71,21 +71,6 @@ export const SECTIONS = [
 
 const BY_ID = new Map(SECTIONS.map((entry) => [entry.id, entry]));
 
-/**
- * The sections in the order the owner put them.
- *
- * Anything the stored order does not mention keeps its place at the end,
- * which is what lets a section added in a later version appear at all.
- */
-export function sectionsInOrder(order = []) {
-  const wanted = Array.isArray(order) ? order.filter((id) => BY_ID.has(id)) : [];
-  const seen = new Set(wanted);
-  return [
-    ...wanted.map((id) => BY_ID.get(id)),
-    ...SECTIONS.filter((entry) => !seen.has(entry.id)),
-  ];
-}
-
 /** One section's description, or null. */
 export function sectionInfo(id) {
   return BY_ID.get(id) ?? null;

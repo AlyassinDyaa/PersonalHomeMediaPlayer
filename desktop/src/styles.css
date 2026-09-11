@@ -7015,30 +7015,51 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   .picture-view { padding: 14px; }
 }
 
-/* --------------------------------------------- moving a section about --- */
+
+
+/* ------------------------------------------- putting the tabs in order --- */
 
 /*
- * Up and down, on the row the section is named on.
+ * Rearranging is a mode rather than a handle on every tab.
  *
- * Inside the summary, so they read as belonging to that section rather than
- * to the page; the press is stopped from also folding the card, which is what
- * pressing a summary otherwise does.
+ * These are pressed constantly to get somewhere, so arrows sitting beside
+ * each one permanently would be two more things to miss the tab with. Asked
+ * for, they appear either side; done, they go and the row is itself again.
  */
-.section-move {
-  display: inline-flex;
-  gap: 6px;
-  margin-left: auto;
-  margin-right: 10px;
-}
+.settings-tab-slot { display: inline-flex; align-items: center; }
 
-.section-move .chip {
-  min-width: 30px;
-  padding: 4px 8px;
+.settings-tab-move {
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.settings-tab-move:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); color: var(--text); }
+.settings-tab-move:disabled { opacity: 0.25; cursor: default; }
+
+/* While arranging, a tab is a thing being moved rather than a way in. */
+.settings-tab-slot.arranging .settings-tab { cursor: default; opacity: 0.9; }
+
+.settings-arrange {
+  margin-left: 8px;
+  padding: 7px 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-faint);
   font-size: 13px;
-  line-height: 1.1;
+  cursor: pointer;
 }
-.section-move .chip:disabled { opacity: 0.3; cursor: default; }
-
-/* The heading no longer fills the row on its own. */
-.settings-card > summary { display: flex; align-items: center; gap: 10px; }
-.settings-card > summary h2 { margin-right: 0; }
+.settings-arrange:hover { color: var(--text-dim); border-color: rgba(255, 255, 255, 0.4); }
+.settings-arrange.on {
+  border-style: solid;
+  border-color: var(--accent, #7d8aa0);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent, #7d8aa0) 18%, transparent);
+}

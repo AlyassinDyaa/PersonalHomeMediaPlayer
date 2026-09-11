@@ -22,7 +22,7 @@ import {
 import * as library from './library.js';
 import * as collections from './collections.js';
 // Which profiles are let into a whole area of the library, such as Comics.
-import { SECTIONS, sectionInfo, sectionsInOrder, allowedIn, maySee, setAllowed } from './sections.js';
+import { SECTIONS, sectionInfo, allowedIn, maySee, setAllowed } from './sections.js';
 import { scanSection, rootsFor } from './sections/scan.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
@@ -1267,10 +1267,9 @@ app.get('/api/sections', (req, res) => {
   const owner = Boolean(req.profile?.isOwner);
   const on = config.sectionsOn ?? {};
   const db = getDb();
-  const ordered = sectionsInOrder(config.sectionOrder);
 
   if (!owner) {
-    const mine = ordered
+    const mine = SECTIONS
       .filter((entry) => on[entry.id] !== false && maySee(entry.id, req.profile?.id))
       .map((entry) => ({ id: entry.id, label: entry.label }));
     res.json({ sections: mine });
@@ -1278,7 +1277,7 @@ app.get('/api/sections', (req, res) => {
   }
 
   res.json({
-    sections: ordered.map((entry) => {
+    sections: SECTIONS.map((entry) => {
       const roots = entry.folders ? rootsFor(entry.id) : [];
       const counts = entry.folders && entry.id !== 'comics'
         ? {
@@ -1300,15 +1299,6 @@ app.get('/api/sections', (req, res) => {
       };
     }),
   });
-});
-
-/** The order they are offered in, top to bottom. */
-app.put('/api/sections/order', requireOwner, (req, res) => {
-  if (!Array.isArray(req.body?.order)) {
-    return res.status(400).json({ error: 'Say the order, as a list of section names' });
-  }
-  const saved = saveSettings({ sectionOrder: req.body.order });
-  res.json({ order: saved.sectionOrder ?? [] });
 });
 
 /** Switch a section on or off. */

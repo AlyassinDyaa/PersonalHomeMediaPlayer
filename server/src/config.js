@@ -194,15 +194,17 @@ export const config = {
    * it has been given somewhere to look.
    */
   /*
-   * The order the sections are offered in.
+   * The order the tabs across the top of Settings are offered in.
    *
-   * Which parts of a library matter most is not something this can know: a
-   * house that mostly watches television and a house that mostly reads comics
-   * want different things first, and the strip down the side is read top to
-   * bottom every time. Anything missing from the list keeps its place at the
-   * end, so a section added later appears without this needing to be rewritten.
+   * Which of these somebody opens every day and which they touch twice a year
+   * is not something this can know. The strip down the side of the library is
+   * deliberately not arrangeable — that is how the place is moved around, and
+   * navigation that moves is navigation nobody learns — but this is a row of
+   * headings somebody reads, and reading is quicker when the thing wanted is
+   * first. Anything missing keeps its place at the end, so a tab added later
+   * still appears.
    */
-  sectionOrder: Array.isArray(local.sectionOrder) ? local.sectionOrder : [],
+  settingsTabOrder: Array.isArray(local.settingsTabOrder) ? local.settingsTabOrder : [],
   sectionsOn: {
     shows: local.sectionsOn?.shows ?? true,
     movies: local.sectionsOn?.movies ?? true,
@@ -466,14 +468,15 @@ export function saveSettings(patch) {
   }
   if (Array.isArray(patch.familyRoots)) allowed.familyRoots = normaliseRoots(patch.familyRoots);
   if (Array.isArray(patch.artworkRoots)) allowed.artworkRoots = normaliseRoots(patch.artworkRoots);
-  if (Array.isArray(patch.sectionOrder)) {
-    const known = ['shows', 'movies', 'comics', 'family', 'artwork'];
-    const wanted = patch.sectionOrder.filter((id) => known.includes(id));
+  if (Array.isArray(patch.settingsTabOrder)) {
+    const known = ['library', 'collections', 'sections', 'playback',
+      'sharing', 'profiles', 'requests', 'maintenance'];
+    const wanted = patch.settingsTabOrder.filter((id) => known.includes(id));
     /* Deduplicated, and anything left out put back on the end, so the stored
        order is always a complete one however odd the request was. */
     const seen = new Set();
     const ordered = wanted.filter((id) => (seen.has(id) ? false : seen.add(id)));
-    allowed.sectionOrder = [...ordered, ...known.filter((id) => !seen.has(id))];
+    allowed.settingsTabOrder = [...ordered, ...known.filter((id) => !seen.has(id))];
   }
   if (patch.sectionsOn && typeof patch.sectionsOn === 'object') {
     const on = {};
@@ -563,7 +566,7 @@ export function settingsView() {
     familyRoots: config.familyRoots,
     artworkRoots: config.artworkRoots,
     sectionsOn: config.sectionsOn,
-    sectionOrder: config.sectionOrder,
+    settingsTabOrder: config.settingsTabOrder,
     showComics: config.showComics,
     background: config.background,
     backgroundColor: config.backgroundColor,

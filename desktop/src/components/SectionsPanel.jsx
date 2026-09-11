@@ -76,33 +76,6 @@ export function SectionsPanel({ isOwner, onChanged }) {
     }
   };
 
-  /*
-   * Up and down rather than dragging.
-   *
-   * Five rows do not need a drag, and a drag is the one interaction that
-   * fails quietly on a touch screen and needs a fallback anyway. Two buttons
-   * work everywhere, say what they will do, and can be pressed repeatedly
-   * without the list moving out from under the finger.
-   */
-  const move = async (section, by) => {
-    const order = sections.map((entry) => entry.id);
-    const at = order.indexOf(section.id);
-    const to = at + by;
-    if (at < 0 || to < 0 || to >= order.length) return;
-    [order[at], order[to]] = [order[to], order[at]];
-
-    /* Shown before it is saved: a list that waits for a round trip before it
-       moves feels like the button missed. */
-    setSections(order.map((id) => sections.find((entry) => entry.id === id)));
-    try {
-      await api.setSectionOrder(order);
-      onChanged?.();
-    } catch (failure) {
-      setError(failure.message);
-      load();
-    }
-  };
-
   const scan = async (section) => {
     setBusy(section.id);
     setScans((was) => ({ ...was, [section.id]: { running: true } }));
@@ -149,7 +122,7 @@ export function SectionsPanel({ isOwner, onChanged }) {
         * nothing worth reading under it either — the switch says all of it — so
         * it stays shut until somebody opens it.
         */}
-      {sections.map((section, index) => (
+      {sections.map((section) => (
         <details
           className="settings-card"
           key={section.id}
@@ -157,33 +130,7 @@ export function SectionsPanel({ isOwner, onChanged }) {
              leaving somebody to wonder where the folder button went. */
           open={section.on}
         >
-          <summary>
-            <h2>{section.label}</h2>
-            {/* Inside the summary, so they sit on the row the section is
-                named on; the press must not also fold the card. */}
-            <span className="section-move">
-              <button
-                type="button"
-                className="chip"
-                title={'Move ' + section.label + ' up'}
-                aria-label={'Move ' + section.label + ' up'}
-                disabled={index === 0}
-                onClick={(event) => { event.preventDefault(); move(section, -1); }}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="chip"
-                title={'Move ' + section.label + ' down'}
-                aria-label={'Move ' + section.label + ' down'}
-                disabled={index === sections.length - 1}
-                onClick={(event) => { event.preventDefault(); move(section, 1); }}
-              >
-                ↓
-              </button>
-            </span>
-          </summary>
+          <summary><h2>{section.label}</h2></summary>
 
           <label className="toggle-row">
             <input
