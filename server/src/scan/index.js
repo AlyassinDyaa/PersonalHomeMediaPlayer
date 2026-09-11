@@ -397,7 +397,7 @@ export async function runScan({ onProgress = () => {} } = {}) {
   }
 
   onProgress({ phase: 'persist', message: 'Writing to database' });
-  const stats = persist(merged, grouped.suggestions, scanId, startedAt);
+  const stats = persist(merged, grouped.suggestions, scanId, startedAt, walked.missingRoots);
   stats.mergedByTmdb = mergeCount;
 
   // Warm the image cache so browsing works with no connection.
@@ -426,8 +426,14 @@ export async function runScan({ onProgress = () => {} } = {}) {
   };
 }
 
-/** Write a scan result to the database in a single transaction. */
-function persist(enriched, suggestions, scanId, startedAt) {
+/**
+ * Write a scan result to the database in a single transaction.
+ *
+ * missingRoots comes in because the decision to delete depends on it: a walk
+ * that could not read one of the folders has not established that anything is
+ * gone, only that it could not look.
+ */
+function persist(enriched, suggestions, scanId, startedAt, missingRoots = []) {
   return transaction((db) => {
     const timestamp = now();
     const seenItems = new Set();
@@ -633,15 +639,66 @@ function persist(enriched, suggestions, scanId, startedAt) {
       }
     }
 
-    // Remove rows for files and items that no longer exist on disk. Progress
-    // rows cascade, which is correct: the file is gone.
-    const staleVideos = db.prepare('SELECT id FROM videos').all()
-      .filter((row) => !seenVideos.has(row.id));
+    /*
+     * What may be removed, and when nothing may be.
+     *
+     * A file that is no longer on the disk should go, and its position with
+     * it: that is what this step is for. But "not on the disk" is decided by
+     * what the walk found, and a walk finds nothing when a drive is asleep,
+     * unplugged, or answering slowly — and then this deletes the entire
+     * library, quietly, in the name of tidiness. That has happened twice
+     * here, once taking four thousand seven hundred files and every resume
+     * position with them.
+     *
+     * So two conditions have to hold before anything is deleted. Every folder
+     * the library was told about has to have been there, and the walk has to
+     * have found a believable amount of what is already indexed. A drive that
+     * is present but returning half its contents is not a drive to take
+     * instructions from.
+     *
+     * Erring this way is cheap: a library that keeps a row for a file
+     * somebody genuinely deleted shows one stale entry until the next scan,
+     * and a scan that prunes when it should not have loses everything.
+     */
+    const indexed = db.prepare(
+      "SELECT COUNT(*) c FROM videos v JOIN items i ON i.id = v.item_id WHERE i.section = 'library'",
+    ).get().c;
+    const foundEnough = indexed < 20 || seenVideos.size >= indexed * 0.5;
+    const mayPrune = missingRoots.length === 0 && foundEnough;
+
+    const heldBack = !mayPrune
+      ? (missingRoots.length
+        ? 'a folder the library was told about could not be read: '
+          + missingRoots.join(', ')
+        : 'the walk found ' + seenVideos.size + ' files where ' + indexed
+          + ' are indexed, which is too few to trust')
+      : null;
+    if (heldBack) {
+      onProgress({ phase: 'persist', message: 'Nothing removed — ' + heldBack });
+    }
+
+    /*
+     * And only ever the film library.
+     *
+     * Family and artwork are written as ordinary items so they play like
+     * anything else, which means an unscoped sweep counts them as files this
+     * scan did not see — because it never looked in their folders — and
+     * deletes the lot. They are read by their own scan and pruned by it.
+     */
+    const staleVideos = mayPrune
+      ? db.prepare(`
+          SELECT v.id FROM videos v
+          JOIN items i ON i.id = v.item_id
+          WHERE i.section = 'library'
+        `).all().filter((row) => !seenVideos.has(row.id))
+      : [];
     const deleteVideo = db.prepare('DELETE FROM videos WHERE id = ?');
     for (const row of staleVideos) deleteVideo.run(row.id);
 
-    const staleItems = db.prepare('SELECT id FROM items').all()
-      .filter((row) => !seenItems.has(row.id));
+    const staleItems = mayPrune
+      ? db.prepare("SELECT id FROM items WHERE section = 'library'").all()
+        .filter((row) => !seenItems.has(row.id))
+      : [];
     const deleteItem = db.prepare('DELETE FROM items WHERE id = ?');
     for (const row of staleItems) deleteItem.run(row.id);
 
@@ -656,19 +713,27 @@ function persist(enriched, suggestions, scanId, startedAt) {
      * After the stale videos above, not before, or the counts would still
      * include files that are on their way out.
      */
-    const emptySeasons = db.prepare(`
-      SELECT s.id FROM seasons s
-      WHERE NOT EXISTS (SELECT 1 FROM videos v WHERE v.season_id = s.id)
-        AND NOT EXISTS (
-          SELECT 1 FROM videos v WHERE v.item_id = s.item_id AND v.season = s.number
-        )
-    `).all();
+    const emptySeasons = mayPrune
+      ? db.prepare(`
+          SELECT s.id FROM seasons s
+          JOIN items i ON i.id = s.item_id
+          WHERE i.section = 'library'
+            AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.season_id = s.id)
+            AND NOT EXISTS (
+              SELECT 1 FROM videos v WHERE v.item_id = s.item_id AND v.season = s.number
+            )
+        `).all()
+      : [];
     const deleteSeason = db.prepare('DELETE FROM seasons WHERE id = ?');
     for (const row of emptySeasons) deleteSeason.run(row.id);
 
-    const emptyItems = db.prepare(
-      'SELECT id FROM items WHERE NOT EXISTS (SELECT 1 FROM videos v WHERE v.item_id = items.id)',
-    ).all();
+    const emptyItems = mayPrune
+      ? db.prepare(`
+          SELECT id FROM items
+          WHERE section = 'library'
+            AND NOT EXISTS (SELECT 1 FROM videos v WHERE v.item_id = items.id)
+        `).all()
+      : [];
     for (const row of emptyItems) deleteItem.run(row.id);
 
     db.prepare('DELETE FROM suggestions WHERE resolved = 0').run();
@@ -692,6 +757,8 @@ function persist(enriched, suggestions, scanId, startedAt) {
       removedVideos: staleVideos.length,
       removedItems: staleItems.length,
       suggestions: suggestions.length,
+      /* Null on an ordinary scan; a sentence when nothing was allowed to go. */
+      heldBack,
     };
 
     db.prepare('INSERT OR REPLACE INTO scans (id, started_at, finished_at, stats) VALUES (?,?,?,?)')

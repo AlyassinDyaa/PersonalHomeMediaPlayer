@@ -76,6 +76,33 @@ export function SectionsPanel({ isOwner, onChanged }) {
     }
   };
 
+  /*
+   * Up and down rather than dragging.
+   *
+   * Five rows do not need a drag, and a drag is the one interaction that
+   * fails quietly on a touch screen and needs a fallback anyway. Two buttons
+   * work everywhere, say what they will do, and can be pressed repeatedly
+   * without the list moving out from under the finger.
+   */
+  const move = async (section, by) => {
+    const order = sections.map((entry) => entry.id);
+    const at = order.indexOf(section.id);
+    const to = at + by;
+    if (at < 0 || to < 0 || to >= order.length) return;
+    [order[at], order[to]] = [order[to], order[at]];
+
+    /* Shown before it is saved: a list that waits for a round trip before it
+       moves feels like the button missed. */
+    setSections(order.map((id) => sections.find((entry) => entry.id === id)));
+    try {
+      await api.setSectionOrder(order);
+      onChanged?.();
+    } catch (failure) {
+      setError(failure.message);
+      load();
+    }
+  };
+
   const scan = async (section) => {
     setBusy(section.id);
     setScans((was) => ({ ...was, [section.id]: { running: true } }));
@@ -114,9 +141,49 @@ export function SectionsPanel({ isOwner, onChanged }) {
     <>
       {error && <div className="banner" style={{ margin: '0 0 14px' }}>{error}</div>}
 
-      {sections.map((section) => (
-        <details className="settings-card" key={section.id} open={section.on}>
-          <summary><h2>{section.label}</h2></summary>
+      {/*
+        * Open only what is in use.
+        *
+        * Five sections expanded at once is a page nobody can see the shape of,
+        * and four of them are usually settled. One that is switched off has
+        * nothing worth reading under it either — the switch says all of it — so
+        * it stays shut until somebody opens it.
+        */}
+      {sections.map((section, index) => (
+        <details
+          className="settings-card"
+          key={section.id}
+          /* Keyed on the switch so turning one on opens it, rather than
+             leaving somebody to wonder where the folder button went. */
+          open={section.on}
+        >
+          <summary>
+            <h2>{section.label}</h2>
+            {/* Inside the summary, so they sit on the row the section is
+                named on; the press must not also fold the card. */}
+            <span className="section-move">
+              <button
+                type="button"
+                className="chip"
+                title={'Move ' + section.label + ' up'}
+                aria-label={'Move ' + section.label + ' up'}
+                disabled={index === 0}
+                onClick={(event) => { event.preventDefault(); move(section, -1); }}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="chip"
+                title={'Move ' + section.label + ' down'}
+                aria-label={'Move ' + section.label + ' down'}
+                disabled={index === sections.length - 1}
+                onClick={(event) => { event.preventDefault(); move(section, 1); }}
+              >
+                ↓
+              </button>
+            </span>
+          </summary>
 
           <label className="toggle-row">
             <input
@@ -147,7 +214,7 @@ export function SectionsPanel({ isOwner, onChanged }) {
                   <p className="settings-hint">
                     {section.roots.length === 0
                       ? 'Give it a folder and it will read what is in there. The folders inside become the groups.'
-                      : 'The folders inside these become the groups you see.'}
+                      : 'The folders inside these become the groups you see. Add as many folders as you like; they are read together.'}
                   </p>
 
                   {section.roots.map((root) => {
@@ -177,7 +244,7 @@ export function SectionsPanel({ isOwner, onChanged }) {
                       disabled={busy === section.id}
                       onClick={() => setAsking({ kind: 'folder', section })}
                     >
-                      + Add a folder
+                      {section.roots.length ? '+ Add another folder' : '+ Add a folder'}
                     </button>
                     <button
                       className="btn btn-primary"

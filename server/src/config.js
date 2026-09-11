@@ -193,6 +193,16 @@ export const config = {
    * library that hides them is not a library. Everything else is off until
    * it has been given somewhere to look.
    */
+  /*
+   * The order the sections are offered in.
+   *
+   * Which parts of a library matter most is not something this can know: a
+   * house that mostly watches television and a house that mostly reads comics
+   * want different things first, and the strip down the side is read top to
+   * bottom every time. Anything missing from the list keeps its place at the
+   * end, so a section added later appears without this needing to be rewritten.
+   */
+  sectionOrder: Array.isArray(local.sectionOrder) ? local.sectionOrder : [],
   sectionsOn: {
     shows: local.sectionsOn?.shows ?? true,
     movies: local.sectionsOn?.movies ?? true,
@@ -265,16 +275,16 @@ export const config = {
    * household that only ever wants rails should not have two buttons offering
    * to change something nobody wants changed.
    */
-  shelfLayouts: readLayouts(local.shelfLayouts ?? defaults.shelfLayouts),
-
-  /**
-   * Whether the home screen also arranges titles by genre.
-   *
-   * On by default, because a library with no shelves of its own needs some
-   * arrangement. Once somebody has made their own shelves those say far more
-   * about the library than "Animation" ever did, and this turns the guessed
-   * ones off so the made ones are what the page is.
-   */
+  shelfLayouts: readLayouts(local.shelfLayouts ?? defaults.shelfLayouts),
+
+  /**
+   * Whether the home screen also arranges titles by genre.
+   *
+   * On by default, because a library with no shelves of its own needs some
+   * arrangement. Once somebody has made their own shelves those say far more
+   * about the library than "Animation" ever did, and this turns the guessed
+   * ones off so the made ones are what the page is.
+   */
   genreShelves: local.genreShelves ?? defaults.genreShelves ?? true,
 
   /*
@@ -449,13 +459,22 @@ export function saveSettings(patch) {
     allowed.shelfStrength = Math.min(100, Math.max(10, Math.round(patch.shelfStrength)));
   }
   if (typeof patch.serveToTelevisions === 'boolean') allowed.serveToTelevisions = patch.serveToTelevisions;
-  if (Array.isArray(patch.shelfLayouts)) allowed.shelfLayouts = readLayouts(patch.shelfLayouts);
+  if (Array.isArray(patch.shelfLayouts)) allowed.shelfLayouts = readLayouts(patch.shelfLayouts);
   if (typeof patch.genreShelves === 'boolean') allowed.genreShelves = patch.genreShelves;
   if (Array.isArray(patch.comicRoots)) {
     allowed.comicRoots = normaliseRoots(patch.comicRoots);
   }
   if (Array.isArray(patch.familyRoots)) allowed.familyRoots = normaliseRoots(patch.familyRoots);
   if (Array.isArray(patch.artworkRoots)) allowed.artworkRoots = normaliseRoots(patch.artworkRoots);
+  if (Array.isArray(patch.sectionOrder)) {
+    const known = ['shows', 'movies', 'comics', 'family', 'artwork'];
+    const wanted = patch.sectionOrder.filter((id) => known.includes(id));
+    /* Deduplicated, and anything left out put back on the end, so the stored
+       order is always a complete one however odd the request was. */
+    const seen = new Set();
+    const ordered = wanted.filter((id) => (seen.has(id) ? false : seen.add(id)));
+    allowed.sectionOrder = [...ordered, ...known.filter((id) => !seen.has(id))];
+  }
   if (patch.sectionsOn && typeof patch.sectionsOn === 'object') {
     const on = {};
     for (const id of ['shows', 'movies', 'comics', 'family', 'artwork']) {
@@ -544,6 +563,7 @@ export function settingsView() {
     familyRoots: config.familyRoots,
     artworkRoots: config.artworkRoots,
     sectionsOn: config.sectionsOn,
+    sectionOrder: config.sectionOrder,
     showComics: config.showComics,
     background: config.background,
     backgroundColor: config.backgroundColor,
@@ -556,7 +576,7 @@ export function settingsView() {
     railOpacity: config.railOpacity,
     backgroundStrength: config.backgroundStrength,
     serveToTelevisions: config.serveToTelevisions,
-    shelfLayouts: config.shelfLayouts,
+    shelfLayouts: config.shelfLayouts,
     genreShelves: config.genreShelves,
     comicRootsStatus: config.comicRoots.map((root) => ({
       path: root,

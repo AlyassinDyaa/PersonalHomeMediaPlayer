@@ -169,12 +169,12 @@ function buildSeriesFolders(topFolder, classification) {
    * same test used for near-identical names below, for the same reason.
    */
   // Strip season markers out of the folder name before reading a title from it.
-  const folderWithoutSeason = topFolder
-    .replace(/\bS\d{1,2}\s?[-+–]\s?S?\d{1,2}\b/gi, ' ')
-    .replace(/\bS\d{1,2}\b/gi, ' ')
-    .replace(/\bseasons?\s*[\d\s-]+\b/gi, ' ')
-    .replace(/\ball\s+seasons?\b/gi, ' ');
-  const folderParsed = parseTitle(folderWithoutSeason);
+  const folderWithoutSeason = topFolder
+    .replace(/\bS\d{1,2}\s?[-+–]\s?S?\d{1,2}\b/gi, ' ')
+    .replace(/\bS\d{1,2}\b/gi, ' ')
+    .replace(/\bseasons?\s*[\d\s-]+\b/gi, ' ')
+    .replace(/\ball\s+seasons?\b/gi, ' ');
+  const folderParsed = parseTitle(folderWithoutSeason);
 
   /** What the folder itself claims to be, for comparing with the buckets. */
   const folderKey = folderParsed.title ? seriesKey(folderParsed.title) : '';

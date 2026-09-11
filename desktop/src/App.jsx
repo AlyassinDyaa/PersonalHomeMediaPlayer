@@ -375,6 +375,19 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       return mySections?.includes(entry.id) ?? true;
     }
     return true;
+  }).sort((a, b) => {
+    /*
+     * In the order the owner put them.
+     *
+     * Home, the lists and the way into Settings are fixed — they are not
+     * sections and nobody is arranging them — so they keep the places this
+     * file gives them, and the sections sort themselves in between.
+     */
+    const rank = (entry) => {
+      const at = (mySections ?? []).indexOf(entry.id);
+      return at < 0 ? Number.MAX_SAFE_INTEGER : at;
+    };
+    return rank(a) - rank(b);
   }), [showComics, mySections]);
 
   useEffect(() => {
@@ -1371,11 +1384,21 @@ const SECTION_ICONS = {
       <circle cx="14.4" cy="14" r="1.4" />
     </svg>
   ),
+  /*
+   * A brush, not a picture frame.
+   *
+   * The frame said "pictures", which is what the section holds rather than
+   * what it is for — and beside a television and a film reel it read as one
+   * more container. A brush says somebody made these.
+   */
   artwork: (
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
-      <circle cx="9" cy="9.5" r="1.6" />
-      <path d="M4.5 16.5 9 12.5l3.5 3 3-2.5 4 4" />
+      {/* The handle, running up to the right. */}
+      <path d="M20.2 3.8a2 2 0 0 0-2.8 0l-6.5 6.5 2.8 2.8 6.5-6.5a2 2 0 0 0 0-2.8z" />
+      {/* The ferrule. */}
+      <path d="M10.9 10.3 13.7 13.1" />
+      {/* The bristles, and the stroke they leave. */}
+      <path d="M9.6 11.6c-1.6-.6-3.2.2-3.9 1.7-.6 1.3-.4 2.4-1.6 3.4-.5.4-.8.6-.8.6s1.6 1.1 3.6 1.1c2.4 0 4.3-1.5 4.3-3.6 0-1.4-.6-2.6-1.6-3.2z" />
     </svg>
   ),
   lists: (

@@ -1145,30 +1145,32 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'maintenance' && (
           <>
-          <details className="settings-card" open>
-            <summary><h2>Folders</h2></summary>
-            <p className="settings-hint">
-              Point at any folder containing movies or TV shows. Sub-folders are searched
-              automatically, and nothing needs renaming.
-            </p>
-
-            {!hasRoots && (
-              <p className="settings-empty">No folders added yet.</p>
-            )}
-
-            {settings.rootsStatus.map((root) => (
-              <div className="root-row" key={root.path}>
-                <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
-                <code className="root-path">{root.path}</code>
-                {!root.available && <span className="root-warn">not connected</span>}
-                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
-              </div>
-            ))}
-
-            <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
-              + Add folder
-            </button>
-          </details>
+          <details className="settings-card" open>
+            <summary><h2>Folders</h2></summary>
+            <p className="settings-hint">
+              Point at any folder containing movies or TV shows. Sub-folders are searched
+              automatically, and nothing needs renaming. Add as many as you like —
+              a library spread over two drives is one library, and the scan reads
+              all of them.
+            </p>
+
+            {!hasRoots && (
+              <p className="settings-empty">No folders added yet.</p>
+            )}
+
+            {settings.rootsStatus.map((root) => (
+              <div className="root-row" key={root.path}>
+                <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
+                <code className="root-path">{root.path}</code>
+                {!root.available && <span className="root-warn">not connected</span>}
+                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
+              </div>
+            ))}
+
+            <button className="btn btn-secondary" style={{ marginTop: 14 }} onClick={() => setPicking('root')}>
+              {hasRoots ? '+ Add another folder' : '+ Add folder'}
+            </button>
+          </details>
 
           <details className="settings-card" open>
             <summary><h2>Scan</h2></summary>

@@ -274,7 +274,17 @@ export function Detail({ itemId, onBack, onPlay, library = [], onSelect = null }
     return <Skeleton detail />;
   }
 
-  const backdrop = artwork(item.backdrop, 'w1280');
+  /*
+   * Something behind the title, even where nothing was published.
+   *
+   * A home video has no backdrop and never will, so this page opened on a
+   * black rectangle with a filename over it. The file itself is the only
+   * picture there is, and one frame out of it says more than an empty hero
+   * does — the same frame the card in the section is already showing, so the
+   * page somebody came from and the page they land on agree.
+   */
+  const backdrop = artwork(item.backdrop, 'w1280')
+    ?? frameFrom(item.video ?? item.nextUp);
   const logo = artwork(item.logo, 'w500');
   const activeSeason = item.seasons?.find((s) => s.number === season);
 

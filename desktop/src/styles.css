@@ -7014,3 +7014,31 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   .section-folders { padding: 0 16px 22px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
   .picture-view { padding: 14px; }
 }
+
+/* --------------------------------------------- moving a section about --- */
+
+/*
+ * Up and down, on the row the section is named on.
+ *
+ * Inside the summary, so they read as belonging to that section rather than
+ * to the page; the press is stopped from also folding the card, which is what
+ * pressing a summary otherwise does.
+ */
+.section-move {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 10px;
+}
+
+.section-move .chip {
+  min-width: 30px;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1.1;
+}
+.section-move .chip:disabled { opacity: 0.3; cursor: default; }
+
+/* The heading no longer fills the row on its own. */
+.settings-card > summary { display: flex; align-items: center; gap: 10px; }
+.settings-card > summary h2 { margin-right: 0; }

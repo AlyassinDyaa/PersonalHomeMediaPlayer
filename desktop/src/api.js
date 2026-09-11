@@ -290,6 +290,12 @@ export const api = {
   // --- the parts of the library ----------------------------------------
   /** Every section and its state; the owner sees all of them. */
   sections: () => request('/api/sections'),
+  setSectionOrder: (order) =>
+    request('/api/sections/order', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    }),
   setSectionOn: (section, on) =>
     request('/api/sections/' + encodeURIComponent(section) + '/on', {
       method: 'PUT',

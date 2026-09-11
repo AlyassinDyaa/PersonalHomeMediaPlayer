@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import ProfileFace from './ProfileFace.jsx';
 import AvatarCropper from './AvatarCropper.jsx';
 import { api } from '../api.js';
-import { leaveProfile } from '../leave.js';
+import { leaveProfile } from '../leave.js';
 import Confirm from './Confirm.jsx';
 
 /**
