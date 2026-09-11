@@ -115,21 +115,15 @@ export function SectionsPanel({ isOwner, onChanged }) {
       {error && <div className="banner" style={{ margin: '0 0 14px' }}>{error}</div>}
 
       {/*
-        * Open only what is in use.
+        * All of them shut, until one is opened.
         *
         * Five sections expanded at once is a page nobody can see the shape of,
-        * and four of them are usually settled. One that is switched off has
-        * nothing worth reading under it either — the switch says all of it — so
-        * it stays shut until somebody opens it.
+        * and most of the time every one of them is settled. Shut, the page is
+        * a list of five headings and the one being looked for is found by
+        * reading rather than by scrolling past the other four.
         */}
       {sections.map((section) => (
-        <details
-          className="settings-card"
-          key={section.id}
-          /* Keyed on the switch so turning one on opens it, rather than
-             leaving somebody to wonder where the folder button went. */
-          open={section.on}
-        >
+        <details className="settings-card" key={section.id}>
           <summary><h2>{section.label}</h2></summary>
 
           <label className="toggle-row">

@@ -499,7 +499,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'library' && (
           <>
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Name</h2></summary>
             <p className="settings-hint">
               Your name appears in the header, so the library reads as yours.
@@ -692,7 +692,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * covers given the same treatment the real shelves get, so the
             * word underneath is a caption rather than the whole description.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>How shelves look</h2></summary>
             <p className="settings-hint">
               Every row of covers &mdash; your collections and the genres alike
@@ -840,7 +840,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * answers and a slider would invite fiddling with a number that
             * does not want tuning.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Cover size</h2></summary>
             <p className="settings-hint">
               How large the artwork is drawn, on every screen that draws it.
@@ -870,7 +870,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * Three panes, each a small picture of the column against the
             * backdrop, because "glass" means nothing until it is seen.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Sidebar</h2></summary>
             <p className="settings-hint">
               The column of sections down the left of a wide screen. A phone
@@ -937,7 +937,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * wants rails should not have two buttons inviting a change nobody
             * wants. Take them all but one away and the buttons disappear.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>How collections are shown</h2></summary>
             <p className="settings-hint">
               Collections can be laid out three ways on the Films, TV Shows and
@@ -974,7 +974,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             })}
           </details>
 
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>How the library is arranged</h2></summary>
             <p className="settings-hint">
               Films and series are normally shelved under genre headings. Where a
@@ -1029,7 +1029,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             <CollectionsPanel onChanged={onShelvesChanged} isOwner={isOwner} />
 
             {isOwner && (
-              <details className="settings-card" open>
+              <details className="settings-card">
                 <summary><h2>How the home screen is arranged</h2></summary>
 
                 <label className="toggle-row">
@@ -1069,7 +1069,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'playback' && (
           <>
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Playback</h2></summary>
             <p className="settings-hint">
               Skip prompts use chapter markers when a file has them. Most releases do
@@ -1107,7 +1107,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'sharing' && (
           <>
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Watch on other devices</h2></summary>
             <p className="settings-hint">
               Share the library with phones and tablets on your home network. They
@@ -1192,7 +1192,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * Televisions are the devices that cannot be asked to install
             * anything or to type a passcode, so they get their own switch.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Watch on the television</h2></summary>
             <p className="settings-hint">
               A Roku, or any set that plays from a network, has no browser and will
@@ -1243,7 +1243,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             * tablet sees, and that is where somebody wants to hand the iPad to
             * a guest, or stop being signed in on a borrowed one.
             */}
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>This device</h2></summary>
             <p className="settings-hint">
               Forget the passcode on this device. The library is still shared;
@@ -1267,7 +1267,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'maintenance' && (
           <>
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Folders</h2></summary>
             <p className="settings-hint">
               Point at any folder containing movies or TV shows. Sub-folders are searched
@@ -1299,7 +1299,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             </button>
           </details>
 
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Scan</h2></summary>
 
             {scan ? (
@@ -1345,7 +1345,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
           <HealthPanel />
 
           {merges.length > 0 && (
-            <details className="settings-card" open>
+            <details className="settings-card">
               <summary><h2>Shows you joined</h2></summary>
               <p className="settings-hint" style={{ marginTop: 0 }}>
                 These were answered "one show" and have been filed together ever
@@ -1385,7 +1385,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
           )}
 
           {suggestions.length > 0 && (
-            <details className="settings-card" open>
+            <details className="settings-card">
               <summary><h2>Is this one show or two?</h2></summary>
               <p className="settings-hint" style={{ marginTop: 0 }}>
                 These titles look related. The scanner will not join them without
@@ -1418,7 +1418,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             </details>
           )}
 
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Storage</h2></summary>
             <p className="settings-hint">
               Where this app keeps its own files — the index of your library and the
@@ -1452,7 +1452,7 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
             )}
           </details>
 
-          <details className="settings-card" open>
+          <details className="settings-card">
             <summary><h2>Status</h2></summary>
             <div className="status-row">
               <span>Artwork &amp; metadata</span>
