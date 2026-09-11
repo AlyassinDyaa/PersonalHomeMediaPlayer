@@ -22,7 +22,8 @@ import {
 import * as library from './library.js';
 import * as collections from './collections.js';
 // Which profiles are let into a whole area of the library, such as Comics.
-import { SECTIONS, blockedFrom, maySee, setAllowed } from './sections.js';
+import { SECTIONS, sectionInfo, allowedIn, maySee, setAllowed } from './sections.js';
+import { scanSection, rootsFor } from './sections/scan.js';
 import { walkLibrary } from './scan/walk.js';
 import { artworkStats, prefetchArtwork } from './meta/artwork.js';
 import { ensureAccents } from './meta/accent.js';
@@ -685,7 +686,18 @@ app.get('/api/videos/:id/frame', async (req, res) => {
   if (!video) return res.status(404).json({ error: 'not found' });
 
   const at = snap(req.query.t);
-  const file = await frameAt(video.id, video.path, at);
+  let file = await frameAt(video.id, video.path, at);
+
+  /*
+   * Past the end is not a reason to show nothing.
+   *
+   * The time asked for is worked out from the runtime, and a file whose
+   * runtime was never measured is guessed at — four minutes in, which is
+   * past the end of any clip shorter than that. The guess failing should
+   * cost a worse frame, not the whole picture, so a second try is made near
+   * the start, which every video has.
+   */
+  if (!file && at > 5) file = await frameAt(video.id, video.path, 3);
   if (!file) return res.status(404).json({ error: 'no frame there' });
 
   // The frame for a given second never changes, so it can be kept for good.
@@ -1242,14 +1254,188 @@ app.get('/api/settings', (req, res) => {
  * Who may see one section of the library.
  *
  * The owner's question, so only the owner is answered. Sent as the profiles
- * allowed rather than the profiles blocked, which is how it is asked and how
- * it is shown; sections.js keeps it the other way round for its own reasons.
+ * allowed, which is both how it is asked and how it is stored.
  */
+/*
+ * What the library is made of, and what state each part is in.
+ *
+ * The owner's view: every section whether or not it is switched on, with
+ * where it looks and how much it found. Everybody else is told only which
+ * sections they may see, which is all the app needs to draw its tabs.
+ */
+app.get('/api/sections', (req, res) => {
+  const owner = Boolean(req.profile?.isOwner);
+  const on = config.sectionsOn ?? {};
+  const db = getDb();
+
+  if (!owner) {
+    const mine = SECTIONS
+      .filter((entry) => on[entry.id] !== false && maySee(entry.id, req.profile?.id))
+      .map((entry) => ({ id: entry.id, label: entry.label }));
+    res.json({ sections: mine });
+    return;
+  }
+
+  res.json({
+    sections: SECTIONS.map((entry) => {
+      const roots = entry.folders ? rootsFor(entry.id) : [];
+      const counts = entry.folders && entry.id !== 'comics'
+        ? {
+          videos: db.prepare('SELECT COUNT(*) c FROM items WHERE section = ?').get(entry.id).c,
+          images: db.prepare('SELECT COUNT(*) c FROM section_images WHERE section = ?').get(entry.id).c,
+          folders: db.prepare('SELECT COUNT(*) c FROM section_folders WHERE section = ?').get(entry.id).c,
+        }
+        : null;
+      return {
+        id: entry.id,
+        label: entry.label,
+        hint: entry.hint,
+        folders: entry.folders,
+        media: entry.media,
+        on: on[entry.id] !== false,
+        roots,
+        rootsStatus: roots.map((root) => ({ path: root, available: fs.existsSync(root) })),
+        counts,
+      };
+    }),
+  });
+});
+
+/** Switch a section on or off. */
+app.put('/api/sections/:section/on', requireOwner, (req, res) => {
+  const { section } = req.params;
+  if (!sectionInfo(section)) return res.status(404).json({ error: 'No such section' });
+  const on = req.body?.on !== false;
+  const saved = saveSettings({ sectionsOn: { [section]: on } });
+  res.json({ section, on: saved.sectionsOn?.[section] !== false });
+});
+
+/** Where a section looks. */
+app.put('/api/sections/:section/roots', requireOwner, (req, res) => {
+  const { section } = req.params;
+  const info = sectionInfo(section);
+  if (!info?.folders) return res.status(404).json({ error: 'That section keeps no folders' });
+  if (!Array.isArray(req.body?.roots)) {
+    return res.status(400).json({ error: 'Say where to look, as a list of folders' });
+  }
+  const key = section === 'comics' ? 'comicRoots'
+    : section === 'family' ? 'familyRoots' : 'artworkRoots';
+  const saved = saveSettings({ [key]: req.body.roots });
+  res.json({ section, roots: saved[key] ?? [] });
+});
+
+/* One scan at a time per section, so a second press does not walk the same
+   folders alongside the first. */
+const sectionScanning = new Set();
+
+app.post('/api/sections/:section/scan', requireOwner, (req, res) => {
+  const { section } = req.params;
+  const info = sectionInfo(section);
+  if (!info?.folders) return res.status(404).json({ error: 'That section keeps no folders' });
+  if (section === 'comics') return res.status(400).json({ error: 'Comics have their own scan' });
+  if (sectionScanning.has(section)) {
+    return res.status(409).json({ error: 'That section is already being scanned' });
+  }
+
+  sectionScanning.add(section);
+  try {
+    res.json(scanSection(section));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  } finally {
+    sectionScanning.delete(section);
+  }
+});
+
+/**
+ * What is in a section: its folders, and what each holds.
+ *
+ * Gated on being let in rather than on being the owner, because this is the
+ * screen everybody who has the section actually looks at.
+ */
+app.get('/api/sections/:section/contents', (req, res) => {
+  const { section } = req.params;
+  const info = sectionInfo(section);
+  if (!info?.folders) return res.status(404).json({ error: 'No such section' });
+  if ((config.sectionsOn ?? {})[section] === false) {
+    return res.status(404).json({ error: 'No such section' });
+  }
+  if (!maySee(section, req.profile?.id)) return res.status(404).json({ error: 'No such section' });
+
+  res.json(library.sectionContents(section, req.profile));
+});
+
+/** One picture, sent from wherever it lives on the disk. */
+app.get('/api/sections/:section/image/:id', (req, res) => {
+  const { section, id } = req.params;
+  if (!sectionInfo(section)) return res.status(404).end();
+  if (!maySee(section, req.profile?.id)) return res.status(404).end();
+
+  const row = getDb()
+    .prepare('SELECT path FROM section_images WHERE id = ? AND section = ?')
+    .get(id, section);
+  if (!row || !fs.existsSync(row.path)) return res.status(404).end();
+
+  /* It only changes if it is replaced, and then it is a different file in the
+     same place — a day is a fair bet against fetching a hundred of these on
+     every visit to a gallery. */
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.sendFile(row.path);
+});
+
+/** Rename a folder — the heading, not the folder on the disk. */
+app.put('/api/sections/:section/folders/:id', requireOwner, (req, res) => {
+  const { section, id } = req.params;
+  if (!sectionInfo(section)) return res.status(404).json({ error: 'No such section' });
+
+  const name = String(req.body?.name ?? '').trim().slice(0, 80);
+  const changed = getDb()
+    .prepare('UPDATE section_folders SET name = ? WHERE id = ? AND section = ?')
+    .run(name, id, section);
+  if (!changed.changes) return res.status(404).json({ error: 'No such folder' });
+  res.json({ id, name });
+});
+
+/**
+ * Make a folder inside a section.
+ *
+ * A real folder on the disk, because that is what the section is a view of —
+ * a heading with nothing behind it would vanish at the next scan. Made under
+ * one of the section's own roots and nowhere else.
+ */
+app.post('/api/sections/:section/folders', requireOwner, (req, res) => {
+  const { section } = req.params;
+  const info = sectionInfo(section);
+  if (!info?.folders) return res.status(404).json({ error: 'No such section' });
+
+  const roots = rootsFor(section);
+  if (!roots.length) return res.status(400).json({ error: 'Give the section a folder first' });
+
+  const name = String(req.body?.name ?? '').trim();
+  if (!name || /[\\/:*?"<>|]/.test(name)) {
+    return res.status(400).json({ error: 'That is not a name a folder can have' });
+  }
+
+  const under = req.body?.under && roots.includes(req.body.under) ? req.body.under : roots[0];
+  const full = path.join(under, name);
+  /* Never above the root it was asked for, whatever the name tried to say. */
+  if (!path.resolve(full).startsWith(path.resolve(under))) {
+    return res.status(400).json({ error: 'That folder would sit outside the section' });
+  }
+
+  try {
+    fs.mkdirSync(full, { recursive: true });
+    res.json({ section, path: full });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/sections/:section/access', requireOwner, (req, res) => {
   const { section } = req.params;
-  if (!SECTIONS.has(section)) return res.status(404).json({ error: 'No such section' });
+  if (!sectionInfo(section)) return res.status(404).json({ error: 'No such section' });
 
-  const blocked = new Set(blockedFrom(section));
+  const granted = new Set(allowedIn(section));
   res.json({
     section,
     profiles: listProfiles().map((profile) => ({
@@ -1260,14 +1446,14 @@ app.get('/api/sections/:section/access', requireOwner, (req, res) => {
       colour: profile.colour,
       avatarAt: profile.avatarAt,
       // The owner always may, and cannot be un-ticked.
-      allowed: profile.isOwner || !blocked.has(profile.id),
+      allowed: profile.isOwner || granted.has(profile.id),
     })),
   });
 });
 
 app.put('/api/sections/:section/access', requireOwner, (req, res) => {
   const { section } = req.params;
-  if (!SECTIONS.has(section)) return res.status(404).json({ error: 'No such section' });
+  if (!sectionInfo(section)) return res.status(404).json({ error: 'No such section' });
 
   const allowed = req.body?.allowed;
   if (!Array.isArray(allowed)) {
@@ -1276,11 +1462,11 @@ app.put('/api/sections/:section/access', requireOwner, (req, res) => {
 
   try {
     setAllowed(section, allowed);
-    const blocked = new Set(blockedFrom(section));
+    const granted = new Set(allowedIn(section));
     res.json({
       section,
       allowed: listProfiles()
-        .filter((profile) => profile.isOwner || !blocked.has(profile.id))
+        .filter((profile) => profile.isOwner || granted.has(profile.id))
         .map((profile) => profile.id),
     });
   } catch (error) {

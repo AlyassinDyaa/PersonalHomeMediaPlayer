@@ -8,6 +8,7 @@ import Browse from './components/Browse.jsx';
 import Comics from './components/Comics.jsx';
 import Lists from './components/Lists.jsx';
 import Mosaic from './components/Mosaic.jsx';
+import SectionView from './components/SectionView.jsx';
 import ComicReader from './components/ComicReader.jsx';
 import { shelveByGenre } from './genres.js';
 import { applyBackground } from './backgrounds.js';
@@ -72,6 +73,8 @@ const VIEWS = [
   { id: 'shows', label: 'TV Shows', glyph: '▦' },
   { id: 'movies', label: 'Movies', glyph: '▶' },
   { id: 'comics', label: 'Comics', glyph: '❐' },
+  { id: 'family', label: 'Family', glyph: '⌂' },
+  { id: 'artwork', label: 'Artwork', glyph: '▨' },
   { id: 'lists', label: 'My Lists', glyph: '☆' },
   { id: 'library', label: 'Library', glyph: '⚙' },
 ];
@@ -104,6 +107,15 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
   const [backlog, setBacklog] = useState([]);
   /* A run of comics the Lists page asked to have opened, once on Comics. */
   const [comicSeries, setComicSeries] = useState(null);
+  /*
+   * The sections this profile may see.
+   *
+   * Asked of the server rather than worked out here: whether a section is
+   * switched on is the owner's business and whether this person is in it is
+   * theirs, and neither is something the app should be deciding for itself.
+   * Null until the answer arrives, so nothing flickers into view first.
+   */
+  const [mySections, setMySections] = useState(null);
   const [genres, setGenres] = useState([]);
   /** Shelves the user arranged by hand, in Settings. */
   const [collections, setCollections] = useState([]);
@@ -189,6 +201,21 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
       setFavourites(kept);
       setWatchlist({ items: later?.items ?? [], comics: later?.comics ?? [] });
       setBacklog(Array.isArray(aside) ? aside : []);
+      api.sections()
+        .then((answer) => setMySections((answer.sections ?? [])
+          /*
+           * Switched on, as well as permitted.
+           *
+           * The owner is sent every section whether or not it is on, because
+           * the Settings page has to draw the switches — so the list that
+           * decides which icons appear has to read that flag rather than
+           * assume being sent a section means having it. Everybody else is
+           * sent only what they have, and those entries carry no flag, which
+           * is why this asks whether it is false rather than whether it is true.
+           */
+          .filter((entry) => entry.on !== false)
+          .map((entry) => entry.id)))
+        .catch(() => setMySections([]));
       setGenres(genreList);
       setCollections(shelves);
       setAllShelves(everyShelf);
@@ -335,14 +362,27 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
    * falls back to Home rather than leaving a tab selected that is no longer
    * in the strip.
    */
-  const tabs = useMemo(
-    () => VIEWS.filter((entry) => entry.id !== 'comics' || showComics),
-    [showComics],
-  );
+  const tabs = useMemo(() => VIEWS.filter((entry) => {
+    /*
+     * Comics kept its own switch from before sections existed, and the two
+     * agree; the rest are offered only where the server said so.
+     */
+    if (entry.id === 'comics') return showComics && (mySections?.includes('comics') ?? true);
+    if (entry.id === 'family' || entry.id === 'artwork') {
+      return mySections?.includes(entry.id) ?? false;
+    }
+    if (entry.id === 'shows' || entry.id === 'movies') {
+      return mySections?.includes(entry.id) ?? true;
+    }
+    return true;
+  }), [showComics, mySections]);
 
   useEffect(() => {
     if (!showComics && view === 'comics') setView('home');
-  }, [showComics, view]);
+    if (mySections && !tabs.some((entry) => entry.id === view) && view !== 'library') {
+      setView('home');
+    }
+  }, [showComics, view, tabs, mySections]);
 
   /* Whether the search screen is up. On a phone searching is a destination
      of its own rather than a field wedged into the bar. */
@@ -1102,6 +1142,17 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
         />
       )}
 
+      {!loading && (view === 'family' || view === 'artwork') && (
+        <SectionView
+          key={view}
+          section={view}
+          label={view === 'family' ? 'Family' : 'Artwork'}
+          isOwner={Boolean(me?.isOwner)}
+          onSelect={openDetail}
+          onLongPress={setHeldItem}
+        />
+      )}
+
       {!loading && view === 'lists' && (
         <Lists
           favourites={favourites}
@@ -1310,6 +1361,21 @@ const SECTION_ICONS = {
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12 6.5C10.5 5 8.5 4.3 5 4.3v13c3.5 0 5.5.7 7 2.2 1.5-1.5 3.5-2.2 7-2.2v-13c-3.5 0-5.5.7-7 2.2z" />
       <path d="M12 6.5v13" />
+    </svg>
+  ),
+  family: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 11.5 12 4.5l8 7" />
+      <path d="M6 10.5V19h12v-8.5" />
+      <circle cx="9.6" cy="14" r="1.4" />
+      <circle cx="14.4" cy="14" r="1.4" />
+    </svg>
+  ),
+  artwork: (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <circle cx="9" cy="9.5" r="1.6" />
+      <path d="M4.5 16.5 9 12.5l3.5 3 3-2.5 4 4" />
     </svg>
   ),
   lists: (

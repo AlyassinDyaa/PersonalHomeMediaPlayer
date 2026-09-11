@@ -135,6 +135,58 @@ CREATE INDEX IF NOT EXISTS idx_profiles_order ON profiles(position, created_at);
 -- Keyed by section name rather than by a column per section, because the next
 -- one of these is already known about and a table that grows a column every
 -- time is a migration every time.
+/*
+ * A folder inside a section, and what to call it.
+ *
+ * The arrangement comes from the disk — whatever the folders are, those are
+ * the groups — but the name does not have to. A folder called "2019-08
+ * holiday raw" is a fine name for a folder and a poor heading on a screen, so
+ * a name given here stands in front of it. Empty means use the folder's own.
+ */
+CREATE TABLE IF NOT EXISTS section_folders (
+  id         TEXT PRIMARY KEY,
+  section    TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  path       TEXT NOT NULL,
+  name       TEXT NOT NULL DEFAULT '',
+  added_at   INTEGER NOT NULL,
+  UNIQUE (section, kind, path)
+);
+
+/*
+ * A picture in a section.
+ *
+ * Not a video and so not an item: it has no runtime, nothing to resume, and
+ * nothing to look up anywhere. Kept apart rather than forced into a shape
+ * built for films.
+ */
+CREATE TABLE IF NOT EXISTS section_images (
+  id         TEXT PRIMARY KEY,
+  section    TEXT NOT NULL,
+  folder_id  TEXT,
+  path       TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  size       INTEGER NOT NULL DEFAULT 0,
+  added_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_section_images ON section_images(section, folder_id);
+
+/*
+ * Who has been let into a section.
+ *
+ * The other way round from how this started. It used to record who was shut
+ * out, so switching a section on gave it to the whole house at once — the
+ * right default for a shelf of comics bought for everybody, and the wrong one
+ * for anything private. Now nobody has a section until they are given it, and
+ * the owner always has it.
+ */
+CREATE TABLE IF NOT EXISTS section_grants (
+  section    TEXT NOT NULL,
+  profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  PRIMARY KEY (section, profile_id)
+);
+
 CREATE TABLE IF NOT EXISTS section_blocks (
   section    TEXT NOT NULL,
   profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
@@ -433,6 +485,20 @@ const MIGRATIONS = [
    */
   { table: 'items', column: 'end_year', definition: 'INTEGER' },
   /*
+   * Which part of the library a title belongs to.
+   *
+   * Everything scanned from the film and television folders is "library" and
+   * always was; the sections added later keep their own titles apart under
+   * their own name. Held on the title rather than in a table of its own so
+   * every query that already knows how to find a film — playback, resume,
+   * favourites, the lot — keeps working for them without being taught
+   * anything new. What it must be taught is to leave them out, which is one
+   * clause in the few places that list "the library".
+   */
+  { table: 'items', column: 'section', definition: "TEXT NOT NULL DEFAULT 'library'" },
+  /* The folder it was found in, for the sections that are arranged that way. */
+  { table: 'items', column: 'folder_id', definition: 'TEXT' },
+  /*
    * Where a shelf belongs: the films screen, the shows screen, or both.
    *
    * Added after collections shipped, so existing shelves need the column put
@@ -461,6 +527,11 @@ function migrate(db) {
     fillEndYears(db);
   } catch {
     // A date that could not be filled in is not a reason to refuse to open.
+  }
+  try {
+    carryOverSectionAccess(db);
+  } catch {
+    // Same: a library that opens without this is better than one that does not.
   }
 }
 
@@ -521,6 +592,48 @@ function fillEndYears(db) {
     }
   }
   if (filled) console.log('filled in the end year for ' + filled + ' series');
+}
+
+/**
+ * Turn "who was shut out" into "who was let in", once.
+ *
+ * Comics used to be on for the whole house the moment it was switched on, and
+ * a row existed only for somebody taken off it. Reading that table the new way
+ * round would have said nobody had comics at all, so everybody in the house
+ * would have lost a section they were using — a silent revocation, which is
+ * the worst way for a permission change to arrive.
+ *
+ * So the old answer is carried across: anybody not shut out is granted. Done
+ * once, guarded by whether any grant exists yet, and only where the old table
+ * is actually there.
+ */
+function carryOverSectionAccess(db) {
+  const has = (name) => db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(name);
+  if (!has('section_grants') || !has('section_blocks') || !has('profiles')) return;
+
+  const already = db.prepare('SELECT 1 FROM section_grants LIMIT 1').get();
+  if (already) return;
+
+  const sections = db.prepare('SELECT DISTINCT section FROM section_blocks').all();
+  /* Nothing was ever restricted, so there is nothing to carry: comics was on
+     for everybody, and that is what an empty blocks table meant. */
+  if (sections.length === 0) return;
+
+  const profiles = db.prepare('SELECT id FROM profiles').all();
+  const blocked = db.prepare('SELECT 1 FROM section_blocks WHERE section = ? AND profile_id = ?');
+  const grant = db.prepare('INSERT OR IGNORE INTO section_grants (section, profile_id) VALUES (?, ?)');
+
+  let carried = 0;
+  for (const { section } of sections) {
+    for (const profile of profiles) {
+      if (blocked.get(section, profile.id)) continue;
+      grant.run(section, profile.id);
+      carried += 1;
+    }
+  }
+  if (carried) console.log('carried ' + carried + ' section permissions across');
 }
 
 /**

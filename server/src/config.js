@@ -177,6 +177,29 @@ export const config = {
    * find nothing, and pointing the comic scanner at a film folder the same.
    */
   comicRoots: normaliseRoots(local.comicRoots ?? defaults.comicRoots ?? []),
+  /*
+   * Where the sections added after comics keep their files.
+   *
+   * Each has its own, because the point of a section is that it is somewhere
+   * else — pointing two of them at one folder would scan the same files twice
+   * and file them under two names.
+   */
+  familyRoots: normaliseRoots(local.familyRoots ?? defaults.familyRoots ?? []),
+  artworkRoots: normaliseRoots(local.artworkRoots ?? defaults.artworkRoots ?? []),
+  /*
+   * Which sections are switched on.
+   *
+   * Films and television are on unless somebody says otherwise, because a
+   * library that hides them is not a library. Everything else is off until
+   * it has been given somewhere to look.
+   */
+  sectionsOn: {
+    shows: local.sectionsOn?.shows ?? true,
+    movies: local.sectionsOn?.movies ?? true,
+    comics: local.sectionsOn?.comics ?? (local.showComics ?? false),
+    family: local.sectionsOn?.family ?? false,
+    artwork: local.sectionsOn?.artwork ?? false,
+  },
 
   /**
    * Whether the Comics tab is offered at all.
@@ -431,6 +454,19 @@ export function saveSettings(patch) {
   if (Array.isArray(patch.comicRoots)) {
     allowed.comicRoots = normaliseRoots(patch.comicRoots);
   }
+  if (Array.isArray(patch.familyRoots)) allowed.familyRoots = normaliseRoots(patch.familyRoots);
+  if (Array.isArray(patch.artworkRoots)) allowed.artworkRoots = normaliseRoots(patch.artworkRoots);
+  if (patch.sectionsOn && typeof patch.sectionsOn === 'object') {
+    const on = {};
+    for (const id of ['shows', 'movies', 'comics', 'family', 'artwork']) {
+      if (typeof patch.sectionsOn[id] === 'boolean') on[id] = patch.sectionsOn[id];
+    }
+    /* Merged onto what is already set, so switching one section does
+       not silently clear the others. */
+    allowed.sectionsOn = { ...config.sectionsOn, ...on };
+    /* Kept in step for anything still reading the old name. */
+    if ('comics' in on) allowed.showComics = on.comics;
+  }
   if (typeof patch.groupMoviesByGenre === 'boolean') allowed.groupMoviesByGenre = patch.groupMoviesByGenre;
   if (typeof patch.groupShowsByGenre === 'boolean') allowed.groupShowsByGenre = patch.groupShowsByGenre;
   if (typeof patch.skipIntroEnabled === 'boolean') allowed.skipIntroEnabled = patch.skipIntroEnabled;
@@ -505,6 +541,9 @@ export function settingsView() {
     skipIntroEnabled: config.skipIntroEnabled,
     skipOutroEnabled: config.skipOutroEnabled,
     comicRoots: config.comicRoots,
+    familyRoots: config.familyRoots,
+    artworkRoots: config.artworkRoots,
+    sectionsOn: config.sectionsOn,
     showComics: config.showComics,
     background: config.background,
     backgroundColor: config.backgroundColor,

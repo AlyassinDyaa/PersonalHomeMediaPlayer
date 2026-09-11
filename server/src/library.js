@@ -143,6 +143,10 @@ export function shapeItem(row) {
     certification: row.certification,
     status: row.status,
     endYear: row.end_year ?? null,
+    /* Which part of the library, and which folder within it. Only the
+       sections that keep their own folders use either. */
+    section: row.section ?? 'library',
+    folderId: row.folder_id ?? null,
     tmdbId: row.tmdb_id,
     confidence: row.confidence,
     sourceFolders: parseJsonColumn(row.source_folders, []),
@@ -218,6 +222,15 @@ export function listItems({ kind = null, sort = 'title', profile } = {}) {
              WHERE w.kind = 'item' AND w.target_id = i.id AND w.profile_id = ?) AS watchlist
     FROM items i
     WHERE 1 = 1
+      /*
+       * The film library, and not the sections beside it.
+       *
+       * Family and artwork are written as ordinary items so they can be
+       * played and resumed like anything else, which means every list that
+       * means "the library" has to say so — otherwise somebody's holiday
+       * turns up between two Batman films.
+       */
+      AND i.section = 'library'
       ${kind ? 'AND i.kind = ?' : ''}
       ${limit.sql}
     ORDER BY ${order}
@@ -625,6 +638,84 @@ export function setWatchlist(kind, id, on, profile) {
 }
 
 /**
+ * Everything in one of the sections that keeps its own folders.
+ *
+ * Folders first, because they are the arrangement — whatever the folders on
+ * the disk are, those are the groups, and a name given by hand stands in
+ * front of the folder's own where there is one.
+ *
+ * Videos come back shaped as titles, because that is what they are: they were
+ * written as ordinary items precisely so the same card, the same page and the
+ * same player work on them. Pictures come back as little more than an id and
+ * a name, which is all a gallery needs.
+ */
+export function sectionContents(section, profile) {
+  const db = getDb();
+  const profileId = idOf(profile);
+
+  const folders = db.prepare(`
+    SELECT * FROM section_folders WHERE section = ? ORDER BY kind, path
+  `).all(section);
+
+  /*
+   * The file behind each one comes back with it.
+   *
+   * Nothing here has a poster — these are somebody's own videos, not films
+   * anybody has published artwork for — so the only picture available is one
+   * taken out of the video itself, and that needs the file's id to ask for.
+   */
+  const videos = db.prepare(`
+    SELECT i.*,
+           (SELECT COUNT(*) FROM videos v WHERE v.item_id = i.id) AS episode_count,
+           (SELECT 1 FROM favorites f WHERE f.item_id = i.id AND f.profile_id = ?) AS favourite,
+           (SELECT v.id FROM videos v WHERE v.item_id = i.id ORDER BY v.id LIMIT 1) AS video_id,
+           (SELECT v.duration FROM videos v WHERE v.item_id = i.id ORDER BY v.id LIMIT 1) AS video_duration
+    FROM items i
+    WHERE i.section = ?
+    ORDER BY i.sort_title
+  `).all(profileId, section).map((row) => ({
+    ...shapeItem(row),
+    video: row.video_id ? { id: row.video_id, duration: row.video_duration ?? null } : null,
+  }));
+
+  const images = db.prepare(`
+    SELECT id, folder_id, name FROM section_images
+    WHERE section = ? ORDER BY name
+  `).all(section);
+
+  /* Counted here rather than in three more subqueries: the lists are already
+     in hand and a section is a folder of holidays, not a film library. */
+  const videosIn = new Map();
+  for (const item of videos) {
+    videosIn.set(item.folderId, (videosIn.get(item.folderId) ?? 0) + 1);
+  }
+  const imagesIn = new Map();
+  for (const image of images) {
+    imagesIn.set(image.folder_id, (imagesIn.get(image.folder_id) ?? 0) + 1);
+  }
+
+  return {
+    section,
+    folders: folders.map((folder) => ({
+      id: folder.id,
+      kind: folder.kind,
+      /* The name given, or the folder's own as a fallback. */
+      name: folder.name || folder.path.split(/[\\/]/).filter(Boolean).pop() || folder.path,
+      renamed: Boolean(folder.name),
+      path: folder.path,
+      videos: videosIn.get(folder.id) ?? 0,
+      images: imagesIn.get(folder.id) ?? 0,
+    })),
+    videos,
+    images: images.map((image) => ({
+      id: image.id,
+      folderId: image.folder_id,
+      name: image.name,
+    })),
+  };
+}
+
+/**
  * What was started and set aside, newest first.
  *
  * Shaped like Continue Watching, because it is the same thing seen from the
@@ -717,7 +808,7 @@ export function listGenres(profile) {
   const rated = certificationFilter(profile);
   const counts = new Map();
   const rows = getDb()
-    .prepare('SELECT genres FROM items i WHERE 1 = 1 ' + rated.sql)
+    .prepare("SELECT genres FROM items i WHERE i.section = 'library' " + rated.sql)
     .all(...rated.values);
 
   for (const row of rows) {
@@ -752,12 +843,12 @@ export function libraryStats() {
   const db = getDb();
   const one = (sql) => db.prepare(sql).get();
   return {
-    movies: one("SELECT COUNT(*) c FROM items WHERE kind='movie'").c,
-    shows: one("SELECT COUNT(*) c FROM items WHERE kind='show'").c,
+    movies: one("SELECT COUNT(*) c FROM items WHERE kind='movie' AND section='library'").c,
+    shows: one("SELECT COUNT(*) c FROM items WHERE kind='show' AND section='library'").c,
     episodes: one('SELECT COUNT(*) c FROM videos WHERE episode IS NOT NULL').c,
     videos: one('SELECT COUNT(*) c FROM videos').c,
     totalSize: one('SELECT COALESCE(SUM(size),0) s FROM videos').s,
-    unmatched: one('SELECT COUNT(*) c FROM items WHERE tmdb_id IS NULL').c,
+    unmatched: one("SELECT COUNT(*) c FROM items WHERE tmdb_id IS NULL AND section='library'").c,
     lastScan: one('SELECT MAX(finished_at) t FROM scans').t,
   };
 }

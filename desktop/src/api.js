@@ -92,6 +92,12 @@ export function comicPage(issueId, index) {
   return apiBase + '/api/comics/issue/' + encodeURIComponent(issueId) + '/page/' + index;
 }
 
+/** One picture from a section, fetched straight from the disk. */
+export function sectionImage(section, id) {
+  return apiBase + '/api/sections/' + encodeURIComponent(section)
+    + '/image/' + encodeURIComponent(id);
+}
+
 /** The cover of a comic, at shelf size. */
 export function comicCover(issueId) {
   return apiBase + '/api/comics/issue/' + encodeURIComponent(issueId) + '/cover';
@@ -281,6 +287,38 @@ export const api = {
 
   /** Who is in a title, and the few names behind it. */
   credits: (itemId) => request('/api/items/' + encodeURIComponent(itemId) + '/credits'),
+  // --- the parts of the library ----------------------------------------
+  /** Every section and its state; the owner sees all of them. */
+  sections: () => request('/api/sections'),
+  setSectionOn: (section, on) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/on', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on }),
+    }),
+  setSectionRoots: (section, roots) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/roots', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roots }),
+    }),
+  scanSection: (section) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/scan', { method: 'POST' }),
+  sectionContents: (section) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/contents'),
+  renameSectionFolder: (section, id, name) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/folders/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+  addSectionFolder: (section, name, under = null) =>
+    request('/api/sections/' + encodeURIComponent(section) + '/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, under }),
+    }),
+
   favourites: () => request('/api/favourites'),
   /** Started and set aside: kept, but not offered on the home screen. */
   backlog: () => request('/api/backlog'),

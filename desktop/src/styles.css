@@ -6915,3 +6915,102 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
 @media (max-width: 760px) {
   .lists-filters { padding: 0 16px 16px; }
 }
+
+/* ------------------------------------------------ a section's folders --- */
+
+/*
+ * The arrangement somebody already made.
+ *
+ * Whatever folders their holidays are in are the groups they see, so these
+ * are drawn as folders rather than dressed up as anything else — the point is
+ * that they are recognisable as the same thing on the disk.
+ */
+.section-folders {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  padding: 0 42px 30px;
+}
+
+.section-folder {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease;
+}
+.section-folder:hover { background: rgba(255, 255, 255, 0.09); transform: translateY(-2px); }
+
+.section-folder-mark {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  font-size: 16px;
+  color: var(--accent, #7d8aa0);
+  background: color-mix(in srgb, var(--accent, #7d8aa0) 18%, transparent);
+}
+
+.section-folder-name { min-width: 0; }
+.section-folder-name strong {
+  display: block;
+  font-size: 14.5px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.section-folder-name span { font-size: 12.5px; color: var(--text-faint); }
+
+/* --------------------------------------------------- one picture, large --- */
+
+/*
+ * Over everything, and dismissed by pressing anywhere.
+ *
+ * A picture has nothing to control — no position to keep, nothing to resume —
+ * so it gets no chrome. The only thing anybody wants from this screen is to
+ * see it and then leave.
+ */
+.picture-view {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 30px;
+  background: rgba(6, 6, 10, 0.94);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  cursor: zoom-out;
+  animation: picture-in 180ms ease both;
+}
+@keyframes picture-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.picture-view img {
+  max-width: 100%;
+  max-height: calc(100% - 40px);
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+}
+
+.picture-name { font-size: 13px; color: var(--text-dim); }
+
+@media (max-width: 760px) {
+  .section-folders { padding: 0 16px 22px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+  .picture-view { padding: 14px; }
+}

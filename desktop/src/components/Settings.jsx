@@ -3,6 +3,7 @@ import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
 import SectionAccess from './SectionAccess.jsx';
+import SectionsPanel from './SectionsPanel.jsx';
 import HealthPanel from './HealthPanel.jsx';
 import RequestsPanel from './RequestsPanel.jsx';
 import ProfilesPanel from './ProfilesPanel.jsx';
@@ -40,7 +41,7 @@ const SHELF_LAYOUT_CHOICES = [
 const SETTINGS_TABS = [
   { id: 'library', label: 'Appearance', ownerOnly: true, hint: 'How the library looks — its name, colour, backdrop and shelves' },
   { id: 'collections', label: 'Collections', ownerOnly: true, hint: 'Your own shelves on the home screen' },
-  { id: 'comics', label: 'Comics', ownerOnly: true, hint: 'Where your comics live, and whether the tab is shown' },
+  { id: 'sections', label: 'Sections', ownerOnly: true, hint: 'The parts of the library, and who is let into each' },
   { id: 'playback', label: 'Playback', ownerOnly: true, hint: 'How episodes and films play' },
   { id: 'sharing', label: 'Sharing', ownerOnly: true, hint: 'Watching on a phone, a tablet, or another computer' },
   { id: 'profiles', label: 'Profiles', hint: 'Who is watching, and what each of them can see' },
@@ -940,79 +941,8 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
         {active === 'requests' && <RequestsPanel isOwner={isOwner} />}
 
-        {active === 'comics' && (
-          <>
-          <details className="settings-card" open>
-            <summary><h2>Comics</h2></summary>
-
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={settings.showComics !== false}
-                onChange={(event) => saveToggle('showComics', event.target.checked)}
-              />
-              <span>
-                <strong>Show the Comics tab</strong>
-                <span className="toggle-note">
-                  {settings.showComics !== false
-                    ? 'In the strip beside Movies'
-                    : 'Hidden; the comics stay where they are'}
-                </span>
-              </span>
-            </label>
-
-            {/* Only once it is on: who may see a hidden section is not a
-                question anybody needs answered. */}
-            {settings.showComics !== false && isOwner && (
-              <SectionAccess section="comics" noun="the comics" />
-            )}
-
-            <p className="settings-hint">
-              Folders of .cbz and .cbr files. The folders themselves are the
-              arrangement: anything holding comics is a series, and the folder
-              above it is the shelf it stands on.
-            </p>
-
-            {(settings.comicRoots ?? []).map((root) => (
-              <div key={root} className="root-row">
-                <span className="root-path">{root}</span>
-                {settings.comicRootsStatus?.find((entry) => entry.path === root)?.available
-                  ? null
-                  : <span className="warn-text">not found</span>}
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => saveComicRoots(
-                    (settings.comicRoots ?? []).filter((entry) => entry !== root),
-                  )}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-
-            <div className="key-row">
-              <button className="btn btn-secondary" onClick={() => setPicking('comics')}>
-                Add a comics folder
-              </button>
-              <button
-                className="btn btn-primary"
-                disabled={!(settings.comicRoots ?? []).length || comicScan?.running}
-                onClick={startComicScan}
-              >
-                {comicScan?.running ? 'Scanning…' : 'Scan comics'}
-              </button>
-            </div>
-
-            {comicScan && !comicScan.running && (
-              <div className="scan-result">
-                Found <strong>{comicScan.series}</strong> series and
-   <strong>{comicScan.issues}</strong> issues.
-                {comicScan.removed > 0 && ' ' + comicScan.removed + ' no longer on disk were removed.'}
-              </div>
-            )}
-          </details>
-
-          </>
+        {active === 'sections' && (
+          <SectionsPanel isOwner={isOwner} onChanged={onSettingsChanged} />
         )}
 
         {active === 'playback' && (
