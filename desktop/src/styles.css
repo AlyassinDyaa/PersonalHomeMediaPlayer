@@ -7080,7 +7080,16 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   grid-template-columns: 250px minmax(0, 1fr);
   gap: 34px;
   align-items: start;
-  padding: calc(var(--nav-height) + 26px) 42px 90px;
+  /*
+   * Close under the bar, but not against it.
+   *
+   * The bar already reserves its own height, so everything added here is
+   * gap on top of gap — twenty-six of them left a band of nothing between
+   * the top of the screen and the word Settings, which on a tablet is a
+   * tenth of the page saying nothing. Eight is enough to read as deliberate
+   * space rather than as a heading that has slipped under the bar.
+   */
+  padding: calc(var(--nav-height) + 8px) 42px 90px;
   max-width: 1180px;
 }
 
@@ -7088,7 +7097,7 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
 
 .settings-nav {
   position: sticky;
-  top: calc(var(--nav-height) + 26px);
+  top: calc(var(--nav-height) + 8px);
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -7304,7 +7313,7 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   .settings-shell {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;
-    padding: calc(var(--nav-height) + 16px) 0 90px;
+    padding: calc(var(--nav-height) + 10px) 0 90px;
   }
 
   .settings-nav { position: static; }
