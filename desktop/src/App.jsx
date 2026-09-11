@@ -10,7 +10,7 @@ import Lists from './components/Lists.jsx';
 import Mosaic from './components/Mosaic.jsx';
 import SectionView from './components/SectionView.jsx';
 import ComicReader from './components/ComicReader.jsx';
-import { shelveByGenre } from './genres.js';
+import { shelveByGenre, CATCH_ALL } from './genres.js';
 import { applyBackground } from './backgrounds.js';
 import { applyShelfStyle, applyCardSize } from './shelfStyles.js';
 import { applyRailStyle } from './railStyles.js';
@@ -583,7 +583,12 @@ export function App({ info, onPlayVideo = null, refreshSignal = 0 }) {
    * Continue Watching, Your List and the rest above them.
    */
   const genreRails = useMemo(
-    () => shelveByGenre(items).filter((rail) => rail.entries.length >= 3).slice(0, 8),
+    () => shelveByGenre(items)
+      /* "More" is where the strays are put so the browse screens do not grow a
+         heading per film. On the home page it would be a rail of unrelated
+         things under a word that promises nothing, so it stays off. */
+      .filter((rail) => rail.name !== CATCH_ALL && rail.entries.length >= 3)
+      .slice(0, 8),
     [items],
   );
 
