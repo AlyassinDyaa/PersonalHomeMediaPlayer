@@ -148,11 +148,6 @@ export function Browse({
             : filtered.length + ' of ' + pool.length + ' titles'}
         </span>
         {trimmed && <span className="page-sub">matching “{query.trim()}”</span>}
-        {onSeeEverything && !trimmed && (
-          <button type="button" className="chip see-everything" onClick={onSeeEverything}>
-            See everything
-          </button>
-        )}
       </div>
 
       {/*
@@ -297,6 +292,11 @@ export function Browse({
         >
           Unwatched
         </button>
+        {onSeeEverything && !trimmed && (
+          <button type="button" className="chip" onClick={onSeeEverything}>
+            See everything
+          </button>
+        )}
       </div>
 
       <div className="genre-chips">
@@ -313,6 +313,11 @@ export function Browse({
           </button>
         ))}
         <span style={{ flex: 1 }} />
+        {onSeeEverything && !trimmed && (
+          <button type="button" className="chip" onClick={onSeeEverything}>
+            See everything
+          </button>
+        )}
         <button
           className={unwatchedOnly ? 'chip active' : 'chip'}
           onClick={() => setUnwatchedOnly(!unwatchedOnly)}

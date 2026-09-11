@@ -67,17 +67,22 @@ export function SectionView({ section, label, isOwner, onSelect, onLongPress = n
           ].filter(Boolean).join(' · ') || 'Nothing here'}
         </span>
 
-        {isOwner && open && (
-          <button type="button" className="chip" onClick={() => setRenaming(open)}>
-            Rename
-          </button>
-        )}
-        {isOwner && !open && (
-          <button type="button" className="chip see-everything" onClick={() => setAdding(true)}>
-            + New folder
-          </button>
-        )}
       </div>
+
+      {/* Below the title row, which the bar along the top shares. */}
+      {isOwner && (
+        <div className="section-tools">
+          {open ? (
+            <button type="button" className="chip" onClick={() => setRenaming(open)}>
+              Rename this folder
+            </button>
+          ) : (
+            <button type="button" className="chip" onClick={() => setAdding(true)}>
+              + New folder
+            </button>
+          )}
+        </div>
+      )}
 
       {empty && (
         <div className="lists-empty">
