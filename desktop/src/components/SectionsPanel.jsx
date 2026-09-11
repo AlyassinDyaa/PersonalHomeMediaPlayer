@@ -174,10 +174,7 @@ export function SectionsPanel({ isOwner, onChanged }) {
                         <button
                           className="btn btn-ghost danger-text"
                           disabled={busy === section.id}
-                          onClick={() => setRoots(
-                            section,
-                            section.roots.filter((entry) => entry !== root),
-                          )}
+                          onClick={() => setAsking({ kind: 'dropRoot', section, root })}
                         >
                           Remove
                         </button>
@@ -239,6 +236,21 @@ export function SectionsPanel({ isOwner, onChanged }) {
           danger={asking.danger}
           onCancel={() => setAsking(null)}
           onConfirm={() => { const { section } = asking; setAsking(null); doSwitch(section); }}
+        />
+      )}
+
+      {asking?.kind === 'dropRoot' && (
+        <Confirm
+          title="Stop reading this folder?"
+          body={'Nothing on the disk is touched. What was found in ' + asking.root
+            + ' leaves this section at the next scan, and adding the folder back brings it in again.'}
+          confirmLabel="Stop reading it"
+          onCancel={() => setAsking(null)}
+          onConfirm={() => {
+            const { section, root } = asking;
+            setAsking(null);
+            setRoots(section, section.roots.filter((entry) => entry !== root));
+          }}
         />
       )}
 

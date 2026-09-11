@@ -7089,7 +7089,7 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
    * tenth of the page saying nothing. Eight is enough to read as deliberate
    * space rather than as a heading that has slipped under the bar.
    */
-  padding: calc(var(--nav-height) + 8px) 42px 90px;
+  padding: var(--nav-height) 42px 90px;
   max-width: 1180px;
 }
 
@@ -7097,13 +7097,13 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
 
 .settings-nav {
   position: sticky;
-  top: calc(var(--nav-height) + 8px);
+  top: var(--nav-height);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.settings-nav-head { padding: 0 10px 18px; }
+.settings-nav-head { padding: 0 10px 14px; }
 .settings-nav-head h1 {
   font-family: var(--display);
   font-size: 30px;
@@ -7213,7 +7213,7 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
 
 .settings-shell .settings { padding: 0; max-width: none; }
 
-.settings-pane-head { margin: 4px 0 20px; }
+.settings-pane-head { margin: 0 0 18px; }
 .settings-pane-head h2 {
   font-family: var(--display);
   font-size: 23px;
@@ -7313,7 +7313,7 @@ body.cards-large .grid { grid-template-columns: repeat(auto-fill, minmax(208px, 
   .settings-shell {
     grid-template-columns: minmax(0, 1fr);
     gap: 18px;
-    padding: calc(var(--nav-height) + 10px) 0 90px;
+    padding: calc(var(--nav-height) + 2px) 0 90px;
   }
 
   .settings-nav { position: static; }

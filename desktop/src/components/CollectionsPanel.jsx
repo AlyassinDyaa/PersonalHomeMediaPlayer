@@ -48,6 +48,9 @@ const GROUPS = [
  * is also how a shelf is given prominence.
  */
 function LogoPicker({ collection, busy, run }) {
+  /* Whether the badge is being taken off, pending an answer. Local, because
+     this picker is its own component and knows nothing of the sheet above. */
+  const [dropping, setDropping] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -78,10 +81,23 @@ function LogoPicker({ collection, busy, run }) {
         {collection.logo && (
           <button
             className="btn btn-ghost" disabled={busy}
-            onClick={() => run(() => api.updateCollection(collection.id, { logo: null }))}
+            onClick={() => setDropping(true)}
           >Remove badge</button>
         )}
       </div>
+
+      {dropping && (
+        <Confirm
+          title="Take the badge off?"
+          body="The shelf keeps its name and everything on it, and another badge can be found afterwards."
+          confirmLabel="Take it off"
+          onCancel={() => setDropping(false)}
+          onConfirm={() => {
+            setDropping(false);
+            run(() => api.updateCollection(collection.id, { logo: null }));
+          }}
+        />
+      )}
 
       <form className="collection-logo-search" onSubmit={search}>
         <input
@@ -585,6 +601,20 @@ export function CollectionsPanel({ onChanged, isOwner = true }) {
             const { collection } = asking;
             setAsking(null);
             run(() => api.updateCollection(collection.id, { name: next }));
+          }}
+        />
+      )}
+
+      {asking?.what === 'badge' && (
+        <Confirm
+          title="Take the badge off?"
+          body="The shelf keeps its name and everything on it. You can search for another badge afterwards."
+          confirmLabel="Take it off"
+          onCancel={() => setAsking(null)}
+          onConfirm={() => {
+            const { collection } = asking;
+            setAsking(null);
+            run(() => api.updateCollection(collection.id, { logo: null }));
           }}
         />
       )}

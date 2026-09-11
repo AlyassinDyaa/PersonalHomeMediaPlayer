@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import ProfileFace from './ProfileFace.jsx';
+import Confirm from './Confirm.jsx';
 
 /**
  * Asking for something to be added, and answering.
@@ -31,6 +32,8 @@ export function RequestsPanel({ isOwner }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  /* A request somebody has asked to take off the list, pending an answer. */
+  const [dropping, setDropping] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -159,7 +162,7 @@ export function RequestsPanel({ isOwner }) {
                 </>
               )}
               <button className="btn btn-ghost danger-text" disabled={busy}
-                      onClick={() => withdraw(row.id)}>
+                      onClick={() => setDropping(row)}>
                 {isOwner ? 'Clear' : 'Withdraw'}
               </button>
             </div>
@@ -191,6 +194,18 @@ export function RequestsPanel({ isOwner }) {
           </div>
         )}
       </section>
+
+      {dropping && (
+        <Confirm
+          title={isOwner ? 'Clear this request?' : 'Withdraw this request?'}
+          body={(isOwner
+            ? 'It comes off the list for everybody. '
+            : 'It comes off the list. ') + '“' + dropping.title + '” is not added or removed by this — the list is only what people have asked for.'}
+          confirmLabel={isOwner ? 'Clear it' : 'Withdraw it'}
+          onCancel={() => setDropping(null)}
+          onConfirm={() => { const row = dropping; setDropping(null); withdraw(row.id); }}
+        />
+      )}
     </>
   );
 }

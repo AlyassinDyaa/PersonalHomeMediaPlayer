@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, apiBaseUrl, formatSize } from '../api.js';
 import FolderPicker from './FolderPicker.jsx';
+import Confirm from './Confirm.jsx';
 import CollectionsPanel from './CollectionsPanel.jsx';
 import SectionAccess from './SectionAccess.jsx';
 import SectionsPanel from './SectionsPanel.jsx';
@@ -75,6 +76,8 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
   const [stats, setStats] = useState(null);
   /* Whether the row of tabs is being put in order rather than used. */
   const [arranging, setArranging] = useState(false);
+  /* A folder the owner has asked to take off the library, pending an answer. */
+  const [droppingRoot, setDroppingRoot] = useState(null);
   // Which folder the picker is choosing: a library root, or where the
   // library's own files are kept.
   const [picking, setPicking] = useState(null);
@@ -1282,7 +1285,12 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
                 <span className={root.available ? 'root-dot ok' : 'root-dot bad'} />
                 <code className="root-path">{root.path}</code>
                 {!root.available && <span className="root-warn">not connected</span>}
-                <button className="btn btn-ghost danger-text" onClick={() => removeRoot(root.path)}>Remove</button>
+                <button
+                  className="btn btn-ghost danger-text"
+                  onClick={() => setDroppingRoot(root.path)}
+                >
+                  Remove
+                </button>
               </div>
             ))}
 
@@ -1527,6 +1535,17 @@ export function Settings({ onScanned, onSettingsChanged, onShelvesChanged }) {
 
       </div>
       </div>
+
+      {droppingRoot && (
+        <Confirm
+          title="Stop reading this folder?"
+          body={'Nothing on the disk is touched. Everything found in ' + droppingRoot
+            + ' leaves the library at the next scan, and adding the folder back brings it all in again.'}
+          confirmLabel="Stop reading it"
+          onCancel={() => setDroppingRoot(null)}
+          onConfirm={() => { const path = droppingRoot; setDroppingRoot(null); removeRoot(path); }}
+        />
+      )}
 
       {picking && (
         <FolderPicker
